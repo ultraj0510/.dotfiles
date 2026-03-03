@@ -1,0 +1,9 @@
+{
+  "enabledPlugins": {
+    "github@claude-plugins-official": true,
+    "serena@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "commit-push@local": true
+  }
+}
