@@ -1,0 +1,39 @@
+# strategy.yaml
+# スコア: 正=強気(BUY方向), 負=弱気(SELL方向)
+# threshold: シグナル発火条件の閾値
+version: 1
+
+signals:
+  # ── テクニカル ──────────────────────────────────────────────────
+  rsi_oversold:    { score: 20,  threshold: 35   }  # RSI ≤ threshold
+  rsi_overbought:  { score: -20, threshold: 68   }  # RSI ≥ threshold
+  bb_lower_touch:  { score: 15,  threshold: 0.02 }  # (current - bb_lower)/bb_lower ≤ threshold
+  bb_upper_touch:  { score: -15, threshold: 0.02 }  # (bb_upper - current)/bb_upper ≤ threshold
+  w52_low:         { score: 10,  threshold: 15   }  # 52週位置 ≤ threshold (%)
+  w52_high:        { score: -10, threshold: 85   }  # 52週位置 ≥ threshold (%)
+  momentum_surge:  { score: 12,  threshold: 7.0  }  # 直近5日騰落率 ≥ threshold (%)
+
+  # ── ファンダメンタル ────────────────────────────────────────────
+  analyst_upside:   { score: 15,  threshold: 25  }  # アナリスト目標比 ≥ threshold (%)
+  analyst_downside: { score: -15, threshold: -15 }  # アナリスト目標比 ≤ threshold (%)
+  short_squeeze:    { score: 8,   threshold: 10  }  # 空売りFloat比率 ≥ threshold (%)
+
+  # ── ポジション管理 ──────────────────────────────────────────────
+  pnl_loss:   { score: -25, threshold: -15 }  # 含み損率 ≤ threshold (%)
+  pnl_profit: { score: 20,  threshold: 30  }  # 含み益率 ≥ threshold (%)
+
+# マクロ補正乗数（正のスコアにのみ適用）
+# 複数条件が重なる場合は積算
+macro_multipliers:
+  vix_risk_off:  { multiplier: 0.6, threshold: 25   }  # VIX ≥ threshold
+  vix_risk_on:   { multiplier: 1.2, threshold: 13   }  # VIX ≤ threshold
+  sp500_down:    { multiplier: 0.7, threshold: -1.5 }  # S&P500前日変化率 ≤ threshold (%)
+  sp500_up:      { multiplier: 1.1, threshold: 1.0  }  # S&P500前日変化率 ≥ threshold (%)
+  usdjpy_strong: { multiplier: 1.1, threshold: 155  }  # USD/JPY ≥ threshold
+  usdjpy_weak:   { multiplier: 0.9, threshold: 140  }  # USD/JPY ≤ threshold
+
+# アクション判定閾値
+action_thresholds:
+  buy:         25   # adjusted_score ≥ buy  → BUY検討
+  sell:        -25  # adjusted_score ≤ sell → SELL検討
+  action_flag: 15   # |adjusted_score| ≥ action_flag → 要アクション（エージェント分析対象）

@@ -1,0 +1,57 @@
+account:
+  total_assets: 9466965
+  available_cash: 974965
+trading_rules:
+  trade_timing:
+  - 寄付き
+  - 大引け
+  no_day_trade: true
+  max_position_pct: 20
+  risk_per_trade_pct: 2
+holdings:
+- ticker: 285A.T
+  name: キオクシアHD
+  quantity: 400
+  cost_price: 15136
+  position_type: 現物
+- ticker: 4661.T
+  name: オリエンタルランド
+  quantity: 200
+  cost_price: 3045
+  position_type: 現物
+- ticker: 7013.T
+  name: IHI
+  quantity: 100
+  cost_price: 4063
+  position_type: 現物
+- ticker: 7974.T
+  name: 任天堂
+  quantity: 100
+  cost_price: 10673
+  position_type: 現物
+- ticker: 8473.T
+  name: SBIホールディングス
+  quantity: 200
+  cost_price: 3231
+  position_type: 現物
+- ticker: 9984.T
+  name: ソフトバンクG
+  quantity: 400
+  cost_price: 4775
+  position_type: 現物
+- ticker: 1515.T
+  name: 日鉄鉱業
+  quantity: 2900
+  cost_price: 3708.28
+  position_type: 信用
+  open_date: '2026-01-15'
+  expiry_date: '2026-07-15'
+  credit_type: 制度信用
+- ticker: 285A.T
+  name: キオクシアHD（信用）
+  quantity: 100
+  cost_price: 20000
+  position_type: 信用
+  open_date: '2026-03-03'
+  expiry_date: '2026-09-03'
+  credit_type: 制度信用
