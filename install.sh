@@ -18,6 +18,12 @@ backup_and_link() {
     return
   fi
 
+  # bind mountされている場合はスキップ（コンテナ内では削除不可）
+  if grep -q " $dst " /proc/mounts 2>/dev/null; then
+    echo "  skip (bind mount): $dst"
+    return
+  fi
+
   # 実ファイルが存在する場合はバックアップ
   if [ -e "$dst" ] && [ ! -L "$dst" ]; then
     mkdir -p "$BACKUP_DIR"
