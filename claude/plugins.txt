@@ -1,11 +1,11 @@
-# インストール済みプラグイン一覧
-# 新環境では claude を起動後 /plugin install <name> で再インストール
+# インストール済みプラグイン一覧（name@marketplace 形式）
 
-superpowers
-github
-frontend-design
-code-review
-code-simplifier
-playwright
-skill-creator
-claude-md-management
+superpowers@claude-plugins-official
+github@claude-plugins-official
+frontend-design@claude-plugins-official
+code-review@claude-plugins-official
+code-simplifier@claude-plugins-official
+playwright@claude-plugins-official
+skill-creator@claude-plugins-official
+claude-md-management@claude-plugins-official
+harness@harness-marketplace

@@ -76,26 +76,38 @@ if ! grep -qF "$SOURCE_LINE" "$BASHRC" 2>/dev/null; then
 fi
 
 # プラグイン自動インストール
+MARKETPLACES_FILE="$DOTFILES/claude/marketplaces.txt"
 PLUGINS_FILE="$DOTFILES/claude/plugins.txt"
-if [ -f "$PLUGINS_FILE" ] && command -v claude &>/dev/null; then
-  echo "==> Installing Claude Code plugins..."
 
-  # marketplace が未登録なら追加・更新
-  if ! claude plugin marketplace list 2>/dev/null | grep -q "claude-plugins-official"; then
-    echo "  registering marketplace..."
-    claude plugin marketplace add anthropics/claude-plugins-official 2>&1 | sed 's/^/    /'
-  else
-    claude plugin marketplace update claude-plugins-official 2>/dev/null | sed 's/^/    /' || true
+if command -v claude &>/dev/null; then
+  # marketplaces の登録・更新
+  if [ -f "$MARKETPLACES_FILE" ]; then
+    echo "==> Setting up Claude Code marketplaces..."
+    REGISTERED=$(claude plugin marketplace list 2>/dev/null)
+    grep -v '^\s*#' "$MARKETPLACES_FILE" | grep -v '^\s*$' | while read -r repo marketplace_id; do
+      if echo "$REGISTERED" | grep -q "$marketplace_id"; then
+        echo "  updating: $marketplace_id"
+        claude plugin marketplace update "$marketplace_id" 2>&1 | sed 's/^/    /' || true
+      else
+        echo "  registering: $marketplace_id ($repo)"
+        claude plugin marketplace add "$repo" 2>&1 | sed 's/^/    /'
+      fi
+    done
   fi
 
-  grep -v '^\s*#' "$PLUGINS_FILE" | grep -v '^\s*$' | while read -r plugin; do
-    if claude plugin list 2>/dev/null | grep -A4 "$plugin@" | grep -q "enabled"; then
-      echo "  skip (already installed): $plugin"
-    else
-      echo "  installing: $plugin"
-      claude plugin install "$plugin@claude-plugins-official" 2>&1 | sed 's/^/    /'
-    fi
-  done
+  # プラグインのインストール
+  if [ -f "$PLUGINS_FILE" ]; then
+    echo "==> Installing Claude Code plugins..."
+    grep -v '^\s*#' "$PLUGINS_FILE" | grep -v '^\s*$' | while read -r plugin_spec; do
+      plugin_name="${plugin_spec%%@*}"
+      if claude plugin list 2>/dev/null | grep -A4 "$plugin_name@" | grep -q "enabled"; then
+        echo "  skip (already installed): $plugin_spec"
+      else
+        echo "  installing: $plugin_spec"
+        claude plugin install "$plugin_spec" 2>&1 | sed 's/^/    /'
+      fi
+    done
+  fi
 fi
 
 echo "==> Done!"

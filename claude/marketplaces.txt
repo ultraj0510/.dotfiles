@@ -1,0 +1,4 @@
+# Claude Code marketplaces
+# format: github_repo   marketplace_id
+anthropics/claude-plugins-official   claude-plugins-official
+revfactory/harness                   harness-marketplace
