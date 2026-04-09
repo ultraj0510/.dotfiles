@@ -58,11 +58,18 @@ def parse_holdings_html(html: str) -> list[dict]:
                 entry["quantity"] = int(_clean_number(cells[col_map["quantity"]].get_text()))
             if "cost_price" in col_map:
                 entry["cost_price"] = int(_clean_number(cells[col_map["cost_price"]].get_text()))
+            if "ticker" not in entry or "quantity" not in entry:
+                continue
             results.append(entry)
     return results
 
 
 def parse_account_html(html: str) -> dict:
+    if "ログイン" in html and "tbl01" not in html:
+        raise ValueError(
+            "SBI証券のCookieが無効です。ブラウザから新しいCookieを取得して "
+            "SBI_COOKIE 環境変数に設定してください。"
+        )
     soup = BeautifulSoup(html, "lxml")
     total_assets = None
     available_cash = None
@@ -145,6 +152,12 @@ def sync_to_portfolio(holdings: list[dict], account: dict):
                 "position_type": h.get("position_type", "現物"),
             }
             new_holdings.append(entry)
+
+    new_keys = {(h["ticker"], h.get("position_type", "現物")) for h in holdings}
+    for key, h in existing_map.items():
+        if key not in new_keys:
+            print(f"[SBI sync] 警告: {key[0]} はSBI取得データに含まれないため既存データを保持します")
+            new_holdings.append(h)
 
     portfolio["holdings"] = new_holdings
 
