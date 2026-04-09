@@ -4,4 +4,4 @@ anthropics/claude-plugins-official   claude-plugins-official
 revfactory/harness                   harness-marketplace
 
 # 社内マーケットプレイス
-org/claude-plugins   org-marketplace
+ultraj0510/org-claude-plugins   org-marketplace
