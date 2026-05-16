@@ -1,31 +1,24 @@
 ---
-name: download-8122
-description: Download cart photos from 8122.jp. Use when the user wants to download photos from their 8122.jp cart.
+name: download-photos
+description: Download cart photos from photo service sites (8122.jp, fujifilm-fasp.jp). Use when the user wants to download photos from their cart.
 ---
 
-# 8122.jp Cart Photo Downloader
+# Photo Cart Downloader
 
-Download photos from the 8122.jp cart using the bundled Python script.
+Download photos from photo service cart pages using Playwright.
+
+Supported sites: `8122` (8122.jp), `fujifilm-fasp` (fujifilm-fasp.jp).
 
 ## Prerequisites
 
-- Environment variables `SITE_EMAIL` and `SITE_PASSWORD` must be set in a `.env` file in the plugin root directory.
+- Environment variables `SITE_EMAIL` and `SITE_PASSWORD` must be set in `.env` in the skill directory.
 - Copy `.env.example` to `.env` and fill in credentials if not already done.
+- Python venv with dependencies at `$SKILL_DIR/.venv/`.
 
-## Execution Steps
-
-When invoked, follow these steps in order:
-
-### 1. Check Environment
-
-Verify that `.env` exists in the plugin root directory (`${CLAUDE_PLUGIN_ROOT}` or the directory containing this skill). If not, tell the user to create it from `.env.example`.
-
-### 2. Setup Python Environment
-
-If `.venv` does not exist or `requirements.txt` has been modified, run:
+## Setup
 
 ```bash
-cd "$CLAUDE_PLUGIN_ROOT"
+cd "$SKILL_DIR"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -33,41 +26,38 @@ playwright install chromium
 ```
 
 If `.venv` already exists, just activate it:
-
 ```bash
-source "$CLAUDE_PLUGIN_ROOT/.venv/bin/activate"
+source "$SKILL_DIR/.venv/bin/activate"
 ```
 
-### 3. Parse Arguments
+## Commands
 
-The user may specify:
-- Output directory: `-o <dir>` or `--output <dir>` (default: `./downloads`)
-- Photo limit: `-n <count>` or `--limit <count>` (default: all)
+### Analyze site structure
 
-Extract these from the user's message. If not specified, use defaults.
-
-### 4. Run Download
-
-Execute the download script:
+Use `--analyze` to inspect a site's cart page and output all image elements as JSON:
 
 ```bash
-cd "$CLAUDE_PLUGIN_ROOT"
-source .venv/bin/activate
-python download_cart_photos.py [-o <output_dir>] [-n <count>]
+cd "$SKILL_DIR" && source .venv/bin/activate
+python download_cart_photos.py --site fujifilm-fasp --analyze
 ```
 
-### 5. Report Results
+This outputs JSON with all `<img>` elements, their attributes, parent hierarchy, and form inputs.
+Use the result to fill in the `SITES["fujifilm-fasp"]` definition in `download_cart_photos.py`.
 
-After completion, show the user:
-- Number of photos downloaded successfully
-- Number of failures (if any)
-- Output directory location
-- Total size of downloaded files
+### Download photos
 
-If there were failures, list the failed URLs.
+```bash
+cd "$SKILL_DIR" && source .venv/bin/activate
+python download_cart_photos.py --site 8122 -o ./downloads [-n <count>]
+```
+
+Options:
+- `--site` - Site key: `8122` (default) or `fujifilm-fasp`
+- `-o <dir>` - Output directory (default: `./downloads`)
+- `-n <count>` - Max photos to download (default: all)
 
 ## Error Handling
 
-- If login fails, check that credentials in `.env` are correct.
-- If Playwright is not installed, run `playwright install chromium`.
-- If the script times out, suggest running with `-n` to test with fewer photos first.
+- Login failed → check `.env` credentials
+- Playwright not installed → run `playwright install chromium`
+- Script times out → use `-n` to limit count
