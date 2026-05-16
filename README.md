@@ -44,12 +44,14 @@ bash ~/.dotfiles/install.sh
 
 `install.sh` が作成するシンボリックリンク：
 
-| dotfiles | → | ~/.claude/ |
-|----------|---|-----------|
+| dotfiles | → | リンク先 |
+|----------|---|---------|
+| `git/.gitconfig` | → | `~/.gitconfig` |
+| `bash/aliases.sh` | → | `~/.claude/bash_aliases.sh` |
 | `claude/CLAUDE.md` | → | `~/.claude/CLAUDE.md` |
 | `claude/settings.local.json` | → | `~/.claude/settings.local.json` |
 | `claude/agents/` | → | `~/.claude/agents/` |
-| `bash/aliases.sh` | → | `~/.claude/bash_aliases.sh` |
+| `claude/statusline.sh` | → | `~/.claude/statusline.sh` |
 
 ## プラグイン管理
 

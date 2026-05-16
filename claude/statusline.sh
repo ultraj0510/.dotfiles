@@ -1,44 +1,65 @@
-#!/usr/bin/env bash
-# Claude Code statusline: model, context usage, cost, tokens
-DATA=$(cat)
+#!/bin/bash
+input=$(cat)
+model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')
+context_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
+workspace=$(echo "$input" | jq -r '.workspace.current_dir // ""')
+cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+rate_5h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null || echo "")
+rate_7d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null || echo "")
 
-PARSED=$(python3 -c "
-import json, sys
-d = json.loads(sys.argv[1])
-cw = d.get('context_window') or {}
-cost = d.get('cost') or {}
-m = d.get('model') or {}
-print(m.get('display_name') or m.get('id') or 'unknown')
-print(int(cw.get('used_percentage') or 0))
-print(float(cost.get('total_cost_usd') or 0))
-print(int(cw.get('total_input_tokens') or 0))
-print(int(cw.get('total_output_tokens') or 0))
-" "$DATA")
+ws_name="--"
+[[ -n "$workspace" ]] && ws_name=$(basename "$workspace")
+branch=$(git -C "$workspace" branch --show-current 2>/dev/null || echo "--")
+branch="${branch:-"--"}"
 
-MODEL=$(   sed -n '1p' <<< "$PARSED")
-CTX=$(     sed -n '2p' <<< "$PARSED")
-COST_USD=$(sed -n '3p' <<< "$PARSED")
-IN_TOK=$(  sed -n '4p' <<< "$PARSED")
-OUT_TOK=$( sed -n '5p' <<< "$PARSED")
+color_for_pct() {
+  local pct="$1"
+  [[ -z "$pct" || "$pct" == "null" ]] && { echo "\033[0m"; return; }
+  local int_pct="${pct%.*}"
+  if (( int_pct >= 90 )); then echo "\033[31m"
+  elif (( int_pct >= 70 )); then echo "\033[33m"
+  else echo "\033[32m"; fi
+}
+RESET="\033[0m"
 
-if [[ "${ANTHROPIC_BASE_URL:-}" == *"mimo"* ]]; then
-  API_LABEL="MiMo"
-  COST=$(python3 -c "print(f'~\${(${IN_TOK}/1000000)*1 + (${OUT_TOK}/1000000)*3:.4f}')")
+context_int="${context_pct%.*}"
+filled=$(( context_int / 10 )); empty=$(( 10 - filled ))
+bar=""
+for (( i=0; i<filled; i++ )); do bar+="●"; done
+for (( i=0; i<empty; i++ )); do bar+="○"; done
+context_color=$(color_for_pct "$context_int")
+
+if [[ -n "$rate_5h" && "$rate_5h" != "null" ]]; then
+  rate_5h_int="${rate_5h%.*}"; rate_5h_color=$(color_for_pct "$rate_5h_int")
+  rate_5h_display="${rate_5h_color}${rate_5h_int}%${RESET}"
+else rate_5h_display="--"; fi
+
+if [[ -n "$rate_7d" && "$rate_7d" != "null" ]]; then
+  rate_7d_int="${rate_7d%.*}"; rate_7d_color=$(color_for_pct "$rate_7d_int")
+  rate_7d_display="${rate_7d_color}${rate_7d_int}%${RESET}"
+else rate_7d_display="--"; fi
+
+# Calculate cost: use manual pricing for non-Anthropic APIs
+base_url="${ANTHROPIC_BASE_URL:-}"
+if [[ "$base_url" == *"deepseek"* ]]; then
+  in_tok=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
+  out_tok=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
+  if [[ "$model" == *"flash"* ]]; then
+    cost=$(python3 -c "print((${in_tok}/1000000)*0.14 + (${out_tok}/1000000)*0.28)")
+  else
+    cost=$(python3 -c "print((${in_tok}/1000000)*0.435 + (${out_tok}/1000000)*0.87)")
+  fi
+  api_label="DeepSeek"
+elif [[ "$base_url" == *"mimo"* ]]; then
+  in_tok=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
+  out_tok=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
+  cost=$(python3 -c "print((${in_tok}/1000000)*1 + (${out_tok}/1000000)*3)")
+  api_label="MiMo"
 else
-  API_LABEL="Official"
-  COST=$(python3 -c "print(f'\${${COST_USD}:.4f}')")
+  api_label=""
 fi
 
-BAR_W=10
-FILLED=$(( CTX * BAR_W / 100 ))
-BAR=""
-for i in $(seq 1 $FILLED);             do BAR="${BAR}█"; done
-for i in $(seq $((FILLED+1)) $BAR_W);  do BAR="${BAR}░"; done
-
-if   [ "$CTX" -ge 80 ]; then C="\033[31m"
-elif [ "$CTX" -ge 60 ]; then C="\033[33m"
-else                          C="\033[32m"
-fi
-R="\033[0m"
-
-echo -e "${C}[${BAR}] ${CTX}%${R} | ${MODEL} (${API_LABEL}) | ${COST} | in:${IN_TOK} out:${OUT_TOK}"
+cost_fmt=$(printf '$%.4f' "$cost")
+[[ -n "$api_label" ]] && cost_display="~${cost_fmt} (${api_label})" || cost_display="${cost_fmt}"
+echo -e "${model} ▸ ${ws_name} ⎇ ${branch}"
+echo -e "${context_color}${bar}${RESET} ${context_int}% ▸ 5h: ${rate_5h_display} ▸ 7d: ${rate_7d_display} ▸ ${cost_display}"
