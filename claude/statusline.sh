@@ -3,9 +3,9 @@ input=$(cat)
 model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')
 context_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
 workspace=$(echo "$input" | jq -r '.workspace.current_dir // ""')
-cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-rate_5h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null || echo "")
-rate_7d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null || echo "")
+cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+in_tok=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
+out_tok=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 
 ws_name="--"
 [[ -n "$workspace" ]] && ws_name=$(basename "$workspace")
@@ -29,37 +29,21 @@ for (( i=0; i<filled; i++ )); do bar+="●"; done
 for (( i=0; i<empty; i++ )); do bar+="○"; done
 context_color=$(color_for_pct "$context_int")
 
-if [[ -n "$rate_5h" && "$rate_5h" != "null" ]]; then
-  rate_5h_int="${rate_5h%.*}"; rate_5h_color=$(color_for_pct "$rate_5h_int")
-  rate_5h_display="${rate_5h_color}${rate_5h_int}%${RESET}"
-else rate_5h_display="--"; fi
-
-if [[ -n "$rate_7d" && "$rate_7d" != "null" ]]; then
-  rate_7d_int="${rate_7d%.*}"; rate_7d_color=$(color_for_pct "$rate_7d_int")
-  rate_7d_display="${rate_7d_color}${rate_7d_int}%${RESET}"
-else rate_7d_display="--"; fi
-
-# Calculate cost: use manual pricing for non-Anthropic APIs
+# Manual cost calculation for non-Anthropic APIs
 base_url="${ANTHROPIC_BASE_URL:-}"
 if [[ "$base_url" == *"deepseek"* ]]; then
-  in_tok=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
-  out_tok=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
   if [[ "$model" == *"flash"* ]]; then
     cost=$(python3 -c "print((${in_tok}/1000000)*0.14 + (${out_tok}/1000000)*0.28)")
   else
     cost=$(python3 -c "print((${in_tok}/1000000)*0.435 + (${out_tok}/1000000)*0.87)")
   fi
-  api_label="DeepSeek"
+  cost_display=$(printf '~$%.4f (DeepSeek)' "$cost")
 elif [[ "$base_url" == *"mimo"* ]]; then
-  in_tok=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
-  out_tok=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
   cost=$(python3 -c "print((${in_tok}/1000000)*1 + (${out_tok}/1000000)*3)")
-  api_label="MiMo"
+  cost_display=$(printf '~$%.4f (MiMo)' "$cost")
 else
-  api_label=""
+  cost_display=$(printf '$%.4f' "$cost_usd")
 fi
 
-cost_fmt=$(printf '$%.4f' "$cost")
-[[ -n "$api_label" ]] && cost_display="~${cost_fmt} (${api_label})" || cost_display="${cost_fmt}"
 echo -e "${model} ▸ ${ws_name} ⎇ ${branch}"
-echo -e "${context_color}${bar}${RESET} ${context_int}% ▸ 5h: ${rate_5h_display} ▸ 7d: ${rate_7d_display} ▸ ${cost_display}"
+echo -e "${context_color}${bar}${RESET} ${context_int}% ▸ ${cost_display} ▸ in:${in_tok} out:${out_tok}"
