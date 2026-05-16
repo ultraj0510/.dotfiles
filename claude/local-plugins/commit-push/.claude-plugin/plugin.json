@@ -1,7 +1,0 @@
-{
-  "name": "commit-push",
-  "description": "git add → commit → push をまとめて実行するスキル",
-  "author": {
-    "name": "fujie"
-  }
-}

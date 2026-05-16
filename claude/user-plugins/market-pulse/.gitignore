@@ -1,6 +1,0 @@
-_workspace/
-data/
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/

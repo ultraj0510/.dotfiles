@@ -32,9 +32,10 @@ bash ~/.dotfiles/install.sh
 │   ├── CLAUDE.md           # Claude グローバル指示（個人スタイル）
 │   ├── settings.local.json # Claude ツール権限設定
 │   ├── agents/             # 自作サブエージェント定義（*.md）
-│   ├── local-plugins/      # 個人専用ローカルプラグイン（自動インストール）
-│   │   ├── commit-push/    # git add → commit → push スキル
-│   │   └── stock-analyze/  # 日本株分析スキル
+│   ├── skills/             # 自作スキル（*.md）
+│   │   ├── market-pulse/   # 毎朝のポートフォリオ確認
+│   │   ├── stock-analyze/  # 日本株分析
+│   │   └── download-photos/# 8122.jpカート写真ダウンロード
 │   ├── marketplaces.txt    # 登録するマーケットプレイス一覧
 │   ├── plugins.txt         # 自動インストールするプラグイン一覧
 │   └── statusline.sh       # ステータスライン表示スクリプト
@@ -52,14 +53,15 @@ bash ~/.dotfiles/install.sh
 | `claude/settings.local.json` | → | `~/.claude/settings.local.json` |
 | `claude/agents/` | → | `~/.claude/agents/` |
 | `claude/statusline.sh` | → | `~/.claude/statusline.sh` |
+| `claude/skills/` | → | `~/.claude/skills/` |
 
 ## プラグイン管理
 
-`install.sh` は起動時に3種類のプラグインを自動セットアップします：
+`install.sh` は起動時に2種類のプラグインを自動セットアップします：
 
 1. **マーケットプレイスの登録**（`claude/marketplaces.txt`）
 2. **マーケットプレイス経由プラグインのインストール**（`claude/plugins.txt`）
-3. **ローカルプラグインのインストール**（`claude/local-plugins/` 以下のディレクトリ）
+3. **自作スキル**（`claude/skills/`）は symlink で `~/.claude/skills/` に展開
 
 ## 3層管理モデル
 

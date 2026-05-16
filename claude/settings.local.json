@@ -1,4 +1,5 @@
 {
+  "permissionMode": "bypassPermissions",
   "permissions": {
     "allow": [
       "Bash(npm --version)",

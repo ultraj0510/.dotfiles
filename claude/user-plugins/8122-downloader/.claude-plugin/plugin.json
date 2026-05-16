@@ -1,6 +1,0 @@
-{
-  "name": "8122-downloader",
-  "description": "Download photos from 8122.jp cart with a single command",
-  "version": "1.0.0",
-  "skills": "./skills/"
-}
