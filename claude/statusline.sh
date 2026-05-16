@@ -45,5 +45,17 @@ else
   cost_display=$(printf '$%.4f' "$cost_usd")
 fi
 
+fmt_tok=$(python3 -c "
+def fmt(n):
+    if n >= 1_000_000:
+        return f'{n/1_000_000:.1f}M'
+    elif n >= 1_000:
+        return f'{n/1_000:.1f}k'
+    return str(n)
+print(fmt(${in_tok}), fmt(${out_tok}))
+")
+in_fmt=$(echo "$fmt_tok" | cut -d' ' -f1)
+out_fmt=$(echo "$fmt_tok" | cut -d' ' -f2)
+
 echo -e "${model} ▸ ${ws_name} ⎇ ${branch}"
-echo -e "${context_color}${bar}${RESET} ${context_int}% ▸ ${cost_display} ▸ in:${in_tok} out:${out_tok}"
+echo -e "${context_color}${bar}${RESET} ${context_int}% ▸ ${cost_display} ▸ in:${in_fmt} out:${out_fmt}"
