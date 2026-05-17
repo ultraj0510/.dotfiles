@@ -1,6 +1,7 @@
 ---
 name: download-photos
-description: Download cart photos from photo service sites (8122.jp, fujifilm-fasp.jp). Use when the user wants to download photos from their cart.
+description: Download cart photos from photo service sites (8122.jp, fujifilm-fasp.jp).
+when_to_use: 「写真をダウンロードして」「カートの写真を取って」「8122」「fujifilm」または /download-photos 実行時
 ---
 
 # Photo Cart Downloader
