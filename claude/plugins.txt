@@ -12,3 +12,5 @@ playwright@claude-plugins-official
 skill-creator@claude-plugins-official
 claude-md-management@claude-plugins-official
 harness@harness-marketplace
+oh-my-claudecode@omc
+microsoft-docs@claude-plugins-official

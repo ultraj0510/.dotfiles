@@ -61,16 +61,6 @@ backup_and_link \
   "../.dotfiles/claude/CLAUDE.md"
 
 backup_and_link \
-  "$DOTFILES/claude/agents" \
-  "$HOME/.claude/agents" \
-  "../.dotfiles/claude/agents"
-
-backup_and_link \
-  "$DOTFILES/claude/statusline.sh" \
-  "$HOME/.claude/statusline.sh" \
-  "../.dotfiles/claude/statusline.sh"
-
-backup_and_link \
   "$DOTFILES/claude/skills" \
   "$HOME/.claude/skills" \
   "../.dotfiles/claude/skills"
@@ -93,24 +83,66 @@ if command -v claude &>/dev/null; then
   # marketplaces の登録・更新
   if [ -f "$MARKETPLACES_FILE" ]; then
     echo "==> Setting up Claude Code marketplaces..."
-    REGISTERED=$(claude plugin marketplace list 2>/dev/null)
-    grep -v '^\s*#' "$MARKETPLACES_FILE" | grep -v '^\s*$' | while read -r repo marketplace_id; do
-      if echo "$REGISTERED" | grep -q "$marketplace_id"; then
+    MARKETPLACE_CACHE_DIR="$HOME/.cache/dotfiles/marketplaces"
+    MARKETPLACE_TTL="${DOTFILES_MARKETPLACE_TTL:-21600}"  # default: 6時間
+    _now=$(date +%s)
+
+    # 全marketplaceがTTL内か判定（trueなら高価なCLI呼び出しを丸ごとスキップ）
+    _all_fresh=true
+    while read -r _repo _mid; do
+      _cf="$MARKETPLACE_CACHE_DIR/$_mid"
+      if [ ! -f "$_cf" ] || [ $(( _now - $(cat "$_cf") )) -ge "$MARKETPLACE_TTL" ]; then
+        _all_fresh=false; break
+      fi
+    done < <(grep -v '^\s*#' "$MARKETPLACES_FILE" | grep -v '^\s*$')
+
+    if $_all_fresh; then
+      while read -r _repo _mid; do
+        echo "  skip (fresh, $(( _now - $(cat "$MARKETPLACE_CACHE_DIR/$_mid") ))s old): $_mid"
+      done < <(grep -v '^\s*#' "$MARKETPLACES_FILE" | grep -v '^\s*$')
+    else
+      REGISTERED=$(claude plugin marketplace list 2>/dev/null)
+
+      _update_marketplace() {
+        local marketplace_id="$1"
+        local cache_file="$MARKETPLACE_CACHE_DIR/$marketplace_id"
+        local now; now=$(date +%s)
+
+        if [ -f "$cache_file" ]; then
+          local last; last=$(cat "$cache_file")
+          local age=$(( now - last ))
+          if [ "$age" -lt "$MARKETPLACE_TTL" ]; then
+            echo "  skip (fresh, ${age}s old): $marketplace_id"
+            return
+          fi
+        fi
+
         echo "  updating: $marketplace_id"
         claude plugin marketplace update "$marketplace_id" 2>&1 | sed 's/^/    /' || true
-      else
-        echo "  registering: $marketplace_id ($repo)"
-        claude plugin marketplace add "$repo" 2>&1 | sed 's/^/    /'
-      fi
-    done
+
+        mkdir -p "$MARKETPLACE_CACHE_DIR"
+        date +%s > "$cache_file"
+      }
+
+      while read -r repo marketplace_id; do
+        if echo "$REGISTERED" | grep -q "$marketplace_id"; then
+          _update_marketplace "$marketplace_id" &
+        else
+          echo "  registering: $marketplace_id ($repo)"
+          claude plugin marketplace add "$repo" 2>&1 | sed 's/^/    /'
+        fi
+      done < <(grep -v '^\s*#' "$MARKETPLACES_FILE" | grep -v '^\s*$')
+      wait
+    fi
   fi
 
   # プラグインのインストール
   if [ -f "$PLUGINS_FILE" ]; then
     echo "==> Installing Claude Code plugins..."
+    PLUGIN_LIST=$(claude plugin list 2>/dev/null)
     grep -v '^\s*#' "$PLUGINS_FILE" | grep -v '^\s*$' | while read -r plugin_spec; do
       plugin_name="${plugin_spec%%@*}"
-      if claude plugin list 2>/dev/null | grep -A4 "$plugin_name@" | grep -q "enabled"; then
+      if echo "$PLUGIN_LIST" | grep -A4 "$plugin_name@" | grep -q "enabled"; then
         echo "  skip (already installed): $plugin_spec"
       else
         echo "  installing: $plugin_spec"
