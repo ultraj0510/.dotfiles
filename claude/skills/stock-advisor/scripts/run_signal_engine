@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# run_signal_engine - wrapper to auto-detect Python and run signal_engine.py
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Python detection order:
+#   1. $MORNING_CHECK_PYTHON (explicit override)
+#   2. stock-advisor/scripts/.venv/bin/python (dedicated venv)
+#   3. TradingAgents/.venv/bin/python (fallback to TradingAgents venv)
+#   4. system python3
+find_python() {
+  if [ -n "${MORNING_CHECK_PYTHON:-}" ] && [ -x "$MORNING_CHECK_PYTHON" ]; then
+    echo "$MORNING_CHECK_PYTHON"
+    return
+  fi
+
+  local venv_python="$SCRIPT_DIR/.venv/bin/python"
+  if [ -x "$venv_python" ]; then
+    echo "$venv_python"
+    return
+  fi
+
+  local ta_venv="/home/ultraj/projects/TradingAgents/.venv/bin/python"
+  if [ -x "$ta_venv" ]; then
+    echo "$ta_venv"
+    return
+  fi
+
+  if command -v python3 &>/dev/null; then
+    echo "python3"
+    return
+  fi
+
+  echo "ERROR: no python found" >&2
+  exit 1
+}
+
+PYTHON="$(find_python)"
+exec "$PYTHON" "$SCRIPT_DIR/signal_engine.py" "$@"
