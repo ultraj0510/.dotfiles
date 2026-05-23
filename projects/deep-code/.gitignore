@@ -1,6 +1,0 @@
-# Runtime state
-.omc/state/
-.omc/sessions/
-
-# Local settings
-.claude/settings.local.json

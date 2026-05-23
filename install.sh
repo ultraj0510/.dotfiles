@@ -65,13 +65,6 @@ backup_and_link \
   "$HOME/.claude/skills" \
   "../.dotfiles/claude/skills"
 
-# --- Projects symlinks ---
-mkdir -p "$HOME/projects"
-backup_and_link \
-  "$DOTFILES/projects/deep-code" \
-  "$HOME/projects/deep-code" \
-  "../.dotfiles/projects/deep-code"
-
 # .bashrc に source 行を追記（重複しない）
 BASHRC="$HOME/.bashrc"
 SOURCE_LINE='[ -f ~/.dotfiles/bash/aliases.sh ] && source ~/.dotfiles/bash/aliases.sh'
