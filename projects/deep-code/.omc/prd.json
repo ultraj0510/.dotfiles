@@ -1,0 +1,49 @@
+{
+  "title": "stock-advisor と deep-code を dotfiles で一元管理",
+  "plan": ".omc/plans/dotfiles-consolidation.md",
+  "stories": [
+    {
+      "id": "US-011",
+      "title": "stock-advisor/scripts/ を dotfiles で追跡 + _workspace/ を git 管理から除外",
+      "acceptanceCriteria": [
+        "~/.dotfiles/claude/skills/stock-advisor/scripts/.gitignore が存在し、.venv/, cache/, __pycache__/, logs/, *.pyc が指定されている",
+        "cd ~/.dotfiles && git status で claude/skills/stock-advisor/scripts/ が untracked ではなく staged または committed である",
+        "dotfiles の git status で .venv/ や cache/ が追跡対象に入っていない",
+        "cd ~/.dotfiles && git ls-files | grep '_workspace' → 出力なし（追跡除外済み）"
+      ],
+      "passes": false
+    },
+    {
+      "id": "US-012",
+      "title": "修正済み SKILL.md を dotfiles にコミット",
+      "acceptanceCriteria": [
+        "~/.dotfiles/claude/skills/stock-advisor/SKILL.md の変更がコミット済み",
+        "~/.dotfiles/claude/skills/stock-backtest/SKILL.md の変更がコミット済み",
+        "~/.dotfiles/claude/skills/stock-scan/SKILL.md の変更がコミット済み"
+      ],
+      "passes": false
+    },
+    {
+      "id": "US-013",
+      "title": "deep-code を dotfiles に移動 + install.sh 更新",
+      "acceptanceCriteria": [
+        "~/.dotfiles/projects/deep-code/.omc/prd.json が存在する",
+        "~/.dotfiles/projects/deep-code/.omc/progress.txt が存在する",
+        "grep -Eq '(^|/)state($|/)' ~/.dotfiles/projects/deep-code/.gitignore && grep -Eq '(^|/)sessions($|/)' ~/.dotfiles/projects/deep-code/.gitignore → OK",
+        "~/projects/deep-code/ が ~/.dotfiles/projects/deep-code/ への symlink である",
+        "grep -q 'projects/deep-code' ~/.dotfiles/install.sh → 成功",
+        "test -d ~/projects/deep-code.bak → 成功（バックアップ存在）"
+      ],
+      "passes": false
+    },
+    {
+      "id": "US-014",
+      "title": "dotfiles の git 状況を最終確認",
+      "acceptanceCriteria": [
+        "cd ~/.dotfiles && git diff --stat --cached → 空（全変更コミット済み）",
+        "cd ~/.dotfiles && git status --short → 本プラン対象外の既存変更（git/.gitconfig, local-plugins/, user-plugins/）のみ表示"
+      ],
+      "passes": false
+    }
+  ]
+}
