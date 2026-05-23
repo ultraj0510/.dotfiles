@@ -39,11 +39,18 @@
       "Bash(xargs cat:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "Bash(claude --version)",
+      "Bash(claude update:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in d['plugins'].items\\(\\) if 'local' in k]\")",
+      "Bash(lsb_release -rs)",
+      "Read(//usr/lib/**)",
+      "Bash(docker volume *)",
+      "Bash(docker system df *)"
     ]
   },
-  "statusLine": {
-    "type": "command",
-    "command": "~/.dotfiles/claude/statusline.sh"
+  "enabledPlugins": {
+    "github@claude-plugins-official": true
   }
 }

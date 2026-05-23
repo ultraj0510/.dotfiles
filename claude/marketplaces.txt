@@ -5,3 +5,4 @@ revfactory/harness                   harness-marketplace
 
 # 社内マーケットプレイス
 ultraj0510/org-claude-plugins   org-marketplace
+https://github.com/ultraj0510/oh-my-claudecode.git    omc
