@@ -717,37 +717,37 @@ def _print_summary(result):
 
     # Header
     print(f"\n{sep}")
-    print(f"  BACKTEST SUMMARY")
-    print(f"  Ticker: {result['ticker']}")
-    print(f"  Period: {result['period']['start']} to {result['period']['end']}")
+    print(f"  バックテスト サマリー")
+    print(f"  銘柄: {result['ticker']}")
+    print(f"  期間: {result['period']['start']} 〜 {result['period']['end']}")
     print(sep)
 
     # Benchmark vs Strategy comparison
-    print(f"\n  BENCHMARK vs STRATEGY")
+    print(f"\n  ベンチマーク vs ストラテジー")
     print(f"  {sep2}")
-    print(f"  {'Metric':<24} {'Buy & Hold':>14} {'Strategy':>14} {'Delta':>14}")
+    print(f"  {'指標':<28} {'買い持ち':>12} {'ストラテジー':>14} {'差分':>14}")
     print(f"  {sep2}")
 
     rows_bm = [
         ("CAGR (%)", bm["cagr"], b["cagr"], b["cagr"] - bm["cagr"]),
-        ("Max Drawdown (%)", bm["max_drawdown"], b["max_drawdown"], b["max_drawdown"] - bm["max_drawdown"]),
-        ("Sharpe Ratio", bm["sharpe_ratio"], b["sharpe_ratio"], b["sharpe_ratio"] - bm["sharpe_ratio"]),
-        ("Total Return (%)", bm["total_return"], b["total_return"], b["total_return"] - bm["total_return"]),
+        ("最大DD (%)", bm["max_drawdown"], b["max_drawdown"], b["max_drawdown"] - bm["max_drawdown"]),
+        ("シャープレシオ", bm["sharpe_ratio"], b["sharpe_ratio"], b["sharpe_ratio"] - bm["sharpe_ratio"]),
+        ("総リターン (%)", bm["total_return"], b["total_return"], b["total_return"] - bm["total_return"]),
     ]
     for label, bh, st, delta in rows_bm:
         d_str = f"+{delta:.2f}" if delta > 0 else f"{delta:.2f}"
-        print(f"  {label:<24} {bh:>14.2f} {st:>14.2f} {d_str:>14}")
+        print(f"  {label:<28} {bh:>12.2f} {st:>14.2f} {d_str:>14}")
 
     # Signal census
     sc = b.get("signal_census", {})
-    print(f"\n  SIGNAL CENSUS")
+    print(f"\n  シグナル分布")
     print(f"  {sep2}")
     totals = sc.get("totals", {})
     buy_total = totals.get("buy_count", 0)
     sell_total = totals.get("sell_count", 0)
-    print(f"  Total signals: {buy_total + sell_total}  (BUY: {buy_total}, SELL: {sell_total})")
+    print(f"  総シグナル数: {buy_total + sell_total}  (買: {buy_total}, 売: {sell_total})")
     print(f"  {sep2}")
-    print(f"  {'Rule':<24} {'Type':>6} {'Count':>7} {'Win Rate':>10}")
+    print(f"  {'ルール':<24} {'種別':>6} {'回数':>7} {'勝率':>10}")
     print(f"  {sep2}")
 
     for rule_name in sorted(sc):
@@ -755,52 +755,54 @@ def _print_summary(result):
             continue
         info = sc[rule_name]
         wr_str = f"{info['win_rate']:.1f}%" if info["count"] > 0 else "-"
-        print(f"  {rule_name:<24} {info['type']:>6} {info['count']:>7} {wr_str:>10}")
+        type_jp = "買" if info["type"] == "BUY" else "売"
+        print(f"  {rule_name:<24} {type_jp:>6} {info['count']:>7} {wr_str:>10}")
 
     # Top 3 / Bottom 3 trades
     trades = b.get("trades", [])
+    exit_jp = {"signal": "シグナル", "trailing_stop": "損切り", "end_of_period": "期間終了"}
     if trades:
         sorted_trades = sorted(trades, key=lambda t: t["return"], reverse=True)
         top3 = sorted_trades[:3]
         bot3 = sorted_trades[-3:]
 
-        print(f"\n  TOP 3 TRADES")
+        print(f"\n  上位3トレード")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<21} {'Reason':<14}")
+        print(f"  {'エントリー':<12} {'イグジット':<12} {'リターン%':>8} {'日数':>6} {'ルール':<21} {'理由':<16}")
         print(f"  {sep2}")
         for t in top3:
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<21} {t['exit_reason']:<14}")
+                  f"{t.get('entry_signal_rule','N/A'):<21} {exit_jp.get(t['exit_reason'], t['exit_reason']):<16}")
 
-        print(f"\n  BOTTOM 3 TRADES")
+        print(f"\n  下位3トレード")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<21} {'Reason':<14}")
+        print(f"  {'エントリー':<12} {'イグジット':<12} {'リターン%':>8} {'日数':>6} {'ルール':<21} {'理由':<16}")
         print(f"  {sep2}")
         for t in reversed(bot3):
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<21} {t['exit_reason']:<14}")
+                  f"{t.get('entry_signal_rule','N/A'):<21} {exit_jp.get(t['exit_reason'], t['exit_reason']):<16}")
 
     # Walk-forward verdict
-    print(f"\n  WALK-FORWARD VERDICT")
+    print(f"\n  ウォークフォワード判定")
     print(f"  {sep2}")
     overfit = wf["overfit_detected"]
-    verdict = "OVERFIT DETECTED" if overfit else "PASSED"
-    print(f"  Overfit: {verdict}")
-    print(f"  Train Sharpe: {wf['train_metrics']['sharpe_ratio']:.4f}  |  "
-          f"Test Sharpe: {wf['test_metrics']['sharpe_ratio']:.4f}")
-    print(f"  Sharpe diff: {wf['sharpe_diff_pct']:.1f}%")
+    verdict = "過学習検出" if overfit else "合格"
+    print(f"  過学習: {verdict}")
+    print(f"  訓練シャープ: {wf['train_metrics']['sharpe_ratio']:.4f}  |  "
+          f"テストシャープ: {wf['test_metrics']['sharpe_ratio']:.4f}")
+    print(f"  シャープ差: {wf['sharpe_diff_pct']:.1f}%")
     if overfit:
-        print(f"  Reason: ", end="")
+        print(f"  理由: ", end="")
         reasons = []
         if wf["sharpe_diff_pct"] > 50:
-            reasons.append(f"train/test Sharpe divergence {wf['sharpe_diff_pct']:.1f}% > 50%")
+            reasons.append(f"訓練/テスト シャープ乖離 {wf['sharpe_diff_pct']:.1f}% > 50%")
         if wf["test_metrics"]["sharpe_ratio"] < 0:
-            reasons.append(f"test Sharpe {wf['test_metrics']['sharpe_ratio']:.4f} < 0")
+            reasons.append(f"テストシャープ {wf['test_metrics']['sharpe_ratio']:.4f} < 0")
         print("; ".join(reasons))
         if wf.get("tuned_thresholds"):
-            print(f"  Tuned thresholds discarded, using defaults")
+            print(f"  調整閾値を破棄、デフォルト値を使用")
     else:
-        print(f"  No overfit detected. Tuned thresholds are reliable.")
+        print(f"  過学習未検出。調整閾値は信頼できます。")
 
     print(f"\n{sep}\n")
 
