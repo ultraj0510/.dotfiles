@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = os.path.expanduser("~/.claude/skills/stock-advisor/scripts/cache/")
 
 # === Extracted from y_finance.py:10 ===
-_CUSTOM_INDICATORS = {"5d_return", "20d_return", "52w_position", "volume_ratio"}
+_CUSTOM_INDICATORS = {"5d_return", "20d_return", "52w_position", "volume_ratio", "10d_return"}
 
 
 # === Extracted from stockstats_utils.py:15-31 ===
@@ -137,6 +137,8 @@ def _compute_custom_indicator(data: pd.DataFrame, indicator: str) -> pd.Series:
     elif indicator == "volume_ratio":
         avg_vol = volume.rolling(20, min_periods=1).mean()
         return volume / avg_vol.replace(0, float("nan"))
+    elif indicator == "10d_return":
+        return close.pct_change(10) * 100
     else:
         raise ValueError(f"Unknown custom indicator: {indicator}")
 

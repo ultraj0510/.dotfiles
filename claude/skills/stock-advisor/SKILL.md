@@ -55,14 +55,14 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 - アナリスト目標株価乖離率計算
 - 結果をJSON形式で出力
 
-**上位3銘柄の選定（シグナル強度順）:**
+**全銘柄の分析と優先順位付け:**
 
-`/tmp/morning_signals.json` の `score.recommendation` と `signals` 配列を確認し、以下の優先順で上位3銘柄を選定する:
-1. `signals` が1つ以上存在し、`strength: "strong"` を含む銘柄
-2. `score` の絶対値が最も大きい銘柄（|score|降順）
-3. 上記で同点の場合、信用期限が近い銘柄を優先
+`/tmp/morning_signals.json` に含まれる全銘柄を対象とし、以下の優先順で分析する:
+1. シグナルが1つ以上存在し、`strength: "strong"` を含む銘柄 → 詳細分析（取引指示 + 銘柄別詳細）
+2. `score` の絶対値が15以上の銘柄（HOLD_BUY / HOLD_SELL 以上）→ 簡易分析（取引指示 + 1行サマリー）
+3. 上記以外（スコアが -14〜+14 の HOLD）→ 銘柄名とスコアのみ記載
 
-選定外の銘柄は「継続監視」としてサマリー行のみ出力する。
+シグナルのない銘柄は「見送り」として明示する。取引指示は口座ルール（最大ポジション20%、1トレードリスク2%）の範囲内に収める。
 
 **最終判断（1回のLLM呼び出し）:**
 
@@ -89,13 +89,34 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 
 **シグナル判定基準（signal_engine.pyが自動適用）:**
 
-| 条件 | 判定 |
-|------|------|
-| RSI < 30 かつ BB下限付近 かつ 52週位置 < 25% | 強い HOLD / 逆張り BUY 検討 |
-| RSI > 70 かつ 52週位置 > 85% | 利確 SELL 検討 |
-| 直近5日 +7%超の急騰 + 出来高確認 | モメンタム継続 BUY |
-| 信用残日数 < 60日 かつ 含み損 | ロールオーバー or SELL 緊急検討 |
-| RSI/MACD と直近価格が矛盾 | 直近価格を優先（ラギング指標は後追い） |
+シグナル強度は3段階（strong / moderate / weak）。SELLシグナルはBUYより後に評価され、同一日内で上書きする。
+
+| 条件 | ルール | type | 判定 |
+|------|--------|------|------|
+| RSI < 30 かつ BB下限付近 かつ 52週位置 < 25% | oversold_reversal | BUY | strong(BB近接+vol>1.2)/moderate/weak |
+| 直近5日 +7%超の急騰 + 出来高確認 | momentum | BUY | strong(vol>1.5)/moderate(vol>1.0)/weak |
+| RSI > 70 かつ 52週位置 > 85% | overbought | SELL | strong(RSI>80+vol>1.2)/moderate/weak |
+| 直近5日 -7%超の急落 + 高出来高 | momentum_breakdown | SELL | strong(vol>2.0)/moderate(vol>1.5)/weak(vol>1.0) |
+| 直近20日 -15%超の下落 | drawdown_stop | SELL | strong(<-20%)/moderate(<-15%) |
+| Golden cross(50sma>200sma) + 株価>50sma + 10日+3%超 | trend_following | BUY | strong(vol>1.2)/moderate |
+| 50sma直近(±2%)で反発 + Golden cross + RSI<45 | ma_support_bounce | BUY | moderate(RSI<35)/weak |
+| Death cross(SMA比0.99-1.01 + sma_50<sma_200) + 株価<50sma | death_cross | SELL | strong |
+| 信用残日数 < 60日 かつ 含み損 | — | — | ロールオーバー or SELL 緊急検討 |
+| RSI/MACD と直近価格が矛盾 | — | — | 直近価格を優先（ラギング指標は後追い） |
+
+**トレンド状態（trend_state）の解釈:**
+
+`signal_engine.py` の出力JSONに含まれる `trend_state` フィールドは、MA(50/200)の配置と直近モメンタムに基づく5状態分類:
+
+| trend_state | 条件 | 取引判断への影響 |
+|-------------|------|-----------------|
+| strong_uptrend | close>50sma>200sma + 20日+5%超 | 押し目買い積極。トレーリングストップ幅広(5.0x ATR) |
+| weak_uptrend | close>50sma (golden crossなし含む) | BUY許容。トレーリングストップやや広(4.0x ATR) |
+| ranging | 上記以外 | 通常判断。トレーリングストップ標準(3.0x ATR) |
+| downtrend | close<50sma かつ 一部条件 | 逆張りBUYは格下げ(RSI<25のみ許可)。ストップ狭(2.5x ATR) |
+| strong_downtrend | close<50sma<200sma + 20日-5%超 | 逆張りBUY抑制。ストップ最狭(2.0x ATR) |
+
+**トレンド確認フィルター:** oversold_reversal BUYは下降トレンドで格下げ（downtrendではmoderate→weak、strong_downtrendではシグナル生成を抑制）。これは下降トレンド中の逆張り買いのリスクを管理するための設計。
 
 **アナリスト目標株価の読み方:**
 
