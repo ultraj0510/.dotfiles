@@ -166,60 +166,140 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
     ret_5d = _safe_float(indicators.get("5d_return"))
     vol_ratio = _safe_float(indicators.get("volume_ratio"))
     ret_20d = _safe_float(indicators.get("20d_return"))
+    sma_50 = _safe_float(indicators.get("close_50_sma"))
+    sma_200 = _safe_float(indicators.get("close_200_sma"))
+    ret_10d = _safe_float(indicators.get("10d_return"))
+
+    # Compute trend state for filter and adaptive logic
+    trend_state = compute_trend_state(indicators)
+
+    # Signal evaluation order (documented):
+    # oversold_reversal → momentum_buy → overbought → momentum_breakdown
+    # → drawdown_stop → trend_following → ma_support_bounce → death_cross
+    # SELL signals evaluated later, overwriting BUY within the same day.
 
     # === BUY signals ===
 
     # Oversold reversal: RSI < 30 + near BB lower + 52w low zone
-    if rsi is not None and rsi < 30 and position_52w is not None and position_52w < 25:
+    # Trend filter: suppress in strong_downtrend, downgrade in downtrend
+    if (rsi is not None and rsi < 30
+            and position_52w is not None and position_52w < 25
+            and trend_state != "strong_downtrend"):
         near_bb = False
         if close is not None and boll_lb is not None and close <= boll_lb * 1.02:
             near_bb = True
+        vol_high = vol_ratio is not None and vol_ratio > 1.2
+        vol_ok = vol_ratio is not None and vol_ratio > 1.0
+        if near_bb and vol_high:
+            strength = "strong"
+        elif near_bb or vol_ok:
+            strength = "moderate"
+        else:
+            strength = "weak"
+        if trend_state == "downtrend" and strength == "moderate":
+            strength = "weak"
         signals.append({
             "type": "BUY",
             "rule": "oversold_reversal",
-            "strength": "strong" if near_bb else "moderate",
+            "strength": strength,
             "description": f"RSI={rsi:.1f}, 52w_position={position_52w:.1f}%"
                            + (f", near BB lower={boll_lb:.0f}" if near_bb else ""),
         })
 
     # Momentum BUY: 5d surge > 7% with volume confirmation
     if ret_5d is not None and ret_5d > 7:
+        vol_high = vol_ratio is not None and vol_ratio > 1.5
         vol_ok = vol_ratio is not None and vol_ratio > 1.0
+        if vol_high:
+            strength = "strong"
+        elif vol_ok:
+            strength = "moderate"
+        else:
+            strength = "weak"
         signals.append({
             "type": "BUY",
             "rule": "momentum",
-            "strength": "strong" if vol_ok else "moderate",
-            "description": f"5d_return={ret_5d:.1f}%, volume_ratio={vol_ratio:.1f}" if vol_ok else f"5d_return={ret_5d:.1f}%",
+            "strength": strength,
+            "description": f"5d_return={ret_5d:.1f}%, volume_ratio={vol_ratio:.1f}" if vol_ratio is not None else f"5d_return={ret_5d:.1f}%",
         })
 
     # === SELL signals ===
 
     # Overbought: RSI > 70 + near 52w high
     if rsi is not None and rsi > 70 and position_52w is not None and position_52w > 85:
+        vol_high = vol_ratio is not None and vol_ratio > 1.2
+        if rsi > 80 and vol_high:
+            strength = "strong"
+        elif rsi > 80 or vol_high:
+            strength = "moderate"
+        else:
+            strength = "weak"
         signals.append({
             "type": "SELL",
             "rule": "overbought",
-            "strength": "strong" if rsi > 80 else "moderate",
+            "strength": strength,
             "description": f"RSI={rsi:.1f}, 52w_position={position_52w:.1f}%",
         })
 
     # Momentum breakdown: 5d sharp drop with high volume
-    if ret_5d is not None and ret_5d < -7 and vol_ratio is not None and vol_ratio > 1.5:
+    if ret_5d is not None and ret_5d < -7 and vol_ratio is not None and vol_ratio > 1.0:
+        if vol_ratio > 2.0:
+            strength = "strong"
+        elif vol_ratio > 1.5:
+            strength = "moderate"
+        else:
+            strength = "weak"
         signals.append({
             "type": "SELL",
             "rule": "momentum_breakdown",
-            "strength": "strong",
+            "strength": strength,
             "description": f"5d_return={ret_5d:.1f}%, volume_ratio={vol_ratio:.1f}",
         })
 
-    # Drawdown stop: 20d decline > 15% (trend breakdown, stop-loss trigger)
+    # Drawdown stop: 20d decline triggers stop-loss
     if ret_20d is not None and ret_20d < -15:
+        strength = "strong" if ret_20d < -20 else "moderate"
         signals.append({
             "type": "SELL",
             "rule": "drawdown_stop",
-            "strength": "strong",
+            "strength": strength,
             "description": f"20d_return={ret_20d:.1f}%, trend breakdown",
         })
+
+    # Trend following BUY: golden cross active + positive mid-term momentum
+    if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+            and close is not None and close > sma_50
+            and ret_10d is not None and ret_10d > 3
+            and vol_ratio is not None and vol_ratio > 0.8):
+        signals.append({
+            "type": "BUY", "rule": "trend_following",
+            "strength": "strong" if vol_ratio > 1.2 else "moderate",
+            "description": f"10d_return={ret_10d:.1f}%, golden cross active",
+        })
+
+    # MA support bounce BUY: price bounces off 50sma in uptrend
+    if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+            and close is not None and sma_50 * 0.98 <= close <= sma_50 * 1.02
+            and rsi is not None and rsi < 45):
+        signals.append({
+            "type": "BUY", "rule": "ma_support_bounce",
+            "strength": "moderate" if rsi < 35 else "weak",
+            "description": f"close near 50sma={sma_50:.0f}, RSI={rsi:.1f}",
+        })
+
+    # Death cross SELL: SMA ratio proximity detection
+    # Uses sma_50/sma_200 ratio near 1.0 with sma_50 < sma_200 as approximate
+    # cross detection. May fire repeatedly while SMAs remain close.
+    if (sma_50 is not None and sma_200 is not None and sma_200 > 0
+            and close is not None and close < sma_50
+            and sma_50 < sma_200):
+        sma_ratio = sma_50 / sma_200
+        if 0.99 <= sma_ratio <= 1.01:
+            signals.append({
+                "type": "SELL", "rule": "death_cross",
+                "strength": "strong",
+                "description": f"50sma/200sma ratio={sma_ratio:.3f}, death cross detected",
+            })
 
     # === Analyst-based signals ===
     div = analyst.get("divergence_pct")
@@ -287,7 +367,7 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
 
     # Add signal contributions
     for sig in signals:
-        weight = 15 if sig["strength"] == "strong" else 8
+        weight = 15 if sig["strength"] == "strong" else (8 if sig["strength"] == "moderate" else 4)
         if sig["type"] == "BUY":
             score += weight
         elif sig["type"] == "SELL":
@@ -309,6 +389,35 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
     return {"score": score, "recommendation": recommendation}
 
 
+def compute_trend_state(indicators: dict) -> str:
+    close = _safe_float(indicators.get("close"))
+    sma_50 = _safe_float(indicators.get("close_50_sma"))
+    sma_200 = _safe_float(indicators.get("close_200_sma"))
+    ret_20d = _safe_float(indicators.get("20d_return"))
+
+    if close is None or sma_50 is None or sma_200 is None:
+        return "unknown"
+
+    above_50sma = close > sma_50
+    above_200sma = close > sma_200
+    golden_cross = sma_50 > sma_200
+
+    if above_50sma and above_200sma and golden_cross:
+        if ret_20d is not None and ret_20d > 5:
+            return "strong_uptrend"
+        return "weak_uptrend"
+    elif above_50sma and not golden_cross:
+        return "weak_uptrend"
+    elif not above_50sma and not above_200sma and not golden_cross:
+        if ret_20d is not None and ret_20d < -5:
+            return "strong_downtrend"
+        return "downtrend"
+    elif not above_50sma and above_200sma:
+        return "downtrend"
+    else:
+        return "ranging"
+
+
 def analyze_ticker(ticker: str, date_str: str) -> dict:
     """Run full analysis for a single ticker."""
     try:
@@ -328,11 +437,13 @@ def analyze_ticker(ticker: str, date_str: str) -> dict:
         analyst = fetch_analyst_target(ticker)
         signals = classify_signals(indicators, macro, analyst)
         score = compute_overall_score(indicators, signals)
+        trend_state = compute_trend_state(indicators)
 
         return {
             "ticker": ticker,
             "date": date_str,
             "is_trading_day": is_trading_day(date_str),
+            "trend_state": trend_state,
             "indicators": indicators,
             "signals": signals,
             "score": score,
