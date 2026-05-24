@@ -109,10 +109,12 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
     # Filter to range
     dates = [d for d in dates if start_date <= d <= end_date]
 
-    # Signal evaluation order (documented):
-    # oversold_reversal → momentum_buy → overbought → momentum_breakdown
-    # → drawdown_stop → trend_following → ma_support_bounce → death_cross
-    # SELL signals evaluated later, overwriting BUY within the same day.
+    # Signal evaluation: 2-pass architecture.
+    # Pass 1 — BUY rules (first-match-wins):
+    #   oversold_reversal → momentum_buy → trend_following → ma_support_bounce
+    # Pass 2 — SELL rules (first-match-wins):
+    #   overbought_sell → momentum_breakdown → drawdown_stop → death_cross
+    # If any SELL rule fires, it overwrites the BUY signal for that day.
 
     rows = []
     prev_date = None
@@ -162,52 +164,64 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_rule = "oversold_reversal"
 
         # Momentum BUY
-        if ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
+        if signal == 0 and ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
             if vol_ratio is None or vol_ratio > thresholds["momentum_vol"]:
                 signal = 1
                 signal_rule = "momentum_buy"
 
-        # Overbought SELL
-        if (rsi is not None and rsi > thresholds["rsi_upper"]
-                and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
-            signal = -1
-            signal_rule = "overbought_sell"
-
-        # Momentum breakdown SELL
-        if (ret_5d is not None and ret_5d < thresholds["breakdown_5d"]
-                and vol_ratio is not None and vol_ratio > thresholds["breakdown_vol"]):
-            signal = -1
-            signal_rule = "momentum_breakdown"
-
-        # Drawdown stop SELL
-        if ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
-            signal = -1
-            signal_rule = "drawdown_stop"
-
         # Trend following BUY
-        if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+        if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
                 and close_val > sma_50 and ret_10d is not None and ret_10d > 3
                 and vol_ratio is not None and vol_ratio > 0.8):
             signal = 1
             signal_rule = "trend_following"
 
         # MA support bounce BUY
-        if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+        if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
                 and sma_50 * 0.98 <= close_val <= sma_50 * 1.02
                 and rsi is not None and rsi < 45):
             signal = 1
             signal_rule = "ma_support_bounce"
 
+        # ============================================================
+        # Pass 2: SELL rules (first-match-wins, overwrites BUY)
+        # ============================================================
+        sell_signal = 0
+        sell_rule = None
+
+        # Overbought SELL
+        if (rsi is not None and rsi > thresholds["rsi_upper"]
+                and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
+            sell_signal = -1
+            sell_rule = "overbought_sell"
+
+        # Momentum breakdown SELL
+        if sell_signal == 0 and (ret_5d is not None
+                and ret_5d < thresholds["breakdown_5d"]
+                and vol_ratio is not None
+                and vol_ratio > thresholds["breakdown_vol"]):
+            sell_signal = -1
+            sell_rule = "momentum_breakdown"
+
+        # Drawdown stop SELL
+        if sell_signal == 0 and ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
+            sell_signal = -1
+            sell_rule = "drawdown_stop"
+
         # Death cross SELL (exact detection via prev_date comparison)
-        if (prev_date is not None
-                and sma_50 is not None and sma_200 is not None):
+        if sell_signal == 0 and prev_date is not None and sma_50 is not None and sma_200 is not None:
             sma_50_prev = _safe_float(indicator_data["close_50_sma"].get(prev_date))
             sma_200_prev = _safe_float(indicator_data["close_200_sma"].get(prev_date))
             if (sma_50_prev is not None and sma_200_prev is not None
                     and sma_50_prev >= sma_200_prev
                     and sma_50 < sma_200 and close_val < sma_50):
-                signal = -1
-                signal_rule = "death_cross"
+                sell_signal = -1
+                sell_rule = "death_cross"
+
+        # SELL overwrites BUY when both fire on the same day
+        if sell_signal == -1:
+            signal = -1
+            signal_rule = sell_rule
 
         rows.append({
             "date": d,
@@ -287,14 +301,19 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
 
     daily_returns = []
     prev_close = None
+    prev_in_position = False
 
     for _, row in signals_df.iterrows():
         close = row["close"]
         if close <= 0:
             continue
 
+        # Daily return based on previous day's position state
         if prev_close is not None and prev_close > 0:
-            daily_returns.append((close - prev_close) / prev_close)
+            if prev_in_position:
+                daily_returns.append((close - prev_close) / prev_close)
+            else:
+                daily_returns.append(0.0)
         prev_close = close
 
         # Adaptive ATR multiplier from trend state with slew limiting
@@ -331,6 +350,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
                     entry_signal_rule = None
                     highest_since_entry = 0.0
                     lowest_since_entry = 0.0
+                    prev_in_position = False
                     continue
 
         prev_effective_mult = effective_mult
@@ -357,8 +377,9 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
             entry_signal_rule = None
             highest_since_entry = 0.0
             lowest_since_entry = 0.0
+            prev_in_position = False
 
-    # Close any open position at the last price
+        prev_in_position = in_position
     if in_position:
         last_row = signals_df.iloc[-1]
         ret = (last_row["close"] - entry_price) / entry_price
@@ -745,19 +766,19 @@ def _print_summary(result):
 
         print(f"\n  TOP 3 TRADES")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<22} {'Reason':<14}")
+        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<21} {'Reason':<14}")
         print(f"  {sep2}")
         for t in top3:
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<22} {t['exit_reason']:<14}")
+                  f"{t.get('entry_signal_rule','N/A'):<21} {t['exit_reason']:<14}")
 
         print(f"\n  BOTTOM 3 TRADES")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<22} {'Reason':<14}")
+        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<21} {'Reason':<14}")
         print(f"  {sep2}")
         for t in reversed(bot3):
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<22} {t['exit_reason']:<14}")
+                  f"{t.get('entry_signal_rule','N/A'):<21} {t['exit_reason']:<14}")
 
     # Walk-forward verdict
     print(f"\n  WALK-FORWARD VERDICT")
