@@ -5,6 +5,12 @@ Usage:
     python backtest_engine.py --ticker 1515.T
     python backtest_engine.py --ticker 1515.T --tune
     python backtest_engine.py --ticker 1515.T --start 2024-01-01 --end 2025-01-01
+
+Limitations:
+- Trailing stop uses closing prices only. Intraday gap-downs that recover
+  by close are not captured as stop-loss events.
+- ATR requires a 14-period warm-up; the first ~14 rows of the backtest
+  period will have NaN ATR and the trailing stop will not fire.
 """
 
 import argparse
@@ -28,6 +34,11 @@ DEFAULT_THRESHOLDS = {
     "momentum_vol": 1.0,
     "breakdown_5d": -7.0,
     "breakdown_vol": 1.5,
+    "drawdown_20d": -15.0,
+}
+
+DEFAULT_RISK_PARAMS = {
+    "trailing_stop_atr_mult": 3.0,
 }
 
 # Grid search parameter ranges
@@ -61,7 +72,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
     """Generate buy/sell signals for each trading day in the date range.
 
     Returns DataFrame with columns: date, close, rsi, 52w_position, 5d_return,
-    volume_ratio, boll_lb, signal (1=buy, -1=sell, 0=hold).
+    volume_ratio, boll_lb, ret_20d, atr, signal (1=buy, -1=sell, 0=hold).
     """
     if thresholds is None:
         thresholds = DEFAULT_THRESHOLDS
@@ -92,6 +103,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         pos_52w = _safe_float(indicator_data["52w_position"].get(d))
         ret_5d = _safe_float(indicator_data["5d_return"].get(d))
         vol_ratio = _safe_float(indicator_data["volume_ratio"].get(d))
+        ret_20d = _safe_float(indicator_data["20d_return"].get(d))
+        atr = _safe_float(indicator_data["atr"].get(d))
         close_val = close_map.get(d, 0)
         if isinstance(close_val, pd.Series):
             close_val = float(close_val.iloc[0]) if not close_val.empty else 0
@@ -122,6 +135,10 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio is not None and vol_ratio > thresholds["breakdown_vol"]):
             signal = -1
 
+        # Drawdown stop SELL
+        if ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
+            signal = -1
+
         rows.append({
             "date": d,
             "close": close_val,
@@ -130,18 +147,28 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             "5d_return": ret_5d,
             "volume_ratio": vol_ratio,
             "boll_lb": boll_lb,
+            "ret_20d": ret_20d,
+            "atr": atr,
             "signal": signal,
         })
 
     return pd.DataFrame(rows)
 
 
-def simulate_trades(signals_df: pd.DataFrame) -> dict:
+def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
     """Simulate trades from signal DataFrame and compute performance metrics.
 
     Simple strategy: one position at a time. BUY signal enters long,
     SELL signal exits. No short selling. Uses closing prices.
+
+    Trailing stop (ATR-based) is checked before signal processing each day.
+    If triggered, the day's signal is skipped to prevent re-entry on the
+    same day as a stop-out.
     """
+    if risk_params is None:
+        risk_params = DEFAULT_RISK_PARAMS
+    atr_mult = risk_params["trailing_stop_atr_mult"]
+
     if signals_df.empty:
         return _empty_metrics()
 
@@ -149,8 +176,8 @@ def simulate_trades(signals_df: pd.DataFrame) -> dict:
     in_position = False
     entry_price = 0
     entry_date = None
+    highest_since_entry = 0.0
 
-    # Track daily returns for Sharpe/Sortino
     daily_returns = []
     prev_close = None
 
@@ -163,11 +190,36 @@ def simulate_trades(signals_df: pd.DataFrame) -> dict:
             daily_returns.append((close - prev_close) / prev_close)
         prev_close = close
 
+        # Trailing stop check (before signal processing)
+        if in_position:
+            if close > highest_since_entry:
+                highest_since_entry = close
+            atr_val = row.get("atr")
+            if atr_val is not None and not (isinstance(atr_val, float) and math.isnan(atr_val)):
+                stop_level = highest_since_entry - (atr_val * atr_mult)
+                if close < stop_level:
+                    ret = (close - entry_price) / entry_price
+                    trades.append({
+                        "entry_date": entry_date,
+                        "exit_date": row["date"],
+                        "entry_price": entry_price,
+                        "exit_price": close,
+                        "return": ret,
+                        "exit_reason": "trailing_stop",
+                    })
+                    in_position = False
+                    entry_price = 0
+                    entry_date = None
+                    highest_since_entry = 0.0
+                    continue
+
+        # Signal check
         sig = row["signal"]
         if sig == 1 and not in_position:
             in_position = True
             entry_price = close
             entry_date = row["date"]
+            highest_since_entry = close
         elif sig == -1 and in_position:
             ret = (close - entry_price) / entry_price
             trades.append({
@@ -176,10 +228,12 @@ def simulate_trades(signals_df: pd.DataFrame) -> dict:
                 "entry_price": entry_price,
                 "exit_price": close,
                 "return": ret,
+                "exit_reason": "signal",
             })
             in_position = False
             entry_price = 0
             entry_date = None
+            highest_since_entry = 0.0
 
     # Close any open position at the last price
     if in_position:
@@ -191,6 +245,7 @@ def simulate_trades(signals_df: pd.DataFrame) -> dict:
             "entry_price": entry_price,
             "exit_price": last_row["close"],
             "return": ret,
+            "exit_reason": "end_of_period",
         })
 
     return _compute_metrics(trades, daily_returns)
@@ -395,6 +450,7 @@ def main():
         "ticker": args.ticker,
         "period": {"start": start_date, "end": end_date},
         "default_thresholds": DEFAULT_THRESHOLDS,
+        "default_risk_params": DEFAULT_RISK_PARAMS,
     }
 
     # Baseline with default thresholds

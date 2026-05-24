@@ -212,6 +212,15 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
             "description": f"5d_return={ret_5d:.1f}%, volume_ratio={vol_ratio:.1f}",
         })
 
+    # Drawdown stop: 20d decline > 15% (trend breakdown, stop-loss trigger)
+    if ret_20d is not None and ret_20d < -15:
+        signals.append({
+            "type": "SELL",
+            "rule": "drawdown_stop",
+            "strength": "strong",
+            "description": f"20d_return={ret_20d:.1f}%, trend breakdown",
+        })
+
     # === Analyst-based signals ===
     div = analyst.get("divergence_pct")
     if div is not None:
