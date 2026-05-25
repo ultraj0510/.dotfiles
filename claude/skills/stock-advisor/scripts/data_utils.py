@@ -52,6 +52,10 @@ def yf_retry(func, max_retries=3, base_delay=2.0):
 # === Extracted from stockstats_utils.py:34-44 ===
 def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     """Normalize a stock DataFrame for stockstats: parse dates, drop invalid rows, fill price gaps."""
+    # yfinance reset_index() can produce "index" or "Date" column depending on
+    # version and auto_adjust settings. Normalize both to "Date".
+    if "Date" not in data.columns and "index" in data.columns:
+        data = data.rename(columns={"index": "Date"})
     data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
     data = data.dropna(subset=["Date"])
 
