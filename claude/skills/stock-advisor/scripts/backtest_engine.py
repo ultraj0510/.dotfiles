@@ -50,6 +50,12 @@ DEFAULT_RISK_PARAMS = {
     "atr_slew_max": 0.5,
 }
 
+DEFAULT_MARGIN_PARAMS = {
+    "margin_long_rate": 0.028,
+    "margin_short_rate": 0.012,
+    "margin_max_days": 180,
+}
+
 # Grid search parameter ranges
 TUNE_PARAM_GRID = {
     "rsi_lower": [20, 25, 30, 35],
@@ -109,10 +115,12 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
     # Filter to range
     dates = [d for d in dates if start_date <= d <= end_date]
 
-    # Signal evaluation order (documented):
-    # oversold_reversal → momentum_buy → overbought → momentum_breakdown
-    # → drawdown_stop → trend_following → ma_support_bounce → death_cross
-    # SELL signals evaluated later, overwriting BUY within the same day.
+    # Signal evaluation: 2-pass architecture.
+    # Pass 1 — BUY rules (first-match-wins):
+    #   oversold_reversal → momentum_buy → trend_following → ma_support_bounce
+    # Pass 2 — SELL rules (first-match-wins):
+    #   overbought_sell → momentum_breakdown → drawdown_stop → death_cross
+    # If any SELL rule fires, it overwrites the BUY signal for that day.
 
     rows = []
     prev_date = None
@@ -162,52 +170,64 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_rule = "oversold_reversal"
 
         # Momentum BUY
-        if ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
+        if signal == 0 and ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
             if vol_ratio is None or vol_ratio > thresholds["momentum_vol"]:
                 signal = 1
                 signal_rule = "momentum_buy"
 
-        # Overbought SELL
-        if (rsi is not None and rsi > thresholds["rsi_upper"]
-                and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
-            signal = -1
-            signal_rule = "overbought_sell"
-
-        # Momentum breakdown SELL
-        if (ret_5d is not None and ret_5d < thresholds["breakdown_5d"]
-                and vol_ratio is not None and vol_ratio > thresholds["breakdown_vol"]):
-            signal = -1
-            signal_rule = "momentum_breakdown"
-
-        # Drawdown stop SELL
-        if ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
-            signal = -1
-            signal_rule = "drawdown_stop"
-
         # Trend following BUY
-        if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+        if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
                 and close_val > sma_50 and ret_10d is not None and ret_10d > 3
                 and vol_ratio is not None and vol_ratio > 0.8):
             signal = 1
             signal_rule = "trend_following"
 
         # MA support bounce BUY
-        if (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
+        if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
                 and sma_50 * 0.98 <= close_val <= sma_50 * 1.02
                 and rsi is not None and rsi < 45):
             signal = 1
             signal_rule = "ma_support_bounce"
 
+        # ============================================================
+        # Pass 2: SELL rules (first-match-wins, overwrites BUY)
+        # ============================================================
+        sell_signal = 0
+        sell_rule = None
+
+        # Overbought SELL
+        if (rsi is not None and rsi > thresholds["rsi_upper"]
+                and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
+            sell_signal = -1
+            sell_rule = "overbought_sell"
+
+        # Momentum breakdown SELL
+        if sell_signal == 0 and (ret_5d is not None
+                and ret_5d < thresholds["breakdown_5d"]
+                and vol_ratio is not None
+                and vol_ratio > thresholds["breakdown_vol"]):
+            sell_signal = -1
+            sell_rule = "momentum_breakdown"
+
+        # Drawdown stop SELL
+        if sell_signal == 0 and ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
+            sell_signal = -1
+            sell_rule = "drawdown_stop"
+
         # Death cross SELL (exact detection via prev_date comparison)
-        if (prev_date is not None
-                and sma_50 is not None and sma_200 is not None):
+        if sell_signal == 0 and prev_date is not None and sma_50 is not None and sma_200 is not None:
             sma_50_prev = _safe_float(indicator_data["close_50_sma"].get(prev_date))
             sma_200_prev = _safe_float(indicator_data["close_200_sma"].get(prev_date))
             if (sma_50_prev is not None and sma_200_prev is not None
                     and sma_50_prev >= sma_200_prev
                     and sma_50 < sma_200 and close_val < sma_50):
-                signal = -1
-                signal_rule = "death_cross"
+                sell_signal = -1
+                sell_rule = "death_cross"
+
+        # SELL overwrites BUY when both fire on the same day
+        if sell_signal == -1:
+            signal = -1
+            signal_rule = sell_rule
 
         rows.append({
             "date": d,
@@ -235,13 +255,22 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
 
 def _build_trade(entry_date, exit_date, entry_price, exit_price, ret,
                  exit_reason, highest_since_entry, lowest_since_entry,
-                 entry_signal_rule=None):
-    """Build a trade dict with computed metrics."""
+                 entry_signal_rule=None, direction="long"):
+    """Build a trade dict with computed metrics.
+
+    direction: "long" or "short". MAE/MFE are direction-aware:
+    - long:  MAE = max drawdown from entry (lowest), MFE = max gain (highest)
+    - short: MAE = max adverse move from entry (highest), MFE = max gain (lowest)
+    """
     entry_dt = pd.to_datetime(entry_date)
     exit_dt = pd.to_datetime(exit_date)
     holding_days = (exit_dt - entry_dt).days
-    mae_pct = (lowest_since_entry - entry_price) / entry_price * 100
-    mfe_pct = (highest_since_entry - entry_price) / entry_price * 100
+    if direction == "short":
+        mae_pct = (highest_since_entry - entry_price) / entry_price * 100
+        mfe_pct = (lowest_since_entry - entry_price) / entry_price * 100
+    else:
+        mae_pct = (lowest_since_entry - entry_price) / entry_price * 100
+        mfe_pct = (highest_since_entry - entry_price) / entry_price * 100
     trade = {
         "entry_date": entry_date,
         "exit_date": exit_date,
@@ -252,17 +281,20 @@ def _build_trade(entry_date, exit_date, entry_price, exit_price, ret,
         "holding_days": holding_days,
         "mae_pct": round(mae_pct, 2),
         "mfe_pct": round(mfe_pct, 2),
+        "direction": direction,
     }
     if entry_signal_rule:
         trade["entry_signal_rule"] = entry_signal_rule
     return trade
 
 
-def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
+def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
+                    margin_mode: bool = False,
+                    margin_params: dict = None) -> dict:
     """Simulate trades from signal DataFrame and compute performance metrics.
 
-    Simple strategy: one position at a time. BUY signal enters long,
-    SELL signal exits. No short selling. Uses closing prices.
+    One position at a time. When margin_mode=True, short selling and margin
+    costs are enabled. Uses closing prices.
 
     Trailing stop (ATR-based) is checked before signal processing each day.
     If triggered, the day's signal is skipped to prevent re-entry on the
@@ -270,32 +302,53 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
     """
     if risk_params is None:
         risk_params = DEFAULT_RISK_PARAMS
+    if margin_params is None:
+        margin_params = DEFAULT_MARGIN_PARAMS
     atr_mult_map = risk_params["trailing_stop_atr_mult"]
     slew_max = risk_params.get("atr_slew_max", 0.5)
+    margin_long_rate = margin_params["margin_long_rate"]
+    margin_short_rate = margin_params["margin_short_rate"]
+    margin_max_days = margin_params["margin_max_days"]
+
+    SHORT_TREND_GATE = {"strong_downtrend", "downtrend", "ranging"}
 
     if signals_df.empty:
         return _empty_metrics()
 
     trades = []
-    in_position = False
+    position = 0  # 0=flat, 1=long, -1=short
     entry_price = 0
     entry_date = None
     entry_signal_rule = None
     highest_since_entry = 0.0
     lowest_since_entry = 0.0
     prev_effective_mult = 0.0
+    margin_cost_accrued = 0.0  # yen, accumulated per trade
 
     daily_returns = []
     prev_close = None
+    prev_position = 0
 
     for _, row in signals_df.iterrows():
         close = row["close"]
         if close <= 0:
             continue
 
+        # Daily return based on previous day's position state
         if prev_close is not None and prev_close > 0:
-            daily_returns.append((close - prev_close) / prev_close)
+            if prev_position == 1:
+                daily_returns.append((close - prev_close) / prev_close)
+            elif prev_position == -1:
+                daily_returns.append((prev_close - close) / prev_close)
+            else:
+                daily_returns.append(0.0)
         prev_close = close
+
+        # Margin cost daily accrual
+        if margin_mode and position != 0:
+            rate = margin_long_rate if position == 1 else margin_short_rate
+            margin_cost_accrued += entry_price * (rate / 365)
+            daily_returns[-1] -= (rate / 365)
 
         # Adaptive ATR multiplier from trend state with slew limiting
         trend_state = row.get("trend_state", "unknown")
@@ -308,7 +361,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
             effective_mult = target_mult
 
         # Trailing stop check (before signal processing)
-        if in_position:
+        if position != 0:
             row_high = row.get("high", close) or close
             row_low = row.get("low", close) or close
             if row_high > highest_since_entry:
@@ -317,56 +370,166 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None) -> dict:
                 lowest_since_entry = row_low
             atr_val = row.get("atr")
             if atr_val is not None and not (isinstance(atr_val, float) and math.isnan(atr_val)):
-                stop_level = highest_since_entry - (atr_val * effective_mult)
-                if close < stop_level:
-                    ret = (close - entry_price) / entry_price
-                    trades.append(_build_trade(
+                stopped = False
+                if position == 1:
+                    stop_level = highest_since_entry - (atr_val * effective_mult)
+                    stopped = close < stop_level
+                else:  # short
+                    stop_level = lowest_since_entry + (atr_val * effective_mult)
+                    stopped = close > stop_level
+                if stopped:
+                    if position == 1:
+                        ret = (close - entry_price) / entry_price
+                    else:
+                        ret = (entry_price - close) / entry_price
+                    cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
+                    direction = "long" if position == 1 else "short"
+                    trade = _build_trade(
                         entry_date, row["date"], entry_price, close, ret,
                         "trailing_stop", highest_since_entry, lowest_since_entry,
-                        entry_signal_rule,
-                    ))
-                    in_position = False
+                        entry_signal_rule, direction,
+                    )
+                    trade["margin_cost"] = cost
+                    if margin_mode:
+                        trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                    trades.append(trade)
+                    position = 0
                     entry_price = 0
                     entry_date = None
                     entry_signal_rule = None
                     highest_since_entry = 0.0
                     lowest_since_entry = 0.0
+                    margin_cost_accrued = 0.0
+                    prev_position = 0
                     continue
 
         prev_effective_mult = effective_mult
 
-        # Signal check
+        # Margin expiry check
+        if margin_mode and position != 0 and entry_date is not None:
+            holding_days = (pd.to_datetime(row["date"]) - pd.to_datetime(entry_date)).days
+            if holding_days > margin_max_days:
+                if position == 1:
+                    ret = (close - entry_price) / entry_price
+                else:
+                    ret = (entry_price - close) / entry_price
+                cost = round(margin_cost_accrued, 2)
+                direction = "long" if position == 1 else "short"
+                trade = _build_trade(
+                    entry_date, row["date"], entry_price, close, ret,
+                    "margin_expiry", highest_since_entry, lowest_since_entry,
+                    entry_signal_rule, direction,
+                )
+                trade["margin_cost"] = cost
+                trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trades.append(trade)
+                position = 0
+                entry_price = 0
+                entry_date = None
+                entry_signal_rule = None
+                highest_since_entry = 0.0
+                lowest_since_entry = 0.0
+                margin_cost_accrued = 0.0
+                prev_position = 0
+                # fall through to signal check (which will skip since position==0)
+                continue
+
+        # Signal check — state machine
         sig = row["signal"]
-        if sig == 1 and not in_position:
-            in_position = True
-            entry_price = close
-            entry_date = row["date"]
-            entry_signal_rule = row.get("signal_rule")
-            highest_since_entry = close
-            lowest_since_entry = close
-        elif sig == -1 and in_position:
-            ret = (close - entry_price) / entry_price
-            trades.append(_build_trade(
-                entry_date, row["date"], entry_price, close, ret,
-                "signal", highest_since_entry, lowest_since_entry,
-                entry_signal_rule,
-            ))
-            in_position = False
-            entry_price = 0
-            entry_date = None
-            entry_signal_rule = None
-            highest_since_entry = 0.0
-            lowest_since_entry = 0.0
+
+        if sig == 1:
+            if position == 0:
+                position = 1
+                entry_price = close
+                entry_date = row["date"]
+                entry_signal_rule = row.get("signal_rule")
+                highest_since_entry = close
+                lowest_since_entry = close
+                margin_cost_accrued = 0.0
+            elif position == -1:
+                # Cover short, enter long (same-day flip)
+                ret = (entry_price - close) / entry_price
+                cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
+                trade = _build_trade(
+                    entry_date, row["date"], entry_price, close, ret,
+                    "signal", highest_since_entry, lowest_since_entry,
+                    entry_signal_rule, "short",
+                )
+                trade["margin_cost"] = cost
+                if margin_mode:
+                    trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trades.append(trade)
+                position = 1
+                entry_price = close
+                entry_date = row["date"]
+                entry_signal_rule = row.get("signal_rule")
+                highest_since_entry = close
+                lowest_since_entry = close
+                margin_cost_accrued = 0.0
+            # else position==1: hold
+
+        elif sig == -1:
+            if position == 1:
+                # Close long
+                ret = (close - entry_price) / entry_price
+                cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
+                trade = _build_trade(
+                    entry_date, row["date"], entry_price, close, ret,
+                    "signal", highest_since_entry, lowest_since_entry,
+                    entry_signal_rule, "long",
+                )
+                trade["margin_cost"] = cost
+                if margin_mode:
+                    trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trades.append(trade)
+                position = 0
+                entry_price = 0
+                entry_date = None
+                entry_signal_rule = None
+                highest_since_entry = 0.0
+                lowest_since_entry = 0.0
+                margin_cost_accrued = 0.0
+                # Try short entry (gated by trend state)
+                if margin_mode and trend_state in SHORT_TREND_GATE:
+                    position = -1
+                    entry_price = close
+                    entry_date = row["date"]
+                    entry_signal_rule = row.get("signal_rule")
+                    highest_since_entry = close
+                    lowest_since_entry = close
+                    margin_cost_accrued = 0.0
+            elif position == 0:
+                # Short entry (gated by trend state)
+                if margin_mode and trend_state in SHORT_TREND_GATE:
+                    position = -1
+                    entry_price = close
+                    entry_date = row["date"]
+                    entry_signal_rule = row.get("signal_rule")
+                    highest_since_entry = close
+                    lowest_since_entry = close
+                    margin_cost_accrued = 0.0
+            # else position==-1: hold
+
+        prev_position = position
 
     # Close any open position at the last price
-    if in_position:
+    if position != 0:
         last_row = signals_df.iloc[-1]
-        ret = (last_row["close"] - entry_price) / entry_price
-        trades.append(_build_trade(
+        if position == 1:
+            ret = (last_row["close"] - entry_price) / entry_price
+        else:
+            ret = (entry_price - last_row["close"]) / entry_price
+        cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
+        direction = "long" if position == 1 else "short"
+        trade = _build_trade(
             entry_date, last_row["date"], entry_price, last_row["close"], ret,
             "end_of_period", highest_since_entry, lowest_since_entry,
-            entry_signal_rule,
-        ))
+            entry_signal_rule, direction,
+        )
+        trade["margin_cost"] = cost
+        if margin_mode:
+            trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+        trades.append(trade)
 
     return _compute_metrics(trades, daily_returns)
 
@@ -409,7 +572,15 @@ def _compute_signal_census(signals_df, trades):
         else:
             census[rule] = {"count": 0, "type": "UNKNOWN", "win_rate": round(rt["wins"] / rt["total"] * 100, 2)}
 
-    census["totals"] = {"buy_count": buy_count, "sell_count": sell_count}
+    short_count = 0
+    for t in trades:
+        if t.get("direction") == "short":
+            short_count += 1
+            rule = t.get("entry_signal_rule")
+            if rule and rule in census:
+                census[rule]["type"] = "SHORT"
+
+    census["totals"] = {"buy_count": buy_count, "sell_count": sell_count, "short_count": short_count}
     return census
 
 
@@ -429,6 +600,7 @@ def _empty_metrics():
         "max_consecutive_losses": 0,
         "avg_win_pct": 0.0,
         "avg_loss_pct": 0.0,
+        "total_margin_cost": 0.0,
         "trades": [],
     }
 
@@ -463,20 +635,23 @@ def _compute_metrics(trades: list, daily_returns: list) -> dict:
         cagr = 0
         total_ret = 0
 
-    # Equity curve for drawdown
-    equity = [1.0]
-    for t in trades:
-        equity.append(equity[-1] * (1 + t["return"]))
-    peak = equity[0]
-    max_dd = 0.0
-    for e in equity:
-        if e > peak:
-            peak = e
-        dd = (peak - e) / peak if peak > 0 else 0
-        if dd > max_dd:
-            max_dd = dd
-
-    total_return = equity[-1] - 1.0
+    # Daily equity curve for drawdown (includes cash periods and margin costs)
+    if daily_returns:
+        equity = [1.0]
+        for dr in daily_returns:
+            equity.append(equity[-1] * (1 + dr))
+        peak = equity[0]
+        max_dd = 0.0
+        for e in equity:
+            if e > peak:
+                peak = e
+            dd = (peak - e) / peak if peak > 0 else 0
+            if dd > max_dd:
+                max_dd = dd
+        total_return = equity[-1] - 1.0
+    else:
+        max_dd = 0.0
+        total_return = 0.0
 
     # Sharpe ratio (annualized)
     dr_array = np.array(daily_returns) if daily_returns else np.array([0.0])
@@ -531,6 +706,7 @@ def _compute_metrics(trades: list, daily_returns: list) -> dict:
         "max_consecutive_losses": max_consecutive_losses,
         "avg_win_pct": round(avg_win_pct, 2) if wins else 0.0,
         "avg_loss_pct": round(avg_loss_pct, 2) if losses else 0.0,
+        "total_margin_cost": round(sum(t.get("margin_cost", 0) for t in trades), 2),
     }
 
 
@@ -574,7 +750,8 @@ def grid_search(ticker: str, start_date: str, end_date: str) -> dict:
 
 
 def walk_forward(ticker: str, start_date: str, end_date: str,
-                 thresholds: dict = None, risk_params: dict = None) -> dict:
+                 thresholds: dict = None, risk_params: dict = None,
+                 margin_mode: bool = False) -> dict:
     """Walk-forward analysis: 70% train / 30% test split.
 
     Train on first 70% of the period, evaluate on last 30%.
@@ -596,11 +773,11 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
 
     # Train period
     train_sig = generate_signals(ticker, train_start, train_end, thresholds)
-    train_metrics = simulate_trades(train_sig, risk_params)
+    train_metrics = simulate_trades(train_sig, risk_params, margin_mode=margin_mode)
 
     # Test period (out-of-sample)
     test_sig = generate_signals(ticker, test_start, test_end, thresholds)
-    test_metrics = simulate_trades(test_sig, risk_params)
+    test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
 
     # Overfitting guard
     train_sharpe = train_metrics["sharpe_ratio"]
@@ -619,7 +796,7 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
         thresholds = DEFAULT_THRESHOLDS
         risk_params = DEFAULT_RISK_PARAMS
         test_sig = generate_signals(ticker, test_start, test_end, thresholds)
-        test_metrics = simulate_trades(test_sig, risk_params)
+        test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
 
     result = {
         "train_period": {"start": train_start, "end": train_end},
@@ -693,48 +870,60 @@ def _print_summary(result):
 
     sep = "=" * 72
     sep2 = "-" * 72
+    exit_jp = {"signal": "シグナル", "trailing_stop": "損切り", "end_of_period": "期間終了",
+               "margin_expiry": "期限切れ"}
 
     # Header
     print(f"\n{sep}")
-    print(f"  BACKTEST SUMMARY")
-    print(f"  Ticker: {result['ticker']}")
-    print(f"  Period: {result['period']['start']} to {result['period']['end']}")
+    print(f"  バックテスト サマリー")
+    print(f"  銘柄: {result['ticker']}")
+    print(f"  期間: {result['period']['start']} 〜 {result['period']['end']}")
     print(sep)
 
     # Benchmark vs Strategy comparison
-    print(f"\n  BENCHMARK vs STRATEGY")
+    total_mc = sum(t.get("margin_cost", 0) for t in b.get("trades", []))
+    print(f"\n  ベンチマーク vs ストラテジー")
     print(f"  {sep2}")
-    print(f"  {'Metric':<24} {'Buy & Hold':>14} {'Strategy':>14} {'Delta':>14}")
+    print(f"  {'指標':<28} {'買い持ち':>12} {'ストラテジー':>14} {'差分':>14}")
     print(f"  {sep2}")
 
     rows_bm = [
         ("CAGR (%)", bm["cagr"], b["cagr"], b["cagr"] - bm["cagr"]),
-        ("Max Drawdown (%)", bm["max_drawdown"], b["max_drawdown"], b["max_drawdown"] - bm["max_drawdown"]),
-        ("Sharpe Ratio", bm["sharpe_ratio"], b["sharpe_ratio"], b["sharpe_ratio"] - bm["sharpe_ratio"]),
-        ("Total Return (%)", bm["total_return"], b["total_return"], b["total_return"] - bm["total_return"]),
+        ("最大DD (%)", bm["max_drawdown"], b["max_drawdown"], b["max_drawdown"] - bm["max_drawdown"]),
+        ("シャープレシオ", bm["sharpe_ratio"], b["sharpe_ratio"], b["sharpe_ratio"] - bm["sharpe_ratio"]),
+        ("総リターン (%)", bm["total_return"], b["total_return"], b["total_return"] - bm["total_return"]),
     ]
     for label, bh, st, delta in rows_bm:
         d_str = f"+{delta:.2f}" if delta > 0 else f"{delta:.2f}"
-        print(f"  {label:<24} {bh:>14.2f} {st:>14.2f} {d_str:>14}")
+        print(f"  {label:<28} {bh:>12.2f} {st:>14.2f} {d_str:>14}")
+
+    if total_mc > 0:
+        print(f"  {'信用コスト合計 (円)':<28} {'':>12} {total_mc:>14.2f}")
 
     # Signal census
     sc = b.get("signal_census", {})
-    print(f"\n  SIGNAL CENSUS")
+    print(f"\n  シグナル分布")
     print(f"  {sep2}")
     totals = sc.get("totals", {})
     buy_total = totals.get("buy_count", 0)
     sell_total = totals.get("sell_count", 0)
-    print(f"  Total signals: {buy_total + sell_total}  (BUY: {buy_total}, SELL: {sell_total})")
+    short_total = totals.get("short_count", 0)
+    parts = [f"買: {buy_total}", f"売: {sell_total}"]
+    if short_total > 0:
+        parts.append(f"空売: {short_total}")
+    print(f"  総シグナル数: {buy_total + sell_total}  ({', '.join(parts)})")
     print(f"  {sep2}")
-    print(f"  {'Rule':<24} {'Type':>6} {'Count':>7} {'Win Rate':>10}")
+    print(f"  {'ルール':<24} {'種別':>6} {'回数':>7} {'勝率':>10}")
     print(f"  {sep2}")
 
+    type_label = {"BUY": "買", "SELL": "売", "SHORT": "空売"}
     for rule_name in sorted(sc):
         if rule_name == "totals":
             continue
         info = sc[rule_name]
         wr_str = f"{info['win_rate']:.1f}%" if info["count"] > 0 else "-"
-        print(f"  {rule_name:<24} {info['type']:>6} {info['count']:>7} {wr_str:>10}")
+        type_jp = type_label.get(info["type"], "不明")
+        print(f"  {rule_name:<24} {type_jp:>6} {info['count']:>7} {wr_str:>10}")
 
     # Top 3 / Bottom 3 trades
     trades = b.get("trades", [])
@@ -743,43 +932,56 @@ def _print_summary(result):
         top3 = sorted_trades[:3]
         bot3 = sorted_trades[-3:]
 
-        print(f"\n  TOP 3 TRADES")
+        print(f"\n  上位3トレード")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<22} {'Reason':<14}")
+        print(f"  {'エントリー':<12} {'イグジット':<12} {'リターン%':>8} {'日数':>6} {'向':>3} {'ルール':<18} {'理由':<16}")
         print(f"  {sep2}")
         for t in top3:
+            d_tag = "S" if t.get("direction") == "short" else " "
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<22} {t['exit_reason']:<14}")
+                  f"{d_tag:>3} {t.get('entry_signal_rule','N/A'):<18} {exit_jp.get(t['exit_reason'], t['exit_reason']):<16}")
 
-        print(f"\n  BOTTOM 3 TRADES")
+        print(f"\n  下位3トレード")
         print(f"  {sep2}")
-        print(f"  {'Entry':<12} {'Exit':<12} {'Return%':>8} {'Days':>6} {'Rule':<22} {'Reason':<14}")
+        print(f"  {'エントリー':<12} {'イグジット':<12} {'リターン%':>8} {'日数':>6} {'向':>3} {'ルール':<18} {'理由':<16}")
         print(f"  {sep2}")
         for t in reversed(bot3):
+            d_tag = "S" if t.get("direction") == "short" else " "
             print(f"  {t['entry_date']:<12} {t['exit_date']:<12} {t['return']*100:>7.1f}% {t['holding_days']:>5}  "
-                  f"{t.get('entry_signal_rule','N/A'):<22} {t['exit_reason']:<14}")
+                  f"{d_tag:>3} {t.get('entry_signal_rule','N/A'):<18} {exit_jp.get(t['exit_reason'], t['exit_reason']):<16}")
 
     # Walk-forward verdict
-    print(f"\n  WALK-FORWARD VERDICT")
+    print(f"\n  ウォークフォワード判定")
     print(f"  {sep2}")
+    has_tuning = "tuning" in result
     overfit = wf["overfit_detected"]
-    verdict = "OVERFIT DETECTED" if overfit else "PASSED"
-    print(f"  Overfit: {verdict}")
-    print(f"  Train Sharpe: {wf['train_metrics']['sharpe_ratio']:.4f}  |  "
-          f"Test Sharpe: {wf['test_metrics']['sharpe_ratio']:.4f}")
-    print(f"  Sharpe diff: {wf['sharpe_diff_pct']:.1f}%")
-    if overfit:
-        print(f"  Reason: ", end="")
-        reasons = []
-        if wf["sharpe_diff_pct"] > 50:
-            reasons.append(f"train/test Sharpe divergence {wf['sharpe_diff_pct']:.1f}% > 50%")
-        if wf["test_metrics"]["sharpe_ratio"] < 0:
-            reasons.append(f"test Sharpe {wf['test_metrics']['sharpe_ratio']:.4f} < 0")
-        print("; ".join(reasons))
-        if wf.get("tuned_thresholds"):
-            print(f"  Tuned thresholds discarded, using defaults")
+    if has_tuning:
+        verdict = "過学習検出" if overfit else "合格"
+        print(f"  種別: パラメータ過学習判定")
+        print(f"  判定: {verdict}")
     else:
-        print(f"  No overfit detected. Tuned thresholds are reliable.")
+        verdict = "不安定" if overfit else "安定"
+        print(f"  種別: レジーム安定性")
+        print(f"  判定: {verdict}")
+    print(f"  訓練シャープ: {wf['train_metrics']['sharpe_ratio']:.4f}  |  "
+          f"テストシャープ: {wf['test_metrics']['sharpe_ratio']:.4f}")
+    print(f"  シャープ差: {wf['sharpe_diff_pct']:.1f}%")
+    if overfit:
+        if has_tuning:
+            print(f"  理由: ", end="")
+            reasons = []
+            if wf["sharpe_diff_pct"] > 50:
+                reasons.append(f"訓練/テスト シャープ乖離 {wf['sharpe_diff_pct']:.1f}% > 50%")
+            if wf["test_metrics"]["sharpe_ratio"] < 0:
+                reasons.append(f"テストシャープ {wf['test_metrics']['sharpe_ratio']:.4f} < 0")
+            print("; ".join(reasons))
+            if wf.get("tuned_thresholds"):
+                print(f"  調整閾値を破棄、デフォルト値を使用")
+        else:
+            print(f"  注記: --tune なしのため、閾値パラメータの過学習ではなくレジーム安定性を測定")
+    else:
+        if has_tuning:
+            print(f"  過学習未検出。調整閾値は信頼できます。")
 
     print(f"\n{sep}\n")
 
@@ -790,6 +992,7 @@ def main():
     parser.add_argument("--start", help="Start date YYYY-MM-DD (default: 1 year ago)")
     parser.add_argument("--end", help="End date YYYY-MM-DD (default: latest trading day)")
     parser.add_argument("--tune", action="store_true", help="Run grid search parameter tuning")
+    parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--output", "-o", help="Output JSON file path")
     args = parser.parse_args()
@@ -818,12 +1021,13 @@ def main():
 
     # Baseline with default thresholds
     sig_df = generate_signals(args.ticker, start_date, end_date)
-    baseline = simulate_trades(sig_df)
+    margin_mode = args.margin
+    baseline = simulate_trades(sig_df, margin_mode=margin_mode)
     baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
     result["baseline"] = baseline
 
     # Walk-forward analysis
-    wf = walk_forward(args.ticker, start_date, end_date)
+    wf = walk_forward(args.ticker, start_date, end_date, margin_mode=margin_mode)
     result["walk_forward"] = wf
 
     if args.tune:
@@ -834,7 +1038,7 @@ def main():
         if tune_result["grid_results"]:
             best = tune_result["grid_results"][0]
             result["best_thresholds"] = best["thresholds"]
-            wf_tuned = walk_forward(args.ticker, start_date, end_date, best["thresholds"])
+            wf_tuned = walk_forward(args.ticker, start_date, end_date, best["thresholds"], margin_mode=margin_mode)
             result["walk_forward_tuned"] = wf_tuned
 
     output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
