@@ -36,6 +36,23 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 
 **非営業日（土日祝）の実行について:** yfinance は直近営業日の終値を返すため、非営業日でもパイプライン全体のテスト実行が可能。データ鮮度は `## Macro Context` に明示される。データ鮮度は「前営業日終値基準」として分析に反映する。
 
+### Step 1.5: 注目銘柄（Watchlist）の読み込み
+
+未保有だがエントリタイミングを狙う注目銘柄を `watchlist.yaml` で管理する:
+
+```bash
+cat ~/code/playground/stock-price-analyze/watchlist.yaml
+```
+
+フォーマット:
+```yaml
+- ticker: 7203.T       # 必須（.T付き）
+  target_entry: 2700   # 任意: 目標エントリー価格
+  note: トヨタ自動車    # 任意: メモ
+```
+
+watchlist.yaml が存在する場合、保有銘柄と同じ分析パイプライン（シグナル+バックテスト）で評価し、レポートの「注目銘柄」セクションに出力する。
+
 ### Step 2: 数値シグナル検出（スクリプト実行）
 
 全保有銘柄のテクニカル指標・シグナルをPythonスクリプトで一括計算する:
@@ -47,7 +64,7 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 `run_signal_engine` ラッパースクリプトが自動的に適切なPythonを検出する。明示的に指定する場合は `MORNING_CHECK_PYTHON` 環境変数にPythonパスを設定する。
 
 スクリプトは以下を実行する:
-- 全保有銘柄の17指標（RSI, MACD, Bollinger Bands, ATR, MFI 等）を一括計算
+- 全保有銘柄 + 注目銘柄の17指標（RSI, MACD, Bollinger Bands, ATR, MFI 等）を一括計算
 - ルールベースのシグナル判定（BUY/SELL/HOLD）
 - マクロコンテキスト取得（VIX, S&P500, USD/JPY, 米10年債）
 - アナリスト目標株価乖離率計算
@@ -70,6 +87,11 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 # 全保有銘柄の過去3年バックテストサマリー
 for t in 1515.T 285A.T 7013.T 8473.T 7974.T 4661.T 5803.T; do
   ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+    ~/.claude/skills/stock-advisor/scripts/backtest_engine.py --ticker "$t" --strategy all
+done
+# 注目銘柄も同様にバックテスト
+for t in $(grep ticker: ~/code/playground/stock-price-analyze/watchlist.yaml 2>/dev/null | awk '{print $3}'); do
+  ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
     ~/.claude/skills/stock-advisor/scripts/backtest_engine.py --ticker "$t" --summary
 done
 ```
@@ -90,7 +112,8 @@ done
 - マクロコンテキスト（VIX, S&P500, USD/JPY, 米10年債）
 - アナリスト目標株価乖離率
 - 信用ポジションの期限
-- 口座ルール（最大ポジション20%、1トレードリスク2%）
+- 口座ルール（新規ポジション上限20%、1トレードリスク2%）
+- 注目銘柄のエントリ判断（watchlist.yaml）
 
 **マクロ環境の読み方:**
 
@@ -167,6 +190,19 @@ done
 **短期 (1-4週):** [見通し]
 **中期 (1-6ヶ月):** [見通し]
 **所見:** [判断根拠 2-3行。シグナル・アナリスト評価・トレンドを踏まえた具体的な指示]
+
+---
+
+## 注目銘柄（エントリ判断）
+
+| Ticker | 銘柄名 | 現在値 | 目標ENT | 乖離 | シグナル | BT Sharpe | 判断 |
+|--------|--------|--------|---------|------|---------|-----------|------|
+| 7203.T | トヨタ | ¥2,850 | ¥2,700 | -5.3% | trend_following | 1.27 | 待機 |
+| 8306.T | 三菱UFJ | ¥1,580 | ¥1,500 | -5.1% | — | 0.82 | 待機 |
+
+- **買い時**: 割安 + シグナルあり + BT Sharpe > 0.5
+- **待機**: 割安だがシグナルなし、またはBT Sharpe < 0.5
+- **見送り**: 割高または BT Sharpe < 0
 
 ---
 
