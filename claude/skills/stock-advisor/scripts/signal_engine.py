@@ -565,7 +565,8 @@ def main():
     # Merge watchlist tickers
     portfolio_tickers = set(tickers)
     watchlist_tickers = set()
-    watchlist_path = os.path.expanduser("~/code/playground/stock-price-analyze/watchlist.yaml")
+    watchlist_path = os.environ.get("WATCHLIST_PATH",
+        os.path.join(os.path.dirname(SCRIPT_DIR), "watchlist.yaml"))
     if os.path.exists(watchlist_path):
         with open(watchlist_path) as f:
             wl = yaml.safe_load(f)

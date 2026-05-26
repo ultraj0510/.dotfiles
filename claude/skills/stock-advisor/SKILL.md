@@ -67,9 +67,9 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 未保有だがエントリタイミングを狙う注目銘柄を `watchlist.yaml` で管理する:
 
 ```bash
-if [ -f ~/code/playground/stock-price-analyze/watchlist.yaml ]; then
+if [ -f ~/.claude/skills/stock-advisor/watchlist.yaml ]; then
   echo "Watchlist found"
-  cat ~/code/playground/stock-price-analyze/watchlist.yaml
+  cat ~/.claude/skills/stock-advisor/watchlist.yaml
 else
   echo "[INFO] watchlist.yaml が存在しません。注目銘柄分析はスキップします。"
 fi
@@ -133,7 +133,7 @@ done
 # 注目銘柄も同様にバックテスト
 for t in $(python3 -c "
 import yaml, os
-path = os.path.expanduser('~/code/playground/stock-price-analyze/watchlist.yaml')
+path = os.path.expanduser('~/.claude/skills/stock-advisor/watchlist.yaml')
 if os.path.exists(path):
     with open(path) as f:
         wl = yaml.safe_load(f)
