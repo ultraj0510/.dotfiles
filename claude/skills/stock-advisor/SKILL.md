@@ -32,7 +32,7 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 
 使用する Python はラッパースクリプトが自動検出する（TradingAgents venv → stock-price-analyze venv → システム python3）。強制指定する場合は `MORNING_CHECK_PYTHON` 環境変数に Python パスを設定する。
 
-**非営業日（土日祝）の実行について:** yfinance は直近営業日の終値を返すため、非営業日でもパイプライン全体のテスト実行が可能。データ鮮度は `## Macro Context` に明示される。データ鮮度は「前営業日終値基準」として分析に反映する。
+**非営業日の判定:** signal_engine.py の出力に含まれる `weekday_ja`（曜日）と `is_trading_day`（取引日判定）を参照すること。曜日を推測せず、必ず JSON 出力の値を使用する。yfinance は直近営業日の終値を返すため、非営業日でもパイプライン全体のテスト実行が可能。データ鮮度は `## Macro Context` に明示される。
 
 ### Step 1.5: 注目銘柄（Watchlist）の読み込み
 
@@ -45,9 +45,14 @@ cat ~/code/playground/stock-price-analyze/watchlist.yaml
 フォーマット:
 ```yaml
 - ticker: 7203.T       # 必須（.T付き）
-  target_entry: 2700   # 任意: 目標エントリー価格
+  target_entry: 2700   # 任意: 目標エントリー価格（未設定時は signal_engine が自動計算）
+  locked: true         # 任意: true で target_entry の自動更新を停止
   note: トヨタ自動車    # 任意: メモ
 ```
+
+**target_entry の自動更新:**
+- `target_entry` が未設定 または `locked` が未設定/false → signal_engine.py の `suggested_entry` 値を採用（`max(BB_lower, analyst_target_mean * 0.75)`）
+- `locked: true` が明示されている → `target_entry` を手動固定値として使用
 
 watchlist.yaml が存在する場合、保有銘柄と同じ分析パイプライン（シグナル+バックテスト）で評価し、レポートの「注目銘柄」セクションに出力する。
 
@@ -193,14 +198,15 @@ done
 
 ## 注目銘柄（エントリ判断）
 
-| Ticker | 銘柄名 | 現在値 | 目標ENT | 乖離 | シグナル | BT Sharpe | 判断 |
-|--------|--------|--------|---------|------|---------|-----------|------|
-| 7203.T | トヨタ | ¥2,850 | ¥2,700 | -5.3% | trend_following | 1.27 | 待機 |
-| 8306.T | 三菱UFJ | ¥1,580 | ¥1,500 | -5.1% | — | 0.82 | 待機 |
+| Ticker | 銘柄名 | 現在値 | 目標ENT | 乖離 | シグナル | Factor Z | 判断 |
+|--------|--------|--------|---------|------|---------|----------|------|
+| 7203.T | トヨタ | ¥2,850 | ¥2,700 | -5.3% | trend_following | +0.30 | 待機 |
+| 8306.T | 三菱UFJ | ¥1,580 | ¥1,500 | -5.1% | — | +0.47 | 待機 |
 
-- **買い時**: 割安 + シグナルあり + BT Sharpe > 0.5
-- **待機**: 割安だがシグナルなし、またはBT Sharpe < 0.5
-- **見送り**: 割高または BT Sharpe < 0
+- **目標ENT**: `suggested_entry`（signal_engine 自動計算）または `target_entry`（locked: true で手動固定）
+- **買い時**: 割安 + シグナルあり + Factor Z > 0.3
+- **待機**: 割安だがシグナルなし、または Factor Z が NEUTRAL
+- **見送り**: 割高または Factor Z < -0.3
 
 ---
 

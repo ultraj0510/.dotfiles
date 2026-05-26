@@ -31,6 +31,8 @@ from data_utils import (
 
 logger = logging.getLogger(__name__)
 
+WEEKDAY_JP = ["月", "火", "水", "木", "金", "土", "日"]
+
 # All 17 indicators: 13 stockstats + 4 custom
 STOCKSTATS_INDICATORS = [
     "close_50_sma", "close_200_sma", "close_10_ema",
@@ -418,6 +420,28 @@ def compute_trend_state(indicators: dict) -> str:
         return "ranging"
 
 
+def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
+    """Compute suggested entry price from BB lower and analyst target.
+
+    Formula: max(BB_lower, analyst_target_mean * 0.75)
+    Returns None when neither value is available.
+    """
+    bb_lower = _safe_float(indicators.get("boll_lb"))
+    target_mean = analyst.get("target_mean")
+    if target_mean is not None:
+        target_mean = _safe_float(target_mean)
+
+    candidates = []
+    if bb_lower is not None:
+        candidates.append(bb_lower)
+    if target_mean is not None:
+        candidates.append(target_mean * 0.75)
+
+    if not candidates:
+        return None
+    return round(max(candidates), 2)
+
+
 def analyze_ticker(ticker: str, date_str: str) -> dict:
     """Run full analysis for a single ticker."""
     try:
@@ -442,6 +466,7 @@ def analyze_ticker(ticker: str, date_str: str) -> dict:
         return {
             "ticker": ticker,
             "date": date_str,
+            "weekday_ja": WEEKDAY_JP[datetime.strptime(date_str, "%Y-%m-%d").weekday()],
             "is_trading_day": is_trading_day(date_str),
             "trend_state": trend_state,
             "indicators": indicators,
@@ -449,6 +474,7 @@ def analyze_ticker(ticker: str, date_str: str) -> dict:
             "score": score,
             "macro": macro,
             "analyst": analyst,
+            "suggested_entry": compute_suggested_entry(indicators, analyst),
         }
     except Exception as e:
         logger.exception("Failed to analyze %s", ticker)
