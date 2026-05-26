@@ -584,6 +584,68 @@ def _parse_sbi_account(html: str) -> dict[str, float]:
     return account
 
 
+def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
+    """Merge SBI holdings into existing, preserving manual metadata.
+
+    Merge key: (ticker, position_type).
+    Sub-key for spot: account_type. Sub-key for margin: open_date.
+    Holdings in existing but not in SBI are removed (sold).
+    Returns None if SBI data appears incomplete (<50% of existing).
+    """
+    # Safety guard: if SBI returns way fewer holdings than existing
+    if len(sbi_holdings) < len(existing) * 0.5:
+        print(
+            f"[WARN] SBI holdings ({len(sbi_holdings)}) < 50% of existing "
+            f"({len(existing)}). Merge aborted to prevent data loss.",
+            file=sys.stderr,
+        )
+        return None
+
+    # Index existing holdings by merge key
+    existing_index: dict[tuple, list[dict]] = {}
+    for h in existing:
+        key = (h.get("ticker"), h.get("position_type", "現物"))
+        existing_index.setdefault(key, []).append(h)
+
+    merged = []
+    seen_keys: dict[tuple, int] = {}  # (key) -> count consumed
+
+    for sbi_h in sbi_holdings:
+        key = (sbi_h.get("ticker"), sbi_h.get("position_type", "現物"))
+        existing_entries = existing_index.get(key, [])
+
+        if not existing_entries:
+            # New holding from SBI
+            merged.append(sbi_h)
+            continue
+
+        idx = seen_keys.get(key, 0)
+        if idx < len(existing_entries):
+            old = existing_entries[idx]
+            seen_keys[key] = idx + 1
+            # Update qty/price from SBI, preserve metadata
+            old["quantity"] = sbi_h["quantity"]
+            old["cost_price"] = sbi_h.get("cost_price", old.get("cost_price"))
+            old["current_price"] = sbi_h.get("current_price")
+            old["name"] = sbi_h.get("name", old.get("name"))
+            merged.append(old)
+        else:
+            # More SBI entries than existing for this key — add new
+            merged.append(sbi_h)
+
+    # Delete entries in existing but not in SBI (sold)
+    sbi_keys = {(h.get("ticker"), h.get("position_type", "現物")) for h in sbi_holdings}
+    removed = 0
+    for key, entries in existing_index.items():
+        if key not in sbi_keys:
+            removed += len(entries)
+
+    if removed:
+        print(f"[OK] SBIに存在しない{removed}件の保有を削除しました", file=sys.stderr)
+
+    return merged
+
+
 def sync_from_sbi(portfolio_path: str) -> bool:
     """Sync holdings and account data from SBI. Returns True on success."""
     cookie = _load_sbi_cookie()
@@ -632,11 +694,20 @@ def sync_from_sbi(portfolio_path: str) -> bool:
     existing_account["buying_power"] = account.get("buying_power") or existing_account.get("buying_power")
     existing_account["margin_principal"] = account.get("margin_principal") or existing_account.get("margin_principal")
 
+    # Merge holdings: SBI is truth for qty/price; preserve manual metadata
+    existing_holdings = existing.get("holdings", [])
+    if existing_holdings:
+        merged = _merge_holdings(existing_holdings, holdings)
+        if merged is None:
+            return False
+    else:
+        merged = holdings
+
     portfolio = {
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "last_sync_source": "SBI",
         "account": existing_account,
-        "holdings": holdings,
+        "holdings": merged,
     }
 
     os.makedirs(os.path.dirname(portfolio_path), exist_ok=True)
