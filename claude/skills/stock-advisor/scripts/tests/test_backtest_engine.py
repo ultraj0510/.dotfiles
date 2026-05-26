@@ -65,3 +65,30 @@ def test_empty_metrics_structure():
                 "total_margin_cost", "trades"]
     for key in required:
         assert key in m, f"Missing key: {key}"
+
+
+def test_strategy_mode_trend():
+    """trend mode: oversold_reversal never fires."""
+    sig = generate_signals("1515.T", "2025-05-25", "2026-05-25", strategy_mode="trend")
+    assert len(sig) > 0
+    buy_signals = sig[sig["signal"] == 1]
+    oversold = buy_signals[buy_signals["signal_rule"] == "oversold_reversal"]
+    assert len(oversold) == 0, "trend mode should not produce oversold_reversal"
+
+
+def test_strategy_mode_contrarian():
+    """contrarian mode: trend_following never fires."""
+    sig = generate_signals("1515.T", "2025-05-25", "2026-05-25", strategy_mode="contrarian")
+    assert len(sig) > 0
+    buy_signals = sig[sig["signal"] == 1]
+    trend = buy_signals[buy_signals["signal_rule"] == "trend_following"]
+    assert len(trend) == 0, "contrarian mode should not produce trend_following"
+
+
+def test_strategy_mode_default():
+    """default mode produces both types of signals."""
+    sig = generate_signals("1515.T", "2025-05-25", "2026-05-25", strategy_mode="default")
+    assert len(sig) > 0
+    rules = set(sig["signal_rule"].dropna())
+    # Should see a mix of signal types
+    assert len(rules) > 2, f"Expected >2 distinct rules, got {rules}"
