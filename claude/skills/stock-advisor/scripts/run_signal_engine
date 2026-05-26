@@ -37,4 +37,13 @@ find_python() {
 }
 
 PYTHON="$(find_python)"
+
+if ! "$PYTHON" -c "import pandas; import yfinance; import stockstats; import jpholiday" >/dev/null 2>&1
+then
+  echo "ERROR: stock-advisor Python dependencies are not installed for: $PYTHON" >&2
+  echo "Run: $SCRIPT_DIR/setup_env" >&2
+  echo "Then retry: $SCRIPT_DIR/run_signal_engine --help" >&2
+  exit 1
+fi
+
 exec "$PYTHON" "$SCRIPT_DIR/signal_engine.py" "$@"

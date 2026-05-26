@@ -1,3 +1,10 @@
 .dotfiles.code-workspace
 .omc/
 projects/deep-code/
+.env
+.cookie
+.tokens.json
+__pycache__/
+*.py[cod]
+.venv/
+cache/

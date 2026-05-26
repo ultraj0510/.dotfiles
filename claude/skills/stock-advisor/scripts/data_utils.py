@@ -71,12 +71,12 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
 # Changes:
 #   - config.get_config() replaced with module constant CACHE_DIR
 #   - CSV cache write uses tempfile + shutil.move for atomicity
-def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
+def load_ohlcv(symbol: str, curr_date: str, force_refresh: bool = False) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 5 years of data up to today and caches per symbol. On
-    subsequent calls the cache is reused. Rows after curr_date are
-    filtered out so backtests never see future prices.
+    Downloads 5 years of data up to today and caches per symbol. Cache has a
+    24h TTL — after expiry a refresh is attempted, falling back to stale cache
+    on failure. Pass force_refresh=True to bypass TTL and force re-download.
     """
     curr_date_dt = pd.to_datetime(curr_date)
 
@@ -92,7 +92,33 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     )
 
     if os.path.exists(data_file):
-        data = pd.read_csv(data_file, on_bad_lines="skip")
+        cache_age = time.time() - os.path.getmtime(data_file)
+        if cache_age < 86400 and not force_refresh:
+            data = pd.read_csv(data_file, on_bad_lines="skip")
+        else:
+            # TTL expired or force_refresh — try re-download
+            try:
+                data = yf_retry(lambda: yf.download(
+                    symbol,
+                    start=start_str,
+                    end=end_str,
+                    multi_level_index=False,
+                    progress=False,
+                    auto_adjust=True,
+                ))
+                data = data.reset_index()
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".csv", delete=False, dir=CACHE_DIR,
+                )
+                try:
+                    data.to_csv(tmp.name, index=False)
+                    shutil.move(tmp.name, data_file)
+                finally:
+                    if os.path.exists(tmp.name):
+                        os.unlink(tmp.name)
+            except Exception:
+                # Fallback: use stale cache instead of failing
+                data = pd.read_csv(data_file, on_bad_lines="skip")
     else:
         data = yf_retry(lambda: yf.download(
             symbol,
