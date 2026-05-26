@@ -1295,11 +1295,23 @@ def _print_summary(result):
     # Strategy comparison (US-003)
     strategy_comparison = result.get("strategy_comparison")
     if strategy_comparison:
-        ver_jp_sc = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足"}
+        ver_jp_sc = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習",
+                     "data_insufficient": "データ不足", "no_trades": "取引なし"}
         print(f"\n  戦略比較")
         print(f"  {sep2}")
         print(f"  {'戦略':<20} {'取引数':>7} {'勝率':>8} {'Sharpe':>8} {'WF判定':>10}")
         print(f"  {sep2}")
+        best_sm = None
+        best_sh = float('-inf')
+        for sm in ["default", "trend", "contrarian"]:
+            sc = strategy_comparison.get(sm)
+            if sc is None:
+                continue
+            tc = sc["baseline"].get("trade_count", 0)
+            sh = sc["baseline"].get("sharpe_ratio", 0) or 0
+            if tc > 0 and sh > best_sh:
+                best_sh = sh
+                best_sm = sm
         for sm in ["default", "trend", "contrarian"]:
             sc = strategy_comparison.get(sm)
             if sc is None:
@@ -1308,11 +1320,19 @@ def _print_summary(result):
             wf_sc = sc["walk_forward"]
             consensus_sc = wf_sc.get("consensus", {})
             tc = b.get("trade_count", 0)
-            wr = b.get("win_rate", 0.0)
             sh = b.get("sharpe_ratio", 0.0)
+            if tc <= 2:
+                wr_str = "     -"
+            else:
+                wr_str = f"{b.get('win_rate', 0.0):>6.1f}%"
             verdict = ver_jp_sc.get(consensus_sc.get("verdict", ""), consensus_sc.get("verdict", ""))
             label = sc.get("label", sm)
-            print(f"  {label:<20} {tc:>7} {wr:>6.1f}% {sh:>8.3f} {verdict:>10}")
+            star = " ★" if sm == best_sm and tc > 0 else ""
+            print(f"  {label:<20} {tc:>7} {wr_str} {sh:>8.3f} {verdict:>10}{star}")
+        if best_sm and best_sh > 0:
+            best_label = strategy_comparison.get(best_sm, {}).get("label", best_sm)
+            print(f"  {sep2}")
+            print(f"  推奨: {best_label} (Sharpe {best_sh:.3f})")
         print(f"  {sep2}")
 
     # Rolling window summary (A-US-001)
