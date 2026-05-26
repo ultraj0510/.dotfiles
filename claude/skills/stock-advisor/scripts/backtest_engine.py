@@ -1035,13 +1035,17 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows]))
     overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
 
-    half = n_windows // 2
-    if overfit_count > half:
-        verdict = "overfit"
-    elif std_sharpe < 0.5:
-        verdict = "robust"
+    total_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
+    if total_trades == 0:
+        verdict = "no_trades"
     else:
-        verdict = "unstable"
+        half = n_windows // 2
+        if overfit_count > half:
+            verdict = "overfit"
+        elif std_sharpe < 0.5:
+            verdict = "robust"
+        else:
+            verdict = "unstable"
 
     # Backward compatibility shim: legacy keys from window 0
     w0 = rolling_windows[0]
@@ -1327,7 +1331,7 @@ def _print_summary(result):
                   f"{rw['sharpe_diff_pct']:>7.1f}% {of_str:>8}")
         print(f"  {sep2}")
         cs = consensus
-        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足"}
+        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足", "no_trades": "取引なし"}
         print(f"  コンセンサス: 平均シャープ {cs['mean_sharpe']:.4f} "
               f"(σ={cs['std_sharpe']:.4f})  "
               f"最大DD {cs['mean_maxdd']:.1f}% 勝率 {cs['mean_win_rate']:.1f}%  "
