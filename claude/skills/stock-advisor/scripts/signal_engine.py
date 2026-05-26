@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 import jpholiday
+import yaml
 
 from data_utils import (
     _CUSTOM_INDICATORS,
@@ -442,32 +443,49 @@ def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
     return round(max(candidates), 2)
 
 
-def analyze_ticker(ticker: str, date_str: str) -> dict:
-    """Run full analysis for a single ticker."""
+def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> dict:
+    """Run full analysis for a single ticker.
+
+    Retries up to 10 previous trading days when indicator data is unavailable
+    for the requested date (e.g. today's data hasn't arrived yet).
+    """
     try:
-        indicators = {}
-        for ind in ALL_INDICATORS:
-            bulk = _get_stock_stats_bulk(ticker, ind, date_str)
-            indicators[ind] = bulk.get(date_str, "N/A")
+        # Refresh cache once before indicator computation if requested
+        if force_refresh:
+            load_ohlcv(ticker, date_str, force_refresh=True)
 
-        # Also get latest close for BB proximity check
-        ohlcv = load_ohlcv(ticker, date_str)
-        if not ohlcv.empty:
-            latest = ohlcv.iloc[-1]
-            indicators["close"] = str(latest.get("Close", "N/A"))
-            indicators["date"] = str(latest.get("Date", date_str))
-
+        # Macro and analyst data are date-independent
         macro = fetch_macro_context()
         analyst = fetch_analyst_target(ticker)
+
+        # Date fallback: retry up to 10 days for indicator data
+        working_date = date_str
+        for attempt in range(10):
+            indicators = {}
+            for ind in ALL_INDICATORS:
+                bulk = _get_stock_stats_bulk(ticker, ind, working_date)
+                indicators[ind] = bulk.get(working_date, "N/A")
+
+            ohlcv = load_ohlcv(ticker, working_date)
+            if not ohlcv.empty:
+                latest = ohlcv.iloc[-1]
+                indicators["close"] = str(latest.get("Close", "N/A"))
+                indicators["date"] = str(latest.get("Date", working_date))
+
+            if indicators.get("rsi") != "N/A" and indicators.get("close_50_sma") != "N/A":
+                break
+
+            working_date = (datetime.strptime(working_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+
         signals = classify_signals(indicators, macro, analyst)
         score = compute_overall_score(indicators, signals)
         trend_state = compute_trend_state(indicators)
 
         return {
             "ticker": ticker,
-            "date": date_str,
-            "weekday_ja": WEEKDAY_JP[datetime.strptime(date_str, "%Y-%m-%d").weekday()],
-            "is_trading_day": is_trading_day(date_str),
+            "date": working_date,
+            "weekday_ja": WEEKDAY_JP[datetime.strptime(working_date, "%Y-%m-%d").weekday()],
+            "is_trading_day": is_trading_day(working_date),
             "trend_state": trend_state,
             "indicators": indicators,
             "signals": signals,
@@ -496,7 +514,18 @@ def _safe_float(val):
 
 
 def load_default_tickers() -> list:
-    """Load ticker list from default_tickers.txt. One ticker per line."""
+    """Load ticker list from portfolio.yaml, falling back to default_tickers.txt."""
+    portfolio_path = os.environ.get("PORTFOLIO_PATH",
+        os.path.expanduser("~/code/playground/stock-price-analyze/portfolio.yaml"))
+    tickers = set()
+    if os.path.exists(portfolio_path):
+        with open(portfolio_path) as f:
+            data = yaml.safe_load(f) or {}
+        for h in data.get("holdings", []):
+            tickers.add(h["ticker"])
+    if tickers:
+        return sorted(tickers)
+    # Fallback to txt file
     tickers = []
     if os.path.exists(DEFAULT_TICKERS_FILE):
         with open(DEFAULT_TICKERS_FILE) as f:
@@ -512,11 +541,13 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ticker", help="Single ticker to analyze")
     group.add_argument("--tickers", help="Comma-separated ticker list")
-    group.add_argument("--all", action="store_true", help="Analyze all tickers in default_tickers.txt")
+    group.add_argument("--all", action="store_true", help="Analyze all portfolio + watchlist tickers")
     parser.add_argument("--output", "-o", help="Output JSON file path (default: stdout)")
     parser.add_argument("--date", help="Reference date YYYY-MM-DD (default: latest trading day)")
     parser.add_argument("--factor-mode", action="store_true",
                         help="Compute factor scores alongside binary signals")
+    parser.add_argument("--refresh", action="store_true",
+                        help="Force re-download from yfinance (bypass cache TTL)")
     args = parser.parse_args()
 
     date_str = args.date or get_latest_trading_day()
@@ -528,8 +559,21 @@ def main():
     else:
         tickers = load_default_tickers()
         if not tickers:
-            print("ERROR: --all specified but default_tickers.txt is empty or missing", file=sys.stderr)
+            print("ERROR: --all specified but no tickers found (check portfolio.yaml or default_tickers.txt)", file=sys.stderr)
             sys.exit(1)
+
+    # Merge watchlist tickers
+    portfolio_tickers = set(tickers)
+    watchlist_tickers = set()
+    watchlist_path = os.path.expanduser("~/code/playground/stock-price-analyze/watchlist.yaml")
+    if os.path.exists(watchlist_path):
+        with open(watchlist_path) as f:
+            wl = yaml.safe_load(f)
+        if wl:
+            watchlist_tickers = {w["ticker"] for w in wl if w.get("ticker")}
+            for t in sorted(watchlist_tickers):
+                if t not in tickers:
+                    tickers.append(t)
 
     results = {
         "generated_at": datetime.now().isoformat(),
@@ -540,7 +584,8 @@ def main():
     }
 
     for ticker in tickers:
-        result = analyze_ticker(ticker.strip(), date_str)
+        result = analyze_ticker(ticker.strip(), date_str, force_refresh=args.refresh)
+        result["is_watchlist"] = ticker in watchlist_tickers and ticker not in portfolio_tickers
         if args.factor_mode:
             try:
                 from factor_engine import compute_factors, classify_factor_signal
