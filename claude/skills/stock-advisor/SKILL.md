@@ -196,3 +196,33 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 ```
 
 現金残高（`available_cash`）は自動更新されないため、手動で `portfolio.yaml` を編集するよう案内する。
+
+## trade_advisor.py（個別銘柄トレードアドバイス）
+
+保有ポジションの取得単価・株数・モード（現物/信用）とテクニカル分析・バックテスト結果を統合し、個別銘柄の取引判断（STRONG_BUY/BUY_MORE/HOLD/REDUCE/SELL）をスコアリングで提示する。
+
+```bash
+~/.claude/skills/stock-advisor/scripts/trade_advisor.py \
+  --ticker 7203.T --cost-basis 2800 --shares 100 --mode spot
+```
+
+### 引数
+
+| 引数 | 必須 | 説明 |
+|------|------|------|
+| `--ticker` | 必須 | 証券コード（.T 付き） |
+| `--cost-basis` | 必須 | 1株あたりの取得単価（円） |
+| `--shares` | 必須 | 保有株式数 |
+| `--mode` | 任意 | `spot`（現物, デフォルト）または `margin`（信用） |
+| `--target-years` | 任意 | バックテスト期間（年）, デフォルト1年 |
+| `--portfolio-value` | 任意 | ポートフォリオ評価額合計（円）, 指定するとポジションサイズリスクを計算 |
+| `--output` / `-o` | 任意 | JSON出力ファイルパス |
+
+### 出力形式
+
+JSON出力には以下のセクションが含まれる:
+- `position`: 時価評価額・含み損益
+- `current_signals`: 現在のテクニカルシグナル一覧
+- `signal_win_rates`: シグナルルール別の過去勝率（1時間キャッシュ付き）
+- `advisory`: スコアリング結果（opinion, confidence, target_price, stop_loss, リスクリワード比）
+- `risk_assessment`: ポジションサイズ・集中・ボラティリティのリスク評価
