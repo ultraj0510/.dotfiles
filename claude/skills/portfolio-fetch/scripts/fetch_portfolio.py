@@ -628,6 +628,7 @@ def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
             old["cost_price"] = sbi_h.get("cost_price", old.get("cost_price"))
             old["current_price"] = sbi_h.get("current_price")
             old["name"] = sbi_h.get("name", old.get("name"))
+            old["account_type"] = sbi_h.get("account_type", old.get("account_type"))
             merged.append(old)
         else:
             # More SBI entries than existing for this key — add new
