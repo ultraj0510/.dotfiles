@@ -301,8 +301,8 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
 
 # --- SBI sync ---
 
-_SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID"
-_SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID"
+_SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
+_SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETacR001Control&_ActionID=DefaultAID&getFlg=on"
 _SBI_TICKER_MAP = {
     "ＮＦ金価格": "1328.T",
     "日鉄鉱": "1515.T",
@@ -315,13 +315,30 @@ _SBI_TICKER_MAP = {
 
 
 def _load_sbi_cookie() -> str | None:
-    """SBI_COOKIE env var or .cookie file."""
+    """SBI_COOKIE env var or .cookie file.
+
+    SBI_COOKIE can be a JSON array of cookie objects or a raw cookie string.
+    Returns a standard cookie header string (name=value; name=value).
+    """
     env_val = os.environ.get("SBI_COOKIE", "").strip()
     if env_val:
+        if env_val.startswith("["):
+            try:
+                cookies = json.loads(env_val)
+                return "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+            except (json.JSONDecodeError, KeyError):
+                pass
         return env_val
     cookie_path = os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")
     if os.path.isfile(cookie_path):
-        return Path(cookie_path).read_text().strip()
+        raw = Path(cookie_path).read_text().strip()
+        if raw.startswith("["):
+            try:
+                cookies = json.loads(raw)
+                return "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+            except (json.JSONDecodeError, KeyError):
+                pass
+        return raw
     return None
 
 
@@ -339,7 +356,14 @@ def _fetch_sbi_page(cookie: str) -> str | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
+            status = resp.getcode()
             raw = resp.read()
+            if status != 200:
+                print(f"[WARN] SBI returned HTTP {status}", file=sys.stderr)
+                return None
+            if len(raw) < 1000:
+                print(f"[WARN] SBI response too small ({len(raw)} bytes) — likely login page", file=sys.stderr)
+                return None
             for enc in ["cp932", "shift_jis", "utf-8"]:
                 try:
                     return raw.decode(enc)
@@ -560,6 +584,69 @@ def _parse_sbi_account(html: str) -> dict[str, float]:
     return account
 
 
+def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
+    """Merge SBI holdings into existing, preserving manual metadata.
+
+    Merge key: (ticker, position_type).
+    Sub-key for spot: account_type. Sub-key for margin: open_date.
+    Holdings in existing but not in SBI are removed (sold).
+    Returns None if SBI data appears incomplete (<50% of existing).
+    """
+    # Safety guard: if SBI returns way fewer holdings than existing
+    if len(sbi_holdings) < len(existing) * 0.5:
+        print(
+            f"[WARN] SBI holdings ({len(sbi_holdings)}) < 50% of existing "
+            f"({len(existing)}). Merge aborted to prevent data loss.",
+            file=sys.stderr,
+        )
+        return None
+
+    # Index existing holdings by merge key
+    existing_index: dict[tuple, list[dict]] = {}
+    for h in existing:
+        key = (h.get("ticker"), h.get("position_type", "現物"))
+        existing_index.setdefault(key, []).append(h)
+
+    merged = []
+    seen_keys: dict[tuple, int] = {}  # (key) -> count consumed
+
+    for sbi_h in sbi_holdings:
+        key = (sbi_h.get("ticker"), sbi_h.get("position_type", "現物"))
+        existing_entries = existing_index.get(key, [])
+
+        if not existing_entries:
+            # New holding from SBI
+            merged.append(sbi_h)
+            continue
+
+        idx = seen_keys.get(key, 0)
+        if idx < len(existing_entries):
+            old = existing_entries[idx]
+            seen_keys[key] = idx + 1
+            # Update qty/price from SBI, preserve metadata
+            old["quantity"] = sbi_h["quantity"]
+            old["cost_price"] = sbi_h.get("cost_price", old.get("cost_price"))
+            old["current_price"] = sbi_h.get("current_price")
+            old["name"] = sbi_h.get("name", old.get("name"))
+            old["account_type"] = sbi_h.get("account_type", old.get("account_type"))
+            merged.append(old)
+        else:
+            # More SBI entries than existing for this key — add new
+            merged.append(sbi_h)
+
+    # Delete entries in existing but not in SBI (sold)
+    sbi_keys = {(h.get("ticker"), h.get("position_type", "現物")) for h in sbi_holdings}
+    removed = 0
+    for key, entries in existing_index.items():
+        if key not in sbi_keys:
+            removed += len(entries)
+
+    if removed:
+        print(f"[OK] SBIに存在しない{removed}件の保有を削除しました", file=sys.stderr)
+
+    return merged
+
+
 def sync_from_sbi(portfolio_path: str) -> bool:
     """Sync holdings and account data from SBI. Returns True on success."""
     cookie = _load_sbi_cookie()
@@ -608,13 +695,23 @@ def sync_from_sbi(portfolio_path: str) -> bool:
     existing_account["buying_power"] = account.get("buying_power") or existing_account.get("buying_power")
     existing_account["margin_principal"] = account.get("margin_principal") or existing_account.get("margin_principal")
 
+    # Merge holdings: SBI is truth for qty/price; preserve manual metadata
+    existing_holdings = existing.get("holdings", [])
+    if existing_holdings:
+        merged = _merge_holdings(existing_holdings, holdings)
+        if merged is None:
+            return False
+    else:
+        merged = holdings
+
     portfolio = {
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "last_sync_source": "SBI",
         "account": existing_account,
-        "holdings": holdings,
+        "holdings": merged,
     }
 
+    os.makedirs(os.path.dirname(portfolio_path), exist_ok=True)
     with open(portfolio_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(portfolio, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
@@ -631,9 +728,19 @@ def main():
     portfolio_path = os.path.join(_STOCK_ANALYZE_DIR, "portfolio.yaml")
 
     # SBI自動同期
-    if not args.skip_sync and _load_sbi_cookie():
-        if sync_from_sbi(portfolio_path):
-            print()
+    cookie = _load_sbi_cookie()
+    if not args.skip_sync and cookie:
+        if not sync_from_sbi(portfolio_path):
+            print("[ERROR] SBI同期に失敗しました。Cookieの有効期限切れの可能性があります。", file=sys.stderr)
+            print("[ERROR] portfolio-authスキルでCookieを再取得してください: /oh-my-claudecode:portfolio-auth", file=sys.stderr)
+            sys.exit(1)
+        print()
+    elif not args.skip_sync and not cookie:
+        print("[WARN] SBI_COOKIEが設定されていません。--skip-syncで既存データを使用します。", file=sys.stderr)
+
+    if not os.path.isfile(portfolio_path):
+        print(f"[ERROR] portfolio.yaml not found at {portfolio_path}", file=sys.stderr)
+        sys.exit(1)
 
     portfolio = load_portfolio(portfolio_path)
     holdings = portfolio.get("holdings", [])

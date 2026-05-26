@@ -82,13 +82,44 @@ def _safe_float(val):
         return None
 
 
+# Strategy mode rule sets
+STRATEGY_ALLOWED_RULES = {
+    "trend": {
+        "buy": {"trend_following", "momentum_buy", "ma_support_bounce"},
+        "sell": {"death_cross"},
+    },
+    "contrarian": {
+        "buy": {"oversold_reversal"},
+        "sell": {"overbought_sell", "momentum_breakdown", "drawdown_stop"},
+    },
+}
+
+
+def _is_rule_allowed(rule: str, signal_type: int, strategy_mode: str) -> bool:
+    """Check whether a signal rule is allowed under the given strategy_mode.
+
+    signal_type: 1=buy, -1=sell.
+    """
+    if strategy_mode == "default":
+        return True
+    mode_rules = STRATEGY_ALLOWED_RULES.get(strategy_mode)
+    if mode_rules is None:
+        return True
+    key = "buy" if signal_type == 1 else "sell"
+    return rule in mode_rules[key]
+
+
 def generate_signals(ticker: str, start_date: str, end_date: str,
-                     thresholds: dict = None) -> pd.DataFrame:
+                     thresholds: dict = None,
+                     strategy_mode: str = "default") -> pd.DataFrame:
     """Generate buy/sell signals for each trading day in the date range.
 
     Returns DataFrame with columns: date, close, high, low, rsi, 52w_position,
     5d_return, volume_ratio, boll_lb, ret_20d, atr, trend_state, sma_50,
     sma_200, ret_10d, signal (1=buy, -1=sell, 0=hold).
+
+    strategy_mode: "default" (all rules), "trend" (trend-following only),
+                   "contrarian" (reversal-only).
     """
     if thresholds is None:
         thresholds = DEFAULT_THRESHOLDS
@@ -168,12 +199,18 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             else:
                 signal = 1
                 signal_rule = "oversold_reversal"
+        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
+            signal = 0
+            signal_rule = None
 
         # Momentum BUY
         if signal == 0 and ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
             if vol_ratio is None or vol_ratio > thresholds["momentum_vol"]:
                 signal = 1
                 signal_rule = "momentum_buy"
+        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
+            signal = 0
+            signal_rule = None
 
         # Trend following BUY
         if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
@@ -181,6 +218,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio is not None and vol_ratio > 0.8):
             signal = 1
             signal_rule = "trend_following"
+        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
+            signal = 0
+            signal_rule = None
 
         # MA support bounce BUY
         if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
@@ -188,6 +228,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and rsi is not None and rsi < 45):
             signal = 1
             signal_rule = "ma_support_bounce"
+        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
+            signal = 0
+            signal_rule = None
 
         # ============================================================
         # Pass 2: SELL rules (first-match-wins, overwrites BUY)
@@ -200,6 +243,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
             sell_signal = -1
             sell_rule = "overbought_sell"
+        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
+            sell_signal = 0
+            sell_rule = None
 
         # Momentum breakdown SELL
         if sell_signal == 0 and (ret_5d is not None
@@ -208,11 +254,17 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio > thresholds["breakdown_vol"]):
             sell_signal = -1
             sell_rule = "momentum_breakdown"
+        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
+            sell_signal = 0
+            sell_rule = None
 
         # Drawdown stop SELL
         if sell_signal == 0 and ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
             sell_signal = -1
             sell_rule = "drawdown_stop"
+        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
+            sell_signal = 0
+            sell_rule = None
 
         # Death cross SELL (exact detection via prev_date comparison)
         if sell_signal == 0 and prev_date is not None and sma_50 is not None and sma_200 is not None:
@@ -223,6 +275,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                     and sma_50 < sma_200 and close_val < sma_50):
                 sell_signal = -1
                 sell_rule = "death_cross"
+        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
+            sell_signal = 0
+            sell_rule = None
 
         # SELL overwrites BUY when both fire on the same day
         if sell_signal == -1:
@@ -837,7 +892,8 @@ def grid_search(ticker: str, start_date: str, end_date: str,
 
 def walk_forward(ticker: str, start_date: str, end_date: str,
                  thresholds: dict = None, risk_params: dict = None,
-                 margin_mode: bool = False) -> dict:
+                 margin_mode: bool = False,
+                 strategy_mode: str = "default") -> dict:
     """Walk-forward analysis: 70% train / 30% test split.
 
     Train on first 70% of the period, evaluate on last 30%.
@@ -858,11 +914,13 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
     test_end = end.strftime("%Y-%m-%d")
 
     # Train period
-    train_sig = generate_signals(ticker, train_start, train_end, thresholds)
+    train_sig = generate_signals(ticker, train_start, train_end, thresholds,
+                                 strategy_mode=strategy_mode)
     train_metrics = simulate_trades(train_sig, risk_params, margin_mode=margin_mode)
 
     # Test period (out-of-sample)
-    test_sig = generate_signals(ticker, test_start, test_end, thresholds)
+    test_sig = generate_signals(ticker, test_start, test_end, thresholds,
+                                strategy_mode=strategy_mode)
     test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
 
     # Overfitting guard
@@ -881,7 +939,8 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
         tuned_test_metrics = dict(test_metrics)
         thresholds = DEFAULT_THRESHOLDS
         risk_params = DEFAULT_RISK_PARAMS
-        test_sig = generate_signals(ticker, test_start, test_end, thresholds)
+        test_sig = generate_signals(ticker, test_start, test_end, thresholds,
+                                    strategy_mode=strategy_mode)
         test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
 
     result = {
@@ -902,7 +961,8 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
 
 def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                          thresholds: dict = None, risk_params: dict = None,
-                         margin_mode: bool = False, n_windows: int = 3) -> dict:
+                         margin_mode: bool = False, n_windows: int = 3,
+                         strategy_mode: str = "default") -> dict:
     """Rolling walk-forward with N equally-spaced windows across the date range.
 
     Each window does a 70/30 train/test split. Returns per-window results,
@@ -918,7 +978,8 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     total_days = (end - start).days
     if total_days < 10:
         result = dict(walk_forward(ticker, start_date, end_date, thresholds,
-                                   risk_params, margin_mode))
+                                   risk_params, margin_mode,
+                                   strategy_mode=strategy_mode))
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -932,7 +993,8 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
 
     if total_days < 252:
         result = dict(walk_forward(ticker, start_date, end_date, thresholds,
-                                   risk_params, margin_mode))
+                                   risk_params, margin_mode,
+                                   strategy_mode=strategy_mode))
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -954,7 +1016,8 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     rolling_windows = []
     for i, anchor_str in enumerate(anchors):
         wf = walk_forward(ticker, start_date, anchor_str,
-                          thresholds, risk_params, margin_mode)
+                          thresholds, risk_params, margin_mode,
+                          strategy_mode=strategy_mode)
         rolling_windows.append({
             "window": i,
             "end_date": anchor_str,
@@ -972,13 +1035,17 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows]))
     overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
 
-    half = n_windows // 2
-    if overfit_count > half:
-        verdict = "overfit"
-    elif std_sharpe < 0.5:
-        verdict = "robust"
+    total_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
+    if total_trades == 0:
+        verdict = "no_trades"
     else:
-        verdict = "unstable"
+        half = n_windows // 2
+        if overfit_count > half:
+            verdict = "overfit"
+        elif std_sharpe < 0.5:
+            verdict = "robust"
+        else:
+            verdict = "unstable"
 
     # Backward compatibility shim: legacy keys from window 0
     w0 = rolling_windows[0]
@@ -1225,6 +1292,49 @@ def _print_summary(result):
         if has_tuning:
             print(f"  過学習未検出。調整閾値は信頼できます。")
 
+    # Strategy comparison (US-003)
+    strategy_comparison = result.get("strategy_comparison")
+    if strategy_comparison:
+        ver_jp_sc = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習",
+                     "data_insufficient": "データ不足", "no_trades": "取引なし"}
+        print(f"\n  戦略比較")
+        print(f"  {sep2}")
+        print(f"  {'戦略':<20} {'取引数':>7} {'勝率':>8} {'Sharpe':>8} {'WF判定':>10}")
+        print(f"  {sep2}")
+        best_sm = None
+        best_sh = float('-inf')
+        for sm in ["default", "trend", "contrarian"]:
+            sc = strategy_comparison.get(sm)
+            if sc is None:
+                continue
+            tc = sc["baseline"].get("trade_count", 0)
+            sh = sc["baseline"].get("sharpe_ratio", 0) or 0
+            if tc > 0 and sh > best_sh:
+                best_sh = sh
+                best_sm = sm
+        for sm in ["default", "trend", "contrarian"]:
+            sc = strategy_comparison.get(sm)
+            if sc is None:
+                continue
+            b = sc["baseline"]
+            wf_sc = sc["walk_forward"]
+            consensus_sc = wf_sc.get("consensus", {})
+            tc = b.get("trade_count", 0)
+            sh = b.get("sharpe_ratio", 0.0)
+            if tc <= 2:
+                wr_str = "     -"
+            else:
+                wr_str = f"{b.get('win_rate', 0.0):>6.1f}%"
+            verdict = ver_jp_sc.get(consensus_sc.get("verdict", ""), consensus_sc.get("verdict", ""))
+            label = sc.get("label", sm)
+            star = " ★" if sm == best_sm and tc > 0 else ""
+            print(f"  {label:<20} {tc:>7} {wr_str} {sh:>8.3f} {verdict:>10}{star}")
+        if best_sm and best_sh > 0:
+            best_label = strategy_comparison.get(best_sm, {}).get("label", best_sm)
+            print(f"  {sep2}")
+            print(f"  推奨: {best_label} (Sharpe {best_sh:.3f})")
+        print(f"  {sep2}")
+
     # Rolling window summary (A-US-001)
     rolling = wf.get("rolling_windows")
     consensus = wf.get("consensus")
@@ -1241,7 +1351,7 @@ def _print_summary(result):
                   f"{rw['sharpe_diff_pct']:>7.1f}% {of_str:>8}")
         print(f"  {sep2}")
         cs = consensus
-        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足"}
+        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足", "no_trades": "取引なし"}
         print(f"  コンセンサス: 平均シャープ {cs['mean_sharpe']:.4f} "
               f"(σ={cs['std_sharpe']:.4f})  "
               f"最大DD {cs['mean_maxdd']:.1f}% 勝率 {cs['mean_win_rate']:.1f}%  "
@@ -1260,6 +1370,8 @@ def main():
     parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--output", "-o", help="Output JSON file path")
+    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all"],
+                        default="default", help="Strategy mode for signal generation")
     args = parser.parse_args()
 
 
@@ -1285,15 +1397,42 @@ def main():
     result["benchmark"] = _compute_benchmark(ohlcv, start_date, end_date)
 
     # Baseline with default thresholds
-    sig_df = generate_signals(args.ticker, start_date, end_date)
     margin_mode = args.margin
-    baseline = simulate_trades(sig_df, margin_mode=margin_mode)
-    baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
-    result["baseline"] = baseline
 
-    # Walk-forward analysis (rolling windows)
-    wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode)
-    result["walk_forward"] = wf
+    if args.strategy == "all":
+        strategy_comparison = {}
+        strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り"}
+        for sm in ["default", "trend", "contrarian"]:
+            sig_df = generate_signals(args.ticker, start_date, end_date,
+                                      strategy_mode=sm)
+            baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+            baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+            wf = walk_forward_rolling(args.ticker, start_date, end_date,
+                                      margin_mode=margin_mode, strategy_mode=sm)
+            strategy_comparison[sm] = {
+                "label": strategy_labels[sm],
+                "baseline": baseline,
+                "walk_forward": wf,
+            }
+        # Use "default" as the primary result
+        result["strategy_comparison"] = strategy_comparison
+        sig_df = generate_signals(args.ticker, start_date, end_date)
+        baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+        baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+        result["baseline"] = baseline
+        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode)
+        result["walk_forward"] = wf
+    else:
+        sig_df = generate_signals(args.ticker, start_date, end_date,
+                                  strategy_mode=args.strategy)
+        baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+        baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+        result["baseline"] = baseline
+
+        # Walk-forward analysis (rolling windows)
+        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
+                                  strategy_mode=args.strategy)
+        result["walk_forward"] = wf
 
     if args.tune:
         tune_result = grid_search(args.ticker, start_date, end_date, margin_mode=margin_mode)
