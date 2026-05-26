@@ -111,10 +111,32 @@ def _timeout_handler(signum, frame):
     raise BacktestTimeoutError("Backtest timed out")
 
 
+def _is_japan_market_open() -> bool:
+    """Check if Tokyo Stock Exchange is currently open."""
+    import jpholiday
+    now = datetime.now()
+    # Check weekday
+    if now.weekday() >= 5:
+        return False
+    # Check Japanese holiday
+    if jpholiday.is_holiday(now.date()):
+        return False
+    # TSE hours: 9:00-11:30, 12:30-15:00 JST (UTC+9)
+    t = now.hour * 60 + now.minute
+    return (540 <= t < 690) or (750 <= t < 900)  # 9:00-11:30, 12:30-15:00
+
+
 def fetch_market_price(ticker: str) -> float:
-    """Fetch current market price for the given ticker via yfinance."""
+    """Fetch current market price for the given ticker via yfinance.
+
+    During TSE trading hours, uses real-time currentPrice.
+    Outside trading hours, falls back to previous close.
+    """
     info = yf_retry(lambda: yf.Ticker(ticker).info)
-    price = info.get("currentPrice") or info.get("regularMarketPreviousClose")
+    if _is_japan_market_open():
+        price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("regularMarketPreviousClose")
+    else:
+        price = info.get("regularMarketPreviousClose") or info.get("regularMarketPrice") or info.get("currentPrice")
     if price is None:
         raise ValueError(f"Could not fetch market price for {ticker}")
     return float(price)
