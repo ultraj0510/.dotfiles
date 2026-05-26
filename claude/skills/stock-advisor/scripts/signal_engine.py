@@ -489,6 +489,8 @@ def main():
     group.add_argument("--all", action="store_true", help="Analyze all tickers in default_tickers.txt")
     parser.add_argument("--output", "-o", help="Output JSON file path (default: stdout)")
     parser.add_argument("--date", help="Reference date YYYY-MM-DD (default: latest trading day)")
+    parser.add_argument("--factor-mode", action="store_true",
+                        help="Compute factor scores alongside binary signals")
     args = parser.parse_args()
 
     date_str = args.date or get_latest_trading_day()
@@ -507,11 +509,21 @@ def main():
         "generated_at": datetime.now().isoformat(),
         "reference_date": date_str,
         "ticker_count": len(tickers),
+        "factor_mode": args.factor_mode,
         "results": [],
     }
 
     for ticker in tickers:
         result = analyze_ticker(ticker.strip(), date_str)
+        if args.factor_mode:
+            try:
+                from factor_engine import compute_factors, classify_factor_signal
+                factor_result = compute_factors(ticker.strip())
+                factor_result["factor_signal"] = classify_factor_signal(
+                    factor_result.get("composite_z"))
+                result["factor_scores"] = factor_result
+            except Exception as e:
+                result["factor_scores"] = {"error": str(e), "data_coverage": "0/4"}
         results["results"].append(result)
 
     output_json = json.dumps(results, ensure_ascii=False, indent=2, default=str)

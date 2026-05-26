@@ -12,6 +12,7 @@ Usage:
 import argparse
 import json
 import logging
+import math
 import os
 import signal
 import sys
@@ -168,7 +169,7 @@ def run_backtest_win_rates(ticker: str, date_str: str, target_years: int):
     signal.alarm(30)
     try:
         sig_df = generate_signals(ticker, start_date, date_str)
-        metrics = simulate_trades(sig_df)
+        metrics = simulate_trades(sig_df, ticker=ticker)
         census = _compute_signal_census(sig_df, metrics.get("trades", []))
         signal.alarm(0)
 
@@ -218,6 +219,48 @@ def compute_pnl_contribution(unrealized_pnl_pct: float) -> float:
     elif unrealized_pnl_pct < -5:
         return max(int(unrealized_pnl_pct / 5) * 10, -30)
     return 0.0
+
+
+def check_signal_conformation(ticker: str, date_str: str,
+                               active_rules: list) -> dict:
+    """Check if each active signal persisted on 2 of the last 3 trading days.
+
+    Returns dict mapping rule_name -> {"conformed": bool, "recent_days": int}.
+    Non-conformed signals get a "signal_not_confirmed" caveat.
+    """
+    if not active_rules:
+        return {}
+
+    # Fetch last 4 trading days of signals (need 3 days prior to date_str)
+    lookback_start = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=10)).strftime("%Y-%m-%d")
+    try:
+        sig_df = generate_signals(ticker, lookback_start, date_str)
+    except Exception:
+        return {}
+
+    if sig_df.empty or len(sig_df) < 3:
+        return {}
+
+    # Get last 3 days of signals (including date_str)
+    recent = sig_df.tail(3)
+    rule_days = {}
+    for _, row in recent.iterrows():
+        rule = row.get("signal_rule")
+        if rule:
+            rule_days[rule] = rule_days.get(rule, 0) + 1
+
+    result = {}
+    current_rules = {s["rule"] for s in active_rules if isinstance(s, dict) and "rule" in s}
+    for rule in current_rules:
+        days_fired = rule_days.get(rule, 0)
+        conformed = days_fired >= 2
+        result[rule] = {
+            "conformed": conformed,
+            "recent_days": days_fired,
+        }
+
+    return result
+
 
 
 def compute_trend_alignment(unrealized_pnl_pct: float, trend_state: str) -> float:
@@ -446,13 +489,175 @@ def assess_risk(
     return {"factors": factors, "overall_risk": overall_risk}
 
 
+def _fetch_historical_vol(ticker: str, lookback_days: int = 60) -> float:
+    """Fetch realized annualized volatility over lookback_days."""
+    ohlcv = load_ohlcv(ticker, datetime.now().strftime("%Y-%m-%d"))
+    if ohlcv.empty or len(ohlcv) < 2:
+        return None
+    closes = ohlcv["Close"].tail(lookback_days + 1)
+    if len(closes) < 2:
+        return None
+    returns = closes.pct_change().dropna()
+    if len(returns) < 2:
+        return None
+    daily_vol = returns.std()
+    return daily_vol * math.sqrt(252)
+
+
+def compute_inverse_vol_weights(positions: list, portfolio_value: float) -> dict:
+    """Compute inverse-volatility-weighted position sizes.
+
+    positions: list of dicts with {ticker, market_price, shares, mode}
+    Returns weights dict with per-ticker allocation details.
+    """
+    vols = {}
+    for p in positions:
+        ticker = p["ticker"]
+        vol = _fetch_historical_vol(ticker, 60)
+        vols[ticker] = vol if vol and vol > 0 else None
+
+    # Compute raw inverse-vol weights (handle None vol as equal weight)
+    inv_vols = {}
+    for ticker, vol in vols.items():
+        inv_vols[ticker] = 1.0 / vol if vol else 0.0
+
+    total_inv = sum(inv_vols.values())
+    if total_inv <= 0:
+        # All vols are None/zero, fall back to equal weight
+        n = len(positions)
+        raw_weights = {p["ticker"]: 1.0 / n for p in positions}
+    else:
+        raw_weights = {t: inv / total_inv for t, inv in inv_vols.items()}
+        # Zero-vol tickers get equal share of remaining
+        zero_vol_tickers = [p["ticker"] for p in positions if vols.get(p["ticker"]) is None]
+        if zero_vol_tickers:
+            eq_weight = 1.0 / len(positions)
+            for zt in zero_vol_tickers:
+                raw_weights[zt] = eq_weight
+
+    # Apply constraints: max 25%, round to 100-share units, min JPY 400K or 100 shares
+    allocations = []
+    for p in positions:
+        ticker = p["ticker"]
+        price = p["market_price"]
+        raw_w = raw_weights.get(ticker, 0.0)
+
+        # Cap at 25%
+        capped_w = min(raw_w, 0.25)
+        target_value = portfolio_value * capped_w
+        target_shares = target_value / price
+
+        # Round to 100-share units
+        rounded_shares = max(round(target_shares / 100) * 100, 0)
+
+        # Minimum position: max(100 shares, JPY 400K)
+        min_shares = max(100, int(400000 / price) + (1 if 400000 % price > 0 else 0))
+        min_shares = (min_shares // 100 + (1 if min_shares % 100 > 0 else 0)) * 100
+        if capped_w > 0.02 and rounded_shares < min_shares:
+            rounded_shares = min_shares
+        if capped_w <= 0.02:
+            rounded_shares = 0  # below 2% threshold, drop position
+
+        actual_value = rounded_shares * price
+        actual_w = actual_value / portfolio_value if portfolio_value > 0 else 0.0
+
+        allocations.append({
+            "ticker": ticker,
+            "market_price": price,
+            "current_shares": p.get("shares", 0),
+            "raw_weight": round(raw_w, 4),
+            "capped_weight": round(capped_w, 4),
+            "target_shares": rounded_shares,
+            "target_value": actual_value,
+            "actual_weight": round(actual_w, 4),
+            "deviation_pct": round((actual_w - capped_w) / capped_w * 100, 1) if capped_w > 0 else 0.0,
+            "mode": p.get("mode", "spot"),
+            "vol_used": round(vols.get(ticker), 4) if vols.get(ticker) else None,
+        })
+
+    # Check weight sum post-rounding
+    total_actual_w = sum(a["actual_weight"] for a in allocations)
+    rebalancing_needed = any(
+        abs(a["actual_weight"] - a["capped_weight"]) > a["capped_weight"] * 0.5
+        for a in allocations if a["capped_weight"] > 0
+    )
+
+    return {
+        "portfolio_value": portfolio_value,
+        "target_weights": {a["ticker"]: a["capped_weight"] for a in allocations},
+        "allocations": allocations,
+        "total_actual_weight": round(total_actual_w, 4),
+        "rebalancing_needed": rebalancing_needed,
+        "rebalancing_frequency": "every 20 trading days (~4 weeks)",
+        "early_rebalance_trigger": "any weight deviates >50% from target at last rebalance",
+    }
+
+
+def _load_portfolio_yaml(path: str) -> dict:
+    """Load portfolio.yaml and return structured position data."""
+    import yaml
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    return data
+
+
+def arbitrate_factor_vs_rule(factor_signal: str, binary_opinion: str) -> dict:
+    """Resolve factor score vs binary rule conflict using the arbitration matrix.
+
+    Returns {adjustment: float, action: str, reasoning: str}.
+    adjustment is a multiplier on position weight (1.0 = no change).
+    """
+    if factor_signal is None:
+        return {"adjustment": 1.0, "action": "BINARY_ONLY",
+                "reasoning": "ファクターデータ不足、バイナリルールのみで判断"}
+
+    # Map binary opinion to matrix categories
+    binary_buy = {"STRONG_BUY", "BUY_MORE"}
+    binary_sell = {"REDUCE", "SELL"}
+    if binary_opinion in binary_buy:
+        binary_cat = "BUY"
+    elif binary_opinion in binary_sell:
+        binary_cat = "SELL"
+    else:
+        binary_cat = "HOLD"
+
+    # Arbitration matrix
+    matrix = {
+        ("STRONG_BUY", "BUY"):   (1.25, "OVERWEIGHT", "ファクター強気+バイナリ買い → オーバーウェイト(+25%)"),
+        ("STRONG_BUY", "SELL"):  (1.0, "NEUTRAL", "ファクター強気でもバイナリ売り優先 → 中立"),
+        ("STRONG_BUY", "HOLD"):  (1.10, "SLIGHT_OVERWEIGHT", "ファクター強気+保留 → ややオーバーウェイト(+10%)"),
+        ("BUY", "BUY"):          (1.10, "SLIGHT_OVERWEIGHT", "ファクター買い+バイナリ買い → ややオーバーウェイト(+10%)"),
+        ("BUY", "SELL"):         (1.0, "NEUTRAL", "ファクター買いでもバイナリ売り優先 → 中立"),
+        ("BUY", "HOLD"):         (1.0, "WEIGHT", "ファクター買い+保留 → 目標ウェイト維持"),
+        ("NEUTRAL", "BUY"):      (1.0, "WEIGHT", "ファクター中立 → バイナリルールに従う"),
+        ("NEUTRAL", "SELL"):     (1.0, "WEIGHT", "ファクター中立 → バイナリルールに従う"),
+        ("NEUTRAL", "HOLD"):     (1.0, "WEIGHT", "ファクター中立+保留 → 目標ウェイト維持"),
+        ("SELL", "BUY"):         (1.0, "WEIGHT", "バイナリ買いがファクター売りを抑制 → 目標ウェイト維持"),
+        ("SELL", "SELL"):        (0.75, "UNDERWEIGHT", "ファクター売り+バイナリ売り → アンダーウェイト(-25%)"),
+        ("SELL", "HOLD"):        (0.90, "SLIGHT_UNDERWEIGHT", "ファクター売り+保留 → ややアンダーウェイト(-10%)"),
+        ("STRONG_SELL", "BUY"):  (1.0, "WEIGHT", "バイナリ買いがファクター強売りを抑制 → 目標ウェイト維持"),
+        ("STRONG_SELL", "SELL"): (0.0, "EXIT", "ファクター強売り+バイナリ売り → 全株売却"),
+        ("STRONG_SELL", "HOLD"): (0.75, "UNDERWEIGHT", "ファクター強売り+保留 → アンダーウェイト(-25%)"),
+    }
+
+    key = (factor_signal, binary_cat)
+    if key in matrix:
+        adj, action, reasoning = matrix[key]
+        return {"adjustment": adj, "action": action, "reasoning": reasoning}
+
+    # Fallback
+    return {"adjustment": 1.0, "action": "WEIGHT",
+            "reasoning": f"未定義の組み合わせ factor={factor_signal} binary={binary_cat} → 目標ウェイト維持"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ポートフォリオポジションに基づく個別トレードアドバイス"
     )
-    parser.add_argument("--ticker", required=True, help="TSEティッカーシンボル (例: 7203.T)")
-    parser.add_argument("--cost-basis", required=True, type=float, help="1株あたりの取得単価 (円)")
-    parser.add_argument("--shares", required=True, type=int, help="保有株式数")
+    parser.add_argument("--ticker", help="TSEティッカーシンボル (例: 7203.T)")
+    parser.add_argument("--portfolio", help="portfolio.yaml のパス (ポートフォリオ全体分析)")
+    parser.add_argument("--cost-basis", type=float, help="1株あたりの取得単価 (円)")
+    parser.add_argument("--shares", type=int, help="保有株式数")
     parser.add_argument("--mode", default="spot", choices=["spot", "margin"],
                         help="ポジション種別 (default: spot)")
     parser.add_argument("--target-years", default=1, type=int,
@@ -461,7 +666,41 @@ def main():
                         help="ポートフォリオ評価額合計 (円)")
     parser.add_argument("--output", "-o", help="JSON出力ファイルパス")
     parser.add_argument("--date", help="基準日 YYYY-MM-DD (default: 直近取引日)")
+    parser.add_argument("--factor-mode", action="store_true",
+                        help="ファクタースコアを計算し仲裁マトリクスを適用")
     args = parser.parse_args()
+
+    # --portfolio mode: compute inverse-vol weights for all positions
+    if args.portfolio:
+        portfolio_data = _load_portfolio_yaml(args.portfolio)
+        holdings = portfolio_data.get("holdings", [])
+        account = portfolio_data.get("account", {})
+        total_assets = account.get("total_assets", 0) or args.portfolio_value or 0
+
+        positions = []
+        for h in holdings:
+            positions.append({
+                "ticker": h["ticker"],
+                "market_price": h.get("current_price", 0),
+                "shares": h.get("quantity", 0),
+                "mode": "margin" if h.get("position_type") == "信用" else "spot",
+            })
+
+        result = compute_inverse_vol_weights(positions, total_assets)
+        result["analysis_date"] = args.date or get_latest_trading_day()
+        result["total_assets"] = total_assets
+        result["available_cash"] = account.get("available_cash", 0)
+        result["num_positions"] = len(positions)
+        result["margin_positions_excluded"] = (
+            "Margin positions use existing backtest_engine margin logic independently. "
+            "Not included in inverse-vol sizing."
+        )
+        _output_result(result, args.output)
+        return
+
+    # --ticker mode: per-ticker advisory (existing behavior)
+    if not args.ticker or args.cost_basis is None or args.shares is None:
+        parser.error("--ticker, --cost-basis, --shares が必要です (または --portfolio で全体分析)")
 
     # Resolve analysis date with fallback for missing indicator data
     date_str = args.date or get_latest_trading_day()
@@ -498,6 +737,21 @@ def main():
             "per_rule": per_rule or {},
         }
 
+        # 4.5. Check signal conformation (2 of last 3 days)
+        conformation = check_signal_conformation(args.ticker, date_str, active_rules)
+        for s in active_rules:
+            rule_name = s.get("rule", "")
+            if rule_name in conformation:
+                conf = conformation[rule_name]
+                if not conf["conformed"]:
+                    if "caveat" not in s:
+                        s["caveat"] = "signal_not_confirmed"
+                    s["conformation"] = conf
+                else:
+                    s["conformation"] = conf
+        if conformation:
+            signal_win_rates["signal_conformation"] = conformation
+
         # 5. Compute advisory
         advisory = compute_advisory(
             analysis["score"],
@@ -524,6 +778,20 @@ def main():
             analysis.get("signals", []), atr_val,
         )
 
+        # Factor mode: compute factor scores and apply arbitration
+        factor_arbitration = None
+        if args.factor_mode:
+            try:
+                from factor_engine import compute_factors, classify_factor_signal
+                factor_result = compute_factors(args.ticker)
+                factor_signal = classify_factor_signal(factor_result.get("composite_z"))
+                factor_arbitration = arbitrate_factor_vs_rule(
+                    factor_signal, advisory["opinion"])
+                factor_arbitration["factor_scores"] = factor_result
+                factor_arbitration["factor_signal"] = factor_signal
+            except Exception as e:
+                factor_arbitration = {"error": str(e)}
+
         # Build output
         result = {
             "ticker": args.ticker,
@@ -545,6 +813,8 @@ def main():
             "advisory": advisory,
             "risk_assessment": risk,
         }
+        if factor_arbitration:
+            result["factor_arbitration"] = factor_arbitration
 
         _output_result(result, args.output)
 

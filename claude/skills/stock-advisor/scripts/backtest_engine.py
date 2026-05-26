@@ -48,6 +48,10 @@ DEFAULT_RISK_PARAMS = {
         "unknown": 3.0,
     },
     "atr_slew_max": 0.5,
+    "vol_target": 0.15,         # 15% annualized target volatility
+    "vol_target_min": 0.5,      # min position size multiplier
+    "vol_target_max": 2.0,      # max position size multiplier
+    "vol_lookback": 20,         # lookback days for realized vol
 }
 
 DEFAULT_MARGIN_PARAMS = {
@@ -55,6 +59,62 @@ DEFAULT_MARGIN_PARAMS = {
     "margin_short_rate": 0.012,
     "margin_max_days": 180,
 }
+
+# Transaction cost model (A5)
+# Tickers known to be TOPIX 500 constituents (lower slippage/impact)
+TOPIX500_TICKERS = {
+    "5803.T", "7013.T", "7974.T", "7203.T", "8306.T",
+    "8411.T", "4307.T", "9984.T", "7003.T",
+}
+
+DEFAULT_COST_PARAMS = {
+    "commission": 0.001,       # 0.1% per trade
+    "slippage_topix500": 0.0005,   # 0.05% for TOPIX 500
+    "slippage_other": 0.0015,      # 0.15% for others
+    "impact_mult_topix500": 0.0015,  # 0.15% impact multiplier
+    "impact_mult_other": 0.003,      # 0.30% impact multiplier
+    "impact_cap": 0.02,              # 2.0% max impact
+    "volume_floor": 1000,            # Floor for volume/avg_volume in impact calc
+}
+
+
+def _compute_transaction_cost(price: float, shares: int, ticker: str,
+                               volume_ratio: float = 1.0,
+                               cost_params: dict = None) -> dict:
+    """Compute per-trade transaction costs in yen.
+
+    Returns dict with commission, slippage, impact, total (all in yen).
+    """
+    if cost_params is None:
+        cost_params = DEFAULT_COST_PARAMS
+
+    notional = price * shares
+    is_topix500 = ticker in TOPIX500_TICKERS
+
+    # Commission and slippage apply to both entry and exit (round-trip)
+    commission = notional * cost_params["commission"] * 2
+    slippage = notional * (cost_params["slippage_topix500"] if is_topix500
+                           else cost_params["slippage_other"]) * 2
+
+    # Market impact: sqrt(volume_ratio) * impact_mult, capped at 2%
+    # volume_ratio = volume / 20d_avg_volume, computed by data_utils
+    safe_ratio = max(abs(volume_ratio) if volume_ratio and volume_ratio > 0 else 1.0, 0.1)
+    impact_mult = (cost_params["impact_mult_topix500"] if is_topix500
+                   else cost_params["impact_mult_other"])
+    impact = min(
+        math.sqrt(safe_ratio) * impact_mult * notional,
+        cost_params["impact_cap"] * notional,
+    )
+
+    total = commission + slippage + impact
+
+    return {
+        "commission": round(commission, 2),
+        "slippage": round(slippage, 2),
+        "impact": round(impact, 2),
+        "total": round(total, 2),
+        "total_pct": round(total / notional * 100, 4) if notional > 0 else 0.0,
+    }
 
 # Grid search parameter ranges
 TUNE_PARAM_GRID = {
@@ -372,9 +432,21 @@ def _build_trade(entry_date, exit_date, entry_price, exit_price, ret,
     return trade
 
 
+def _compute_realized_vol(returns_window: list, annualize: bool = True) -> float:
+    """Compute realized volatility from a list of daily returns."""
+    if len(returns_window) < 2:
+        return 0.0
+    mean = sum(returns_window) / len(returns_window)
+    var = sum((r - mean) ** 2 for r in returns_window) / (len(returns_window) - 1)
+    daily_vol = math.sqrt(var) if var > 0 else 0.0
+    return daily_vol * math.sqrt(252) if annualize else daily_vol
+
+
 def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     margin_mode: bool = False,
-                    margin_params: dict = None) -> dict:
+                    margin_params: dict = None,
+                    ticker: str = "",
+                    cost_params: dict = None) -> dict:
     """Simulate trades from signal DataFrame and compute performance metrics.
 
     One position at a time. When margin_mode=True, short selling and margin
@@ -383,11 +455,17 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
     Trailing stop (ATR-based) is checked before signal processing each day.
     If triggered, the day's signal is skipped to prevent re-entry on the
     same day as a stop-out.
+
+    When cost_params is provided (or defaults active), transaction costs
+    (commission, slippage, market impact) are deducted from each trade.
+    Set cost_params=None to disable.
     """
     if risk_params is None:
         risk_params = DEFAULT_RISK_PARAMS
     if margin_params is None:
         margin_params = DEFAULT_MARGIN_PARAMS
+    if cost_params is None:
+        cost_params = DEFAULT_COST_PARAMS
     atr_mult_map = risk_params["trailing_stop_atr_mult"]
     slew_max = risk_params.get("atr_slew_max", 0.5)
     margin_long_rate = margin_params["margin_long_rate"]
@@ -405,10 +483,17 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
     entry_date = None
     entry_signal_rule = None
     entry_trend_state = None
+    entry_vol_multiplier = 1.0
     highest_since_entry = 0.0
     lowest_since_entry = 0.0
     prev_effective_mult = 0.0
     margin_cost_accrued = 0.0  # yen, accumulated per trade
+    total_transaction_cost = 0.0  # yen, accumulated across all trades
+    returns_window = []  # last N daily returns for realized vol
+    vol_lookback = risk_params.get("vol_lookback", 20)
+    vol_target = risk_params.get("vol_target", 0.15)
+    vol_target_min = risk_params.get("vol_target_min", 0.5)
+    vol_target_max = risk_params.get("vol_target_max", 2.0)
 
     daily_returns = []
     prev_close = None
@@ -428,6 +513,20 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
             else:
                 daily_returns.append(0.0)
         prev_close = close
+
+        # Update realized vol window
+        if daily_returns:
+            returns_window.append(daily_returns[-1])
+            if len(returns_window) > vol_lookback:
+                returns_window.pop(0)
+
+        # Compute vol multiplier from realized vol
+        realized_vol = _compute_realized_vol(returns_window)
+        if realized_vol > 0 and vol_target > 0:
+            vol_multiplier = max(vol_target_min,
+                                 min(vol_target_max, vol_target / realized_vol))
+        else:
+            vol_multiplier = 1.0
 
         # Margin cost daily accrual
         if margin_mode and position != 0:
@@ -476,8 +575,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                         trend_state_at_entry=entry_trend_state,
                     )
                     trade["margin_cost"] = cost
-                    if margin_mode:
-                        trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                    trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
+                    tc = _compute_transaction_cost(close, 100, ticker,
+                                                   row.get("volume_ratio", 1.0),
+                                                   cost_params)
+                    trade["transaction_cost"] = tc
+                    trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                    total_transaction_cost += tc["total"]
+                    if daily_returns:
+                        daily_returns[-1] -= tc["total"] / (entry_price * 100)
                     trades.append(trade)
                     position = 0
                     entry_price = 0
@@ -509,7 +615,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     trend_state_at_entry=entry_trend_state,
                 )
                 trade["margin_cost"] = cost
-                trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
+                tc = _compute_transaction_cost(close, 100, ticker,
+                                               row.get("volume_ratio", 1.0),
+                                               cost_params)
+                trade["transaction_cost"] = tc
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                total_transaction_cost += tc["total"]
+                if daily_returns:
+                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
                 trades.append(trade)
                 position = 0
                 entry_price = 0
@@ -533,6 +647,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                 entry_date = row["date"]
                 entry_signal_rule = row.get("signal_rule")
                 entry_trend_state = row.get("trend_state", "unknown")
+                entry_vol_multiplier = vol_multiplier
                 highest_since_entry = close
                 lowest_since_entry = close
                 margin_cost_accrued = 0.0
@@ -547,14 +662,22 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     trend_state_at_entry=entry_trend_state,
                 )
                 trade["margin_cost"] = cost
-                if margin_mode:
-                    trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
+                tc = _compute_transaction_cost(close, 100, ticker,
+                                               row.get("volume_ratio", 1.0),
+                                               cost_params)
+                trade["transaction_cost"] = tc
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                total_transaction_cost += tc["total"]
+                if daily_returns:
+                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
                 trades.append(trade)
                 position = 1
                 entry_price = close
                 entry_date = row["date"]
                 entry_signal_rule = row.get("signal_rule")
                 entry_trend_state = row.get("trend_state", "unknown")
+                entry_vol_multiplier = vol_multiplier
                 highest_since_entry = close
                 lowest_since_entry = close
                 margin_cost_accrued = 0.0
@@ -572,14 +695,22 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     trend_state_at_entry=entry_trend_state,
                 )
                 trade["margin_cost"] = cost
-                if margin_mode:
-                    trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+                trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
+                tc = _compute_transaction_cost(close, 100, ticker,
+                                               row.get("volume_ratio", 1.0),
+                                               cost_params)
+                trade["transaction_cost"] = tc
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                total_transaction_cost += tc["total"]
+                if daily_returns:
+                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
                 trades.append(trade)
                 position = 0
                 entry_price = 0
                 entry_date = None
                 entry_signal_rule = None
                 entry_trend_state = None
+                entry_vol_multiplier = 1.0
                 highest_since_entry = 0.0
                 lowest_since_entry = 0.0
                 margin_cost_accrued = 0.0
@@ -590,6 +721,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     entry_date = row["date"]
                     entry_signal_rule = row.get("signal_rule")
                     entry_trend_state = row.get("trend_state", "unknown")
+                    entry_vol_multiplier = vol_multiplier
                     highest_since_entry = close
                     lowest_since_entry = close
                     margin_cost_accrued = 0.0
@@ -601,6 +733,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     entry_date = row["date"]
                     entry_signal_rule = row.get("signal_rule")
                     entry_trend_state = row.get("trend_state", "unknown")
+                    entry_vol_multiplier = vol_multiplier
                     highest_since_entry = close
                     lowest_since_entry = close
                     margin_cost_accrued = 0.0
@@ -624,11 +757,18 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
             trend_state_at_entry=entry_trend_state,
         )
         trade["margin_cost"] = cost
-        if margin_mode:
-            trade["return_after_cost"] = round(ret - cost / entry_price, 6)
+        trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
+        tc = _compute_transaction_cost(last_row["close"], 100, ticker,
+                                       last_row.get("volume_ratio", 1.0),
+                                       cost_params)
+        trade["transaction_cost"] = tc
+        trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+        total_transaction_cost += tc["total"]
+        if daily_returns:
+            daily_returns[-1] -= tc["total"] / (entry_price * 100)
         trades.append(trade)
 
-    return _compute_metrics(trades, daily_returns)
+    return _compute_metrics(trades, daily_returns, total_transaction_cost)
 
 
 def _compute_signal_census(signals_df, trades):
@@ -714,7 +854,8 @@ def _empty_metrics():
     }
 
 
-def _compute_metrics(trades: list, daily_returns: list) -> dict:
+def _compute_metrics(trades: list, daily_returns: list,
+                     total_transaction_cost: float = 0.0) -> dict:
     if not trades:
         metrics = _empty_metrics()
         metrics["daily_return_std"] = float(np.std(daily_returns)) if daily_returns else 0.0
@@ -838,6 +979,8 @@ def _compute_metrics(trades: list, daily_returns: list) -> dict:
         "avg_win_pct": round(avg_win_pct, 2) if wins else 0.0,
         "avg_loss_pct": round(avg_loss_pct, 2) if losses else 0.0,
         "total_margin_cost": round(sum(t.get("margin_cost", 0) for t in trades), 2),
+        "total_transaction_cost": round(total_transaction_cost, 2),
+        "total_transaction_cost_per_trade": round(total_transaction_cost / n, 2) if n > 0 else 0.0,
         "regime_breakdown": regime_breakdown,
         "avg_mfe_capture_pct": avg_mfe_capture_pct,
         "avg_exit_efficiency": avg_exit_efficiency,
@@ -872,7 +1015,7 @@ def grid_search(ticker: str, start_date: str, end_date: str,
                         "position_52w_upper": pos_high,
                     }
                     sig_df = generate_signals(ticker, start_date, end_date, thresholds)
-                    metrics = simulate_trades(sig_df, margin_mode=margin_mode)
+                    metrics = simulate_trades(sig_df, ticker=ticker, margin_mode=margin_mode)
                     results.append({
                         "thresholds": thresholds,
                         "sharpe_ratio": metrics["sharpe_ratio"],
@@ -916,12 +1059,12 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
     # Train period
     train_sig = generate_signals(ticker, train_start, train_end, thresholds,
                                  strategy_mode=strategy_mode)
-    train_metrics = simulate_trades(train_sig, risk_params, margin_mode=margin_mode)
+    train_metrics = simulate_trades(train_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
 
     # Test period (out-of-sample)
     test_sig = generate_signals(ticker, test_start, test_end, thresholds,
                                 strategy_mode=strategy_mode)
-    test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
+    test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
 
     # Overfitting guard
     train_sharpe = train_metrics["sharpe_ratio"]
@@ -941,7 +1084,7 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
         risk_params = DEFAULT_RISK_PARAMS
         test_sig = generate_signals(ticker, test_start, test_end, thresholds,
                                     strategy_mode=strategy_mode)
-        test_metrics = simulate_trades(test_sig, risk_params, margin_mode=margin_mode)
+        test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
 
     result = {
         "train_period": {"start": train_start, "end": train_end},
