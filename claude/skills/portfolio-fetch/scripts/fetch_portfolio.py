@@ -59,8 +59,7 @@ def fetch_stock_data(ticker: str) -> dict | None:
         from data.fetcher import get_stock_data
         from indicators.calculator import calculate_indicators, get_latest_values
         from signals.engine import check_signal, describe_signals
-    except ImportError as e:
-        print(f"[WARN] stock-price-analyzeのインポートに失敗: {e}", file=sys.stderr)
+    except ImportError:
         return None
 
     df = get_stock_data(ticker, period="1y")
