@@ -331,7 +331,7 @@ def compute_target_prices(
     # Risk-reward ratio
     risk_reward = None
     if target1 is not None and stop_loss is not None and stop_loss != market_price:
-        if opinion in bullish_opinions + ("HOLD",):
+        if opinion in bullish_opinions | {"HOLD"}:
             if market_price > stop_loss:
                 risk_reward = round(
                     (target1 - market_price) / (market_price - stop_loss), 1
@@ -438,10 +438,18 @@ def main():
     parser.add_argument("--portfolio-value", type=float,
                         help="ポートフォリオ評価額合計 (円)")
     parser.add_argument("--output", "-o", help="JSON出力ファイルパス")
+    parser.add_argument("--date", help="基準日 YYYY-MM-DD (default: 直近取引日)")
     args = parser.parse_args()
 
-    # Get analysis date
-    date_str = get_latest_trading_day()
+    # Resolve analysis date with fallback for missing indicator data
+    date_str = args.date or get_latest_trading_day()
+    analysis = None
+    for attempt in range(5):
+        analysis = analyze_ticker(args.ticker, date_str)
+        if "error" not in analysis and analysis.get("trend_state") != "unknown":
+            break
+        if attempt < 4:
+            date_str = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
 
     try:
         # 1. Get current market price
@@ -449,9 +457,6 @@ def main():
 
         # 2. Compute P&L
         pnl, pnl_pct = compute_pnl(market_price, args.cost_basis, args.shares)
-
-        # 3. Get signal engine analysis
-        analysis = analyze_ticker(args.ticker, date_str)
         if "error" in analysis:
             result = {
                 "ticker": args.ticker,

@@ -917,18 +917,30 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     end = pd.to_datetime(end_date)
     total_days = (end - start).days
     if total_days < 10:
-        # Fallback to single walk_forward if range is too short
-        wf = walk_forward(ticker, start_date, end_date, thresholds,
-                          risk_params, margin_mode)
-        result = dict(wf)
+        result = dict(walk_forward(ticker, start_date, end_date, thresholds,
+                                   risk_params, margin_mode))
         result["rolling_windows"] = []
         result["consensus"] = {
-            "mean_sharpe": wf["test_metrics"]["sharpe_ratio"],
+            "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
             "std_sharpe": 0.0,
-            "mean_maxdd": wf["test_metrics"]["max_drawdown"],
-            "mean_win_rate": wf["test_metrics"]["win_rate"],
-            "overfit_count": 1 if wf["overfit_detected"] else 0,
-            "verdict": "overfit" if wf["overfit_detected"] else "robust",
+            "mean_maxdd": result["test_metrics"]["max_drawdown"],
+            "mean_win_rate": result["test_metrics"]["win_rate"],
+            "overfit_count": 1 if result["overfit_detected"] else 0,
+            "verdict": "data_insufficient",
+        }
+        return result
+
+    if total_days < 252:
+        result = dict(walk_forward(ticker, start_date, end_date, thresholds,
+                                   risk_params, margin_mode))
+        result["rolling_windows"] = []
+        result["consensus"] = {
+            "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
+            "std_sharpe": 0.0,
+            "mean_maxdd": result["test_metrics"]["max_drawdown"],
+            "mean_win_rate": result["test_metrics"]["win_rate"],
+            "overfit_count": 1 if result["overfit_detected"] else 0,
+            "verdict": "data_insufficient",
         }
         return result
 
@@ -1229,7 +1241,7 @@ def _print_summary(result):
                   f"{rw['sharpe_diff_pct']:>7.1f}% {of_str:>8}")
         print(f"  {sep2}")
         cs = consensus
-        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習"}
+        ver_jp = {"robust": "頑健", "unstable": "不安定", "overfit": "過学習", "data_insufficient": "データ不足"}
         print(f"  コンセンサス: 平均シャープ {cs['mean_sharpe']:.4f} "
               f"(σ={cs['std_sharpe']:.4f})  "
               f"最大DD {cs['mean_maxdd']:.1f}% 勝率 {cs['mean_win_rate']:.1f}%  "
