@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from data_utils import yf_retry, load_ohlcv
 from signal_engine import analyze_ticker, get_latest_trading_day
-from backtest_cache import load_cached_result
 from backtest_engine import (
     generate_signals,
     simulate_trades,
