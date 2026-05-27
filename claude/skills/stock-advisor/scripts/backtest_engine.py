@@ -1355,12 +1355,14 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
         verdict = "no_trades"
     else:
         half = n_windows // 2
-        if overfit_count > half:
+        if overfit_count == n_windows:
             verdict = "insufficient_data"
+        elif overfit_count > 0:
+            verdict = "unstable"
         elif std_sharpe < 0.5:
             verdict = "robust"
         else:
-            verdict = "unstable"
+            verdict = "stable"
 
     # Backward compatibility shim: legacy keys from window 0
     w0 = rolling_windows[0]
