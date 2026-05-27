@@ -301,7 +301,11 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
 # --- SBI sync ---
 
 _SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
+_SBI_PORTFOLIO_URL_DESKTOP = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
 _SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETacR001Control&_ActionID=DefaultAID&getFlg=on"
+
+_MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
+_DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 _SBI_TICKER_MAP = {
     "ＮＦ金価格": "1328.T",
     "日鉄鉱": "1515.T",
@@ -341,28 +345,64 @@ def _load_sbi_cookie() -> str | None:
     return None
 
 
-def _fetch_sbi_page(cookie: str) -> tuple[str | None, str]:
-    """Fetch SBI portfolio page, return (html, status)."""
-    import urllib.request
-    import urllib.error
+def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tuple[str | None, str]:
+    """Fetch SBI portfolio page via Playwright, return (html, status).
 
-    req = urllib.request.Request(
-        _SBI_PORTFOLIO_URL,
-        headers={
-            "Cookie": cookie,
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-        },
-    )
+    Uses headless Chromium to navigate SBI's internal redirect chain.
+    Falls back to urllib if Playwright is unavailable.
+    """
+    if url is None:
+        url = _SBI_PORTFOLIO_URL
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return _fetch_sbi_page_urllib(cookie, url, user_agent)
+
+    # Parse cookie string into Playwright format
+    cookie_list = []
+    for pair in cookie.split("; "):
+        if "=" in pair:
+            n, v = pair.split("=", 1)
+            cookie_list.append({"name": n.strip(), "value": v.strip(),
+                                "domain": ".site1.sbisec.co.jp", "path": "/"})
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(locale="ja-JP", timezone_id="Asia/Tokyo")
+            context.add_cookies(cookie_list)
+            page = context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.wait_for_selector("table", timeout=5000)
+            except Exception:
+                pass
+            current_url = page.url
+            if "login" in current_url.lower():
+                browser.close()
+                return (None, "login_page")
+            html = page.content()
+            browser.close()
+            if len(html) < 2000:
+                return (None, "login_page")
+            return (html, "ok")
+    except Exception as e:
+        print(f"[WARN] Playwright fetch failed: {e}", file=sys.stderr)
+        return (None, "http_error")
+
+
+def _fetch_sbi_page_urllib(cookie: str, url: str, user_agent: str) -> tuple[str | None, str]:
+    """Fallback: fetch SBI page via urllib (no JS rendering)."""
+    import urllib.request, urllib.error
+    if user_agent is None:
+        user_agent = _MOBILE_UA
+    req = urllib.request.Request(url, headers={"Cookie": cookie, "User-Agent": user_agent})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            status = resp.getcode()
             raw = resp.read()
-            if status != 200:
-                print(f"[WARN] SBI returned HTTP {status}", file=sys.stderr)
-                return (None, "http_error")
-            if len(raw) < 1000:
-                print(f"[WARN] SBI response too small ({len(raw)} bytes) — likely login page", file=sys.stderr)
-                return (None, "login_page")
+            if resp.getcode() != 200 or len(raw) < 1000:
+                return (None, "login_page" if len(raw) < 1000 else "http_error")
             for enc in ["cp932", "shift_jis", "utf-8"]:
                 try:
                     return (raw.decode(enc), "ok")
@@ -370,7 +410,7 @@ def _fetch_sbi_page(cookie: str) -> tuple[str | None, str]:
                     continue
             return (raw.decode("cp932", errors="replace"), "ok")
     except Exception as e:
-        print(f"[WARN] SBI page fetch failed: {e}", file=sys.stderr)
+        print(f"[WARN] urllib fetch failed: {e}", file=sys.stderr)
         return (None, "http_error")
 
 
@@ -652,7 +692,7 @@ def sync_from_sbi(portfolio_path: str) -> str:
     if not cookie:
         return "no_cookie"
 
-    # Fetch holdings from portfolio page (mobile UA)
+    # Fetch holdings from portfolio page (mobile UA first, desktop as fallback)
     html, fetch_status = _fetch_sbi_page(cookie)
     if fetch_status == "login_page":
         print("[AUTH_EXPIRED] Cookie rejected by SBI", file=sys.stderr)
@@ -661,6 +701,14 @@ def sync_from_sbi(portfolio_path: str) -> str:
         return "network_error"
 
     holdings, _ = _parse_sbi_holdings(html)
+    if not holdings:
+        # Mobile page may be JS-rendered SPA. Retry with desktop UA.
+        print("[INFO] Mobile parse returned 0 holdings, retrying with desktop UA...", file=sys.stderr)
+        html2, status2 = _fetch_sbi_page(cookie, url=_SBI_PORTFOLIO_URL_DESKTOP, user_agent=_DESKTOP_UA)
+        if html2:
+            holdings, _ = _parse_sbi_holdings(html2)
+            if holdings:
+                html = html2  # use desktop response for debug saving
     if not holdings:
         print("[WARN] SBIから保有銘柄を抽出できませんでした。", file=sys.stderr)
         # Save raw HTML for debugging pattern mismatch
