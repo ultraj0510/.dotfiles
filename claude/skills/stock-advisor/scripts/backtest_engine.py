@@ -440,7 +440,8 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     margin_mode: bool = False,
                     margin_params: dict = None,
                     ticker: str = "",
-                    cost_params: dict = None) -> dict:
+                    cost_params: dict = None,
+                    execution_delay: int = 0) -> dict:
     """Simulate trades from signal DataFrame and compute performance metrics.
 
     One position at a time. When margin_mode=True, short selling and margin
@@ -453,6 +454,10 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
     When cost_params is provided (or defaults active), transaction costs
     (commission, slippage, market impact) are deducted from each trade.
     Set cost_params=None to disable.
+
+    execution_delay > 0 introduces a T+1 delay between signal detection and
+    execution. Signal on day T executes at day T+1 close. Last-row signals
+    are skipped. Default 0 = same-day (backward compatible).
     """
     if risk_params is None:
         risk_params = DEFAULT_RISK_PARAMS
@@ -492,6 +497,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
     daily_returns = []
     prev_close = None
     prev_position = 0
+    pending_signal = None  # (signal_val, signal_rule) buffered for T+1 execution
 
     for _, row in signals_df.iterrows():
         close = row["close"]
@@ -521,6 +527,11 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                                  min(vol_target_max, vol_target / realized_vol))
         else:
             vol_multiplier = 1.0
+
+        # Position sizing: base 100 shares scaled by vol_multiplier (0.5–2.0).
+        # Floor 100, ceiling 200, rounded to 100-share lots.
+        raw = max(100, min(round(100 * vol_multiplier / 100) * 100, 200))
+        actual_shares = max(100, min(raw, 200))
 
         # Margin cost daily accrual
         if margin_mode and position != 0:
@@ -570,14 +581,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     )
                     trade["margin_cost"] = cost
                     trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-                    tc = _compute_transaction_cost(close, 100, ticker,
+                    tc = _compute_transaction_cost(close, actual_shares, ticker,
                                                    row.get("volume_ratio", 1.0),
                                                    cost_params)
                     trade["transaction_cost"] = tc
-                    trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                    trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
                     total_transaction_cost += tc["total"]
                     if daily_returns:
-                        daily_returns[-1] -= tc["total"] / (entry_price * 100)
+                        daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
+                    trade["shares"] = actual_shares
                     trades.append(trade)
                     position = 0
                     entry_price = 0
@@ -610,14 +622,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                 )
                 trade["margin_cost"] = cost
                 trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-                tc = _compute_transaction_cost(close, 100, ticker,
+                tc = _compute_transaction_cost(close, actual_shares, ticker,
                                                row.get("volume_ratio", 1.0),
                                                cost_params)
                 trade["transaction_cost"] = tc
-                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
                 total_transaction_cost += tc["total"]
                 if daily_returns:
-                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
+                    daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
+                trade["shares"] = actual_shares
                 trades.append(trade)
                 position = 0
                 entry_price = 0
@@ -633,6 +646,20 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
 
         # Signal check — state machine
         sig = row["signal"]
+        sig_rule = row.get("signal_rule")
+
+        # Execution delay: buffer signal and apply pending
+        if execution_delay > 0:
+            # Skip signals on the last row (no T+1 to execute)
+            is_last = (row.name == signals_df.index[-1])
+            if pending_signal is not None:
+                sig, sig_rule = pending_signal
+                pending_signal = None
+            elif not is_last:
+                pending_signal = (sig, sig_rule)
+                sig = 0
+                sig_rule = None
+            # If last row and no pending signal: sig at last row is skipped
 
         if sig == 1:
             if position == 0:
@@ -657,14 +684,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                 )
                 trade["margin_cost"] = cost
                 trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-                tc = _compute_transaction_cost(close, 100, ticker,
+                tc = _compute_transaction_cost(close, actual_shares, ticker,
                                                row.get("volume_ratio", 1.0),
                                                cost_params)
                 trade["transaction_cost"] = tc
-                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
                 total_transaction_cost += tc["total"]
                 if daily_returns:
-                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
+                    daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
+                trade["shares"] = actual_shares
                 trades.append(trade)
                 position = 1
                 entry_price = close
@@ -690,14 +718,15 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                 )
                 trade["margin_cost"] = cost
                 trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-                tc = _compute_transaction_cost(close, 100, ticker,
+                tc = _compute_transaction_cost(close, actual_shares, ticker,
                                                row.get("volume_ratio", 1.0),
                                                cost_params)
                 trade["transaction_cost"] = tc
-                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
+                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
                 total_transaction_cost += tc["total"]
                 if daily_returns:
-                    daily_returns[-1] -= tc["total"] / (entry_price * 100)
+                    daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
+                trade["shares"] = actual_shares
                 trades.append(trade)
                 position = 0
                 entry_price = 0
@@ -845,6 +874,12 @@ def _empty_metrics():
         "avg_mfe_capture_pct": None,
         "avg_exit_efficiency": None,
         "early_exit_count": 0,
+        "var_95": None,
+        "var_99": None,
+        "cvar_95": None,
+        "cvar_99": None,
+        "skewness": None,
+        "kurtosis": None,
     }
 
 
@@ -955,6 +990,26 @@ def _compute_metrics(trades: list, daily_returns: list,
     avg_exit_efficiency = round(float(np.mean(exit_effs)), 4) if exit_effs else None
     early_exit_count = sum(1 for t in trades if t.get("mfe_capture_pct") is not None and t["mfe_capture_pct"] < 30)
 
+    # Tail-risk metrics from daily returns
+    if len(dr_array) >= 20:
+        var_95 = round(float(np.percentile(dr_array, 5)) * 100, 4)
+        var_99 = round(float(np.percentile(dr_array, 1)) * 100, 4)
+        below_95 = dr_array[dr_array <= np.percentile(dr_array, 5)]
+        below_99 = dr_array[dr_array <= np.percentile(dr_array, 1)]
+        cvar_95 = round(float(np.mean(below_95)) * 100, 4) if len(below_95) > 0 else var_95
+        cvar_99 = round(float(np.mean(below_99)) * 100, 4) if len(below_99) > 0 else var_99
+        m, s = float(np.mean(dr_array)), float(np.std(dr_array, ddof=1))
+        if s > 0 and len(dr_array) >= 3:
+            skewness = round(float(np.sum((dr_array - m) ** 3) / len(dr_array) / (s ** 3)), 4)
+            kurtosis = round(float(np.sum((dr_array - m) ** 4) / len(dr_array) / (s ** 4)) - 3, 4)
+        else:
+            skewness = None
+            kurtosis = None
+    else:
+        var_95 = var_99 = cvar_95 = cvar_99 = None
+        skewness = None
+        kurtosis = None
+
     return {
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": round(sortino, 4),
@@ -979,6 +1034,12 @@ def _compute_metrics(trades: list, daily_returns: list,
         "avg_mfe_capture_pct": avg_mfe_capture_pct,
         "avg_exit_efficiency": avg_exit_efficiency,
         "early_exit_count": early_exit_count,
+        "var_95": var_95,
+        "var_99": var_99,
+        "cvar_95": cvar_95,
+        "cvar_99": cvar_99,
+        "skewness": skewness,
+        "kurtosis": kurtosis,
     }
 
 
@@ -1030,12 +1091,17 @@ def grid_search(ticker: str, start_date: str, end_date: str,
 def walk_forward(ticker: str, start_date: str, end_date: str,
                  thresholds: dict = None, risk_params: dict = None,
                  margin_mode: bool = False,
-                 strategy_mode: str = "default") -> dict:
-    """Walk-forward analysis: 70% train / 30% test split.
+                 strategy_mode: str = "default",
+                 embargo_days: int = 5,
+                 overfit_threshold: float = 30.0,
+                 execution_delay: int = 0) -> dict:
+    """Walk-forward analysis: 70% train / 30% test split with purging.
 
-    Train on first 70% of the period, evaluate on last 30%.
-    Overfitting guard: if train/test Sharpe diff > 50% or test Sharpe < 0,
-    discard tuned thresholds and use defaults.
+    Train on first 70%, evaluate on last 30%. A purging gap of embargo_days
+    separates train and test to prevent leakage from overlapping observations.
+
+    Overfitting guard: if train/test Sharpe degradation > overfit_threshold %
+    or test Sharpe < 0, discard tuned thresholds and use defaults.
     """
     if thresholds is None:
         thresholds = DEFAULT_THRESHOLDS
@@ -1044,21 +1110,26 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
 
     start = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date)
-    split = start + (end - start) * 0.7
+    total = (end - start).days
+    split_point = start + timedelta(days=int(total * 0.7))
     train_start = start.strftime("%Y-%m-%d")
-    train_end = split.strftime("%Y-%m-%d")
-    test_start = (split + timedelta(days=1)).strftime("%Y-%m-%d")
+    train_end = (split_point - timedelta(days=embargo_days)).strftime("%Y-%m-%d")
+    test_start = split_point.strftime("%Y-%m-%d")
     test_end = end.strftime("%Y-%m-%d")
 
     # Train period
     train_sig = generate_signals(ticker, train_start, train_end, thresholds,
                                  strategy_mode=strategy_mode)
-    train_metrics = simulate_trades(train_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
+    train_metrics = simulate_trades(train_sig, risk_params, ticker=ticker,
+                                    margin_mode=margin_mode,
+                                    execution_delay=execution_delay)
 
     # Test period (out-of-sample)
     test_sig = generate_signals(ticker, test_start, test_end, thresholds,
                                 strategy_mode=strategy_mode)
-    test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
+    test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker,
+                                   margin_mode=margin_mode,
+                                   execution_delay=execution_delay)
 
     # Overfitting guard
     train_sharpe = train_metrics["sharpe_ratio"]
@@ -1068,7 +1139,7 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
     else:
         sharpe_diff_pct = 0 if test_sharpe == 0 else 100
 
-    overfit = bool((sharpe_diff_pct > 50) or (test_sharpe < 0))
+    overfit = bool((sharpe_diff_pct > overfit_threshold) or (test_sharpe < 0))
     tuned_thresholds = None
     tuned_test_metrics = None
     if overfit:
@@ -1078,7 +1149,9 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
         risk_params = DEFAULT_RISK_PARAMS
         test_sig = generate_signals(ticker, test_start, test_end, thresholds,
                                     strategy_mode=strategy_mode)
-        test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker, margin_mode=margin_mode)
+        test_metrics = simulate_trades(test_sig, risk_params, ticker=ticker,
+                                       margin_mode=margin_mode,
+                                       execution_delay=execution_delay)
 
     result = {
         "train_period": {"start": train_start, "end": train_end},
@@ -1099,11 +1172,15 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
 def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                          thresholds: dict = None, risk_params: dict = None,
                          margin_mode: bool = False, n_windows: int = 3,
-                         strategy_mode: str = "default") -> dict:
-    """Rolling walk-forward with N equally-spaced windows across the date range.
+                         strategy_mode: str = "default",
+                         embargo_days: int = 5,
+                         execution_delay: int = 0) -> dict:
+    """Rolling walk-forward with N sequential non-overlapping windows.
 
-    Each window does a 70/30 train/test split. Returns per-window results,
-    consensus verdict, and backward-compatible legacy keys from window 0.
+    Each window is an independent 70/30 train/test split using sequential
+    (non-nested) date ranges. A purging gap of embargo_days separates train
+    and test within each window. Returns per-window results, consensus verdict,
+    and backward-compatible legacy keys from window 0.
     """
     if thresholds is None:
         thresholds = DEFAULT_THRESHOLDS
@@ -1116,7 +1193,9 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     if total_days < 10:
         result = dict(walk_forward(ticker, start_date, end_date, thresholds,
                                    risk_params, margin_mode,
-                                   strategy_mode=strategy_mode))
+                                   strategy_mode=strategy_mode,
+                                   embargo_days=embargo_days,
+                                   execution_delay=execution_delay))
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -1131,7 +1210,9 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     if total_days < 252:
         result = dict(walk_forward(ticker, start_date, end_date, thresholds,
                                    risk_params, margin_mode,
-                                   strategy_mode=strategy_mode))
+                                   strategy_mode=strategy_mode,
+                                   embargo_days=embargo_days,
+                                   execution_delay=execution_delay))
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -1143,21 +1224,27 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
         }
         return result
 
-    # Generate n_windows equally-spaced anchor dates
-    anchors = []
-    for i in range(n_windows):
-        frac = (i + 1) / n_windows
-        anchor = start + timedelta(days=int(total_days * frac))
-        anchors.append(anchor.strftime("%Y-%m-%d"))
+    # Generate n_windows sequential non-overlapping windows using half-open
+    # date ranges [start, end). Each window spans per_window_range days.
+    per_window_range = total_days // n_windows
 
     rolling_windows = []
-    for i, anchor_str in enumerate(anchors):
-        wf = walk_forward(ticker, start_date, anchor_str,
+    for i in range(n_windows):
+        w_start = start + timedelta(days=i * per_window_range)
+        w_end = start + timedelta(days=(i + 1) * per_window_range)
+
+        wf = walk_forward(ticker, w_start.strftime("%Y-%m-%d"),
+                          w_end.strftime("%Y-%m-%d"),
                           thresholds, risk_params, margin_mode,
-                          strategy_mode=strategy_mode)
+                          strategy_mode=strategy_mode,
+                          embargo_days=embargo_days,
+                          execution_delay=execution_delay)
         rolling_windows.append({
             "window": i,
-            "end_date": anchor_str,
+            "train_start": wf["train_period"]["start"],
+            "train_end": wf["train_period"]["end"],
+            "test_start": wf["test_period"]["start"],
+            "test_end": wf["test_period"]["end"],
             "train_metrics": wf["train_metrics"],
             "test_metrics": wf["test_metrics"],
             "sharpe_diff_pct": wf["sharpe_diff_pct"],
@@ -1178,7 +1265,7 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     else:
         half = n_windows // 2
         if overfit_count > half:
-            verdict = "overfit"
+            verdict = "insufficient_data"
         elif std_sharpe < 0.5:
             verdict = "robust"
         else:
@@ -1513,6 +1600,8 @@ def main():
                         help="Bypass backtest result cache")
     parser.add_argument("--cache-ttl", type=int, default=86400,
                         help="Cache TTL in seconds (default: 86400 = 24h)")
+    parser.add_argument("--execution-delay", action="store_true",
+                        help="Apply 1-day delay between signal and execution")
     args = parser.parse_args()
 
 
@@ -1558,6 +1647,7 @@ def main():
 
     # Baseline with default thresholds
     margin_mode = args.margin
+    execution_delay = 1 if args.execution_delay else 0
 
     if args.strategy == "all":
         strategy_comparison = {}
@@ -1565,10 +1655,12 @@ def main():
         for sm in ["default", "trend", "contrarian"]:
             sig_df = generate_signals(args.ticker, start_date, end_date,
                                       strategy_mode=sm)
-            baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+            baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                       execution_delay=execution_delay)
             baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
-                                      margin_mode=margin_mode, strategy_mode=sm)
+                                      margin_mode=margin_mode, strategy_mode=sm,
+                                      execution_delay=execution_delay)
             strategy_comparison[sm] = {
                 "label": strategy_labels[sm],
                 "baseline": baseline,
@@ -1577,10 +1669,12 @@ def main():
         # Use "default" as the primary result
         result["strategy_comparison"] = strategy_comparison
         sig_df = generate_signals(args.ticker, start_date, end_date)
-        baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+        baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                   execution_delay=execution_delay)
         baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
         result["baseline"] = baseline
-        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode)
+        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
+                                  execution_delay=execution_delay)
         result["walk_forward"] = wf
     else:
         sig_df = generate_signals(args.ticker, start_date, end_date,
