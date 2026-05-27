@@ -68,8 +68,33 @@ DEFAULT_MARGIN_PARAMS = {
 # Transaction cost model (A5)
 # Tickers known to be TOPIX 500 constituents (lower slippage/impact)
 TOPIX500_TICKERS = {
-    "5803.T", "7013.T", "7974.T", "7203.T", "8306.T",
-    "8411.T", "4307.T", "9984.T", "7003.T",
+    # Automobiles & Transport
+    "7203.T", "7267.T", "7201.T", "7202.T", "7269.T", "7270.T",
+    # Electronics & Precision
+    "6758.T", "7751.T", "7752.T", "7735.T", "6954.T", "6861.T", "8035.T",
+    "6723.T", "6724.T", "6971.T", "6501.T", "6502.T", "6503.T", "6504.T",
+    # Financials (Banks, Securities, Insurance)
+    "8306.T", "8411.T", "8316.T", "8308.T", "8309.T", "7186.T", "7182.T",
+    "8604.T", "8601.T", "8766.T", "8725.T", "8729.T", "8630.T", "8750.T",
+    # Trading Companies & Industrials
+    "8058.T", "8001.T", "8002.T", "8031.T", "8015.T",
+    "7011.T", "7013.T", "7012.T", "6301.T", "6302.T", "6305.T", "6326.T",
+    "5803.T", "5802.T", "5801.T",
+    # Chemicals & Materials
+    "4063.T", "4188.T", "3407.T", "3402.T", "4183.T",
+    "5401.T", "5411.T", "5713.T",
+    # Pharma & Healthcare
+    "4502.T", "4503.T", "4519.T", "4568.T", "4523.T", "4151.T",
+    # IT & Telecom
+    "9984.T", "9432.T", "9433.T", "9434.T", "9613.T", "4689.T",
+    "4307.T", "7974.T",
+    # Consumer & Retail
+    "2914.T", "3382.T", "8267.T", "4452.T", "4901.T", "4911.T",
+    "7003.T", "7004.T", "9201.T", "9202.T",
+    # Real Estate & Construction
+    "8801.T", "8802.T", "8830.T", "1801.T", "1802.T", "1925.T",
+    # Energy & Utilities
+    "9501.T", "9502.T", "9503.T", "9531.T", "5020.T",
 }
 
 DEFAULT_COST_PARAMS = {
@@ -250,6 +275,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
 
         signal = 0
         signal_rule = None
+        signal_strength = None
 
         # Oversold reversal BUY (with trend filter)
         if (rsi is not None and rsi < thresholds["rsi_lower"]
@@ -257,6 +283,13 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and trend_state != "strong_downtrend"):
             signal = 1
             signal_rule = "oversold_reversal"
+            vol_r = _safe_float(vol_ratio) if vol_ratio else None
+            if boll_lb is not None and close_val is not None and close_val <= boll_lb * 1.02 and vol_r and vol_r > 1.2:
+                signal_strength = "strong"
+            elif boll_lb is not None and close_val is not None and close_val <= boll_lb * 1.05:
+                signal_strength = "moderate"
+            else:
+                signal_strength = "weak"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
@@ -265,6 +298,13 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if signal == 0 and ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
             signal = 1
             signal_rule = "momentum"
+            if vol_ratio is not None:
+                if _safe_float(vol_ratio) > 1.5:
+                    signal_strength = "strong"
+                elif _safe_float(vol_ratio) > 1.0:
+                    signal_strength = "moderate"
+                else:
+                    signal_strength = "weak"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
@@ -275,9 +315,14 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio is not None and vol_ratio > 0.8):
             signal = 1
             signal_rule = "trend_following"
+            if vol_ratio is not None and _safe_float(vol_ratio) > 1.2:
+                signal_strength = "strong"
+            else:
+                signal_strength = "moderate"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
+            signal_strength = None
 
         # MA support bounce BUY
         if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
@@ -285,9 +330,14 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and rsi is not None and rsi < 45):
             signal = 1
             signal_rule = "ma_support_bounce"
+            if rsi is not None and rsi < 35:
+                signal_strength = "moderate"
+            else:
+                signal_strength = "weak"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
+            signal_strength = None
 
         # ============================================================
         # Pass 2: SELL rules (first-match-wins, overwrites BUY)
@@ -300,6 +350,10 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
             sell_signal = -1
             sell_rule = "overbought"
+            if rsi is not None and rsi > 80 and vol_ratio is not None and _safe_float(vol_ratio) > 1.2:
+                signal_strength = "strong"
+            else:
+                signal_strength = "moderate"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
             sell_signal = 0
             sell_rule = None
@@ -311,6 +365,13 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio > thresholds["breakdown_vol"]):
             sell_signal = -1
             sell_rule = "momentum_breakdown"
+            if vol_ratio is not None:
+                if _safe_float(vol_ratio) > 2.0:
+                    signal_strength = "strong"
+                elif _safe_float(vol_ratio) > 1.5:
+                    signal_strength = "moderate"
+                else:
+                    signal_strength = "weak"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
             sell_signal = 0
             sell_rule = None
@@ -319,9 +380,14 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if sell_signal == 0 and ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
             sell_signal = -1
             sell_rule = "drawdown_stop"
+            if ret_20d is not None and ret_20d < -20:
+                signal_strength = "strong"
+            else:
+                signal_strength = "moderate"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
             sell_signal = 0
             sell_rule = None
+            signal_strength = None
 
         # Death cross SELL: SMA ratio proximity detection
         if sell_signal == 0 and sma_50 is not None and sma_200 is not None and sma_200 > 0 \
@@ -330,6 +396,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             if 0.99 <= sma_ratio <= 1.01:
                 sell_signal = -1
                 sell_rule = "death_cross"
+            signal_strength = "strong"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
             sell_signal = 0
             sell_rule = None
@@ -357,6 +424,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             "ret_10d": ret_10d,
             "signal": signal,
             "signal_rule": signal_rule,
+            "signal_strength": signal_strength,
         })
 
     return pd.DataFrame(rows)
@@ -880,6 +948,9 @@ def _empty_metrics():
         "cvar_99": None,
         "skewness": None,
         "kurtosis": None,
+        "sharpe_ci_lower": None,
+        "sharpe_ci_upper": None,
+        "deflated_sharpe": None,
     }
 
 
@@ -990,6 +1061,22 @@ def _compute_metrics(trades: list, daily_returns: list,
     avg_exit_efficiency = round(float(np.mean(exit_effs)), 4) if exit_effs else None
     early_exit_count = sum(1 for t in trades if t.get("mfe_capture_pct") is not None and t["mfe_capture_pct"] < 30)
 
+    # Bootstrap Sharpe 95% confidence interval (1000 resamples)
+    if len(dr_array) >= 20:
+        n_bs = 1000
+        np.random.seed(42)
+        bs_sharpes = []
+        for _ in range(n_bs):
+            sample = np.random.choice(dr_array, size=len(dr_array), replace=True)
+            m, s = float(np.mean(sample)), float(np.std(sample))
+            bs_sharpes.append((m / s * math.sqrt(252)) if s > 0 else 0.0)
+        sharpe_ci_lower = round(float(np.percentile(bs_sharpes, 2.5)), 4)
+        sharpe_ci_upper = round(float(np.percentile(bs_sharpes, 97.5)), 4)
+        # Deflated Sharpe (Bonferroni correction for 256 grid-search combos)
+        deflated_sharpe = round(sharpe * (1 - 0.05 / 256), 4)
+    else:
+        sharpe_ci_lower = sharpe_ci_upper = deflated_sharpe = None
+
     # Tail-risk metrics from daily returns
     if len(dr_array) >= 20:
         var_95 = round(float(np.percentile(dr_array, 5)) * 100, 4)
@@ -1040,6 +1127,9 @@ def _compute_metrics(trades: list, daily_returns: list,
         "cvar_99": cvar_99,
         "skewness": skewness,
         "kurtosis": kurtosis,
+        "sharpe_ci_lower": sharpe_ci_lower,
+        "sharpe_ci_upper": sharpe_ci_upper,
+        "deflated_sharpe": deflated_sharpe,
     }
 
 
