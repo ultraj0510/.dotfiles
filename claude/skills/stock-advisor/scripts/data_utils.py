@@ -71,16 +71,20 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
 # Changes:
 #   - config.get_config() replaced with module constant CACHE_DIR
 #   - CSV cache write uses tempfile + shutil.move for atomicity
-def load_ohlcv(symbol: str, curr_date: str, force_refresh: bool = False) -> pd.DataFrame:
+def load_ohlcv(symbol: str, curr_date: str, force_refresh: bool = False,
+               max_date: str = None) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 5 years of data up to today and caches per symbol. Cache has a
-    24h TTL — after expiry a refresh is attempted, falling back to stale cache
-    on failure. Pass force_refresh=True to bypass TTL and force re-download.
+    Downloads 5 years of data and caches per symbol. Cache has a 24h TTL.
+
+    When max_date is provided, the download range ends at max_date instead of
+    today. This pins the data window for reproducible backtest results.
+
+    Pass force_refresh=True to bypass TTL and force re-download.
     """
     curr_date_dt = pd.to_datetime(curr_date)
 
-    today_date = pd.Timestamp.today()
+    today_date = pd.to_datetime(max_date) if max_date else pd.Timestamp.today()
     start_date = today_date - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = today_date.strftime("%Y-%m-%d")
@@ -173,6 +177,12 @@ def _compute_custom_indicator(data: pd.DataFrame, indicator: str) -> pd.Series:
         raise ValueError(f"Unknown custom indicator: {indicator}")
 
 
+# === In-process indicator cache ===
+# Avoids redundant _get_stock_stats_bulk() calls within the same process.
+# Keyed by (symbol, indicator, curr_date). Process-lifetime only.
+_indicator_cache = {}
+
+
 # === Extracted from y_finance.py:234-274 ===
 def _get_stock_stats_bulk(
     symbol: str,
@@ -183,7 +193,12 @@ def _get_stock_stats_bulk(
 
     Fetches data once and calculates indicator for all available dates.
     Returns dict mapping date strings to indicator values.
+    Results are cached in-process for the lifetime of the process.
     """
+    cache_key = (symbol, indicator, curr_date)
+    if cache_key in _indicator_cache:
+        return _indicator_cache[cache_key]
+
     data = load_ohlcv(symbol, curr_date)
 
     if indicator in _CUSTOM_INDICATORS:
@@ -192,6 +207,7 @@ def _get_stock_stats_bulk(
         result_dict = {}
         for date_str, val in zip(date_col, values):
             result_dict[date_str] = "N/A" if pd.isna(val) else f"{val:.2f}"
+        _indicator_cache[cache_key] = result_dict
         return result_dict
 
     from stockstats import wrap
@@ -210,4 +226,5 @@ def _get_stock_stats_bulk(
         else:
             result_dict[date_str] = str(indicator_value)
 
+    _indicator_cache[cache_key] = result_dict
     return result_dict

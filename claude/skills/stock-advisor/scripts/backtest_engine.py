@@ -24,6 +24,7 @@ import pandas as pd
 
 from data_utils import _CUSTOM_INDICATORS, _get_stock_stats_bulk, load_ohlcv
 from signal_engine import compute_trend_state, get_latest_trading_day
+from backtest_cache import load_cached_result, save_cached_result
 from signal_rules import (
     RSI_LOWER, RSI_UPPER,
     POSITION_52W_LOWER, POSITION_52W_UPPER,
@@ -1508,13 +1509,34 @@ def main():
     parser.add_argument("--output", "-o", help="Output JSON file path")
     parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all"],
                         default="default", help="Strategy mode for signal generation")
+    parser.add_argument("--no-cache", action="store_true",
+                        help="Bypass backtest result cache")
+    parser.add_argument("--cache-ttl", type=int, default=86400,
+                        help="Cache TTL in seconds (default: 86400 = 24h)")
     args = parser.parse_args()
 
 
     end_date = args.end
     if not end_date:
-        # Use latest trading day
         end_date = get_latest_trading_day()
+
+    # Check backtest result cache
+    if not args.no_cache and not args.tune and args.strategy != "all":
+        cached = load_cached_result(args.ticker, args.strategy, end_date,
+                                    max_age=args.cache_ttl)
+        if cached is not None:
+            cached.pop("_config_hash", None)
+            if args.output:
+                output_json = json.dumps(cached, ensure_ascii=False, indent=2, default=str)
+                os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+                with open(args.output, "w") as f:
+                    f.write(output_json)
+                print(f"Output written to {args.output} (from cache)")
+            else:
+                print(json.dumps(cached, ensure_ascii=False, indent=2, default=str))
+            if args.summary:
+                _print_summary(cached)
+            return
 
     start_date = args.start
     if not start_date:
@@ -1524,12 +1546,13 @@ def main():
     result = {
         "ticker": args.ticker,
         "period": {"start": start_date, "end": end_date},
+        "resolved_end_date": end_date,
         "default_thresholds": DEFAULT_THRESHOLDS,
         "default_risk_params": DEFAULT_RISK_PARAMS,
     }
 
-    # Benchmark (buy-and-hold)
-    ohlcv = load_ohlcv(args.ticker, end_date)
+    # Benchmark (buy-and-hold) — pin max_date for reproducible data window
+    ohlcv = load_ohlcv(args.ticker, end_date, max_date=end_date)
     result["benchmark"] = _compute_benchmark(ohlcv, start_date, end_date)
 
     # Baseline with default thresholds
@@ -1582,6 +1605,10 @@ def main():
             result["walk_forward_tuned"] = wf_tuned
 
     output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
+
+    # Save to cache (skip for --no-cache, --tune, and --strategy all)
+    if not args.no_cache and not args.tune and args.strategy != "all":
+        save_cached_result(args.ticker, args.strategy, end_date, result)
 
     if args.output:
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
