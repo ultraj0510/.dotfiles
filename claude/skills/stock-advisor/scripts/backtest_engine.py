@@ -24,18 +24,22 @@ import pandas as pd
 
 from data_utils import _CUSTOM_INDICATORS, _get_stock_stats_bulk, load_ohlcv
 from signal_engine import compute_trend_state, get_latest_trading_day
+from signal_rules import (
+    RSI_LOWER, RSI_UPPER,
+    POSITION_52W_LOWER, POSITION_52W_UPPER,
+    MOMENTUM_5D, BREAKDOWN_5D, BREAKDOWN_VOL, DRAWDOWN_20D,
+)
 
-# Default signal thresholds
+# Default signal thresholds (grid_search-compatible dict)
 DEFAULT_THRESHOLDS = {
-    "rsi_lower": 30,
-    "rsi_upper": 70,
-    "position_52w_lower": 25,
-    "position_52w_upper": 85,
-    "momentum_5d": 7.0,
-    "momentum_vol": 1.0,
-    "breakdown_5d": -7.0,
-    "breakdown_vol": 1.5,
-    "drawdown_20d": -15.0,
+    "rsi_lower": RSI_LOWER,
+    "rsi_upper": RSI_UPPER,
+    "position_52w_lower": POSITION_52W_LOWER,
+    "position_52w_upper": POSITION_52W_UPPER,
+    "momentum_5d": MOMENTUM_5D,
+    "breakdown_5d": BREAKDOWN_5D,
+    "breakdown_vol": BREAKDOWN_VOL,
+    "drawdown_20d": DRAWDOWN_20D,
 }
 
 DEFAULT_RISK_PARAMS = {
@@ -145,12 +149,12 @@ def _safe_float(val):
 # Strategy mode rule sets
 STRATEGY_ALLOWED_RULES = {
     "trend": {
-        "buy": {"trend_following", "momentum_buy", "ma_support_bounce"},
+        "buy": {"trend_following", "momentum", "ma_support_bounce"},
         "sell": {"death_cross"},
     },
     "contrarian": {
         "buy": {"oversold_reversal"},
-        "sell": {"overbought_sell", "momentum_breakdown", "drawdown_stop"},
+        "sell": {"overbought", "momentum_breakdown", "drawdown_stop"},
     },
 }
 
@@ -208,9 +212,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
 
     # Signal evaluation: 2-pass architecture.
     # Pass 1 — BUY rules (first-match-wins):
-    #   oversold_reversal → momentum_buy → trend_following → ma_support_bounce
+    #   oversold_reversal → momentum → trend_following → ma_support_bounce
     # Pass 2 — SELL rules (first-match-wins):
-    #   overbought_sell → momentum_breakdown → drawdown_stop → death_cross
+    #   overbought → momentum_breakdown → drawdown_stop → death_cross
     # If any SELL rule fires, it overwrites the BUY signal for that day.
 
     rows = []
@@ -250,24 +254,17 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         # Oversold reversal BUY (with trend filter)
         if (rsi is not None and rsi < thresholds["rsi_lower"]
                 and pos_52w is not None and pos_52w < thresholds["position_52w_lower"]
-                and close_val > 0 and boll_lb is not None and close_val <= boll_lb * 1.02
                 and trend_state != "strong_downtrend"):
-            if trend_state == "downtrend":
-                if rsi < 25:
-                    signal = 1
-                    signal_rule = "oversold_reversal"
-            else:
-                signal = 1
-                signal_rule = "oversold_reversal"
+            signal = 1
+            signal_rule = "oversold_reversal"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
 
         # Momentum BUY
         if signal == 0 and ret_5d is not None and ret_5d > thresholds["momentum_5d"]:
-            if vol_ratio is None or vol_ratio > thresholds["momentum_vol"]:
-                signal = 1
-                signal_rule = "momentum_buy"
+            signal = 1
+            signal_rule = "momentum"
         if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
             signal = 0
             signal_rule = None
@@ -302,7 +299,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if (rsi is not None and rsi > thresholds["rsi_upper"]
                 and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
             sell_signal = -1
-            sell_rule = "overbought_sell"
+            sell_rule = "overbought"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
             sell_signal = 0
             sell_rule = None
@@ -326,13 +323,11 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             sell_signal = 0
             sell_rule = None
 
-        # Death cross SELL (exact detection via prev_date comparison)
-        if sell_signal == 0 and prev_date is not None and sma_50 is not None and sma_200 is not None:
-            sma_50_prev = _safe_float(indicator_data["close_50_sma"].get(prev_date))
-            sma_200_prev = _safe_float(indicator_data["close_200_sma"].get(prev_date))
-            if (sma_50_prev is not None and sma_200_prev is not None
-                    and sma_50_prev >= sma_200_prev
-                    and sma_50 < sma_200 and close_val < sma_50):
+        # Death cross SELL: SMA ratio proximity detection
+        if sell_signal == 0 and sma_50 is not None and sma_200 is not None and sma_200 > 0 \
+                and close_val < sma_50 and sma_50 < sma_200:
+            sma_ratio = sma_50 / sma_200
+            if 0.99 <= sma_ratio <= 1.01:
                 sell_signal = -1
                 sell_rule = "death_cross"
         if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):

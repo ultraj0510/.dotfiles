@@ -29,6 +29,13 @@ from data_utils import (
     load_ohlcv,
     yf_retry,
 )
+from signal_rules import (
+    RSI_LOWER, RSI_UPPER,
+    POSITION_52W_LOWER, POSITION_52W_UPPER,
+    MOMENTUM_5D, MOMENTUM_STRONG_VOL,
+    BREAKDOWN_5D, BREAKDOWN_VOL_GATE,
+    DRAWDOWN_20D, BB_PROXIMITY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,13 +190,13 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
 
     # === BUY signals ===
 
-    # Oversold reversal: RSI < 30 + near BB lower + 52w low zone
+    # Oversold reversal: RSI < RSI_LOWER + near BB lower + 52w low zone
     # Trend filter: suppress in strong_downtrend, downgrade in downtrend
-    if (rsi is not None and rsi < 30
-            and position_52w is not None and position_52w < 25
+    if (rsi is not None and rsi < RSI_LOWER
+            and position_52w is not None and position_52w < POSITION_52W_LOWER
             and trend_state != "strong_downtrend"):
         near_bb = False
-        if close is not None and boll_lb is not None and close <= boll_lb * 1.02:
+        if close is not None and boll_lb is not None and close <= boll_lb * BB_PROXIMITY:
             near_bb = True
         vol_high = vol_ratio is not None and vol_ratio > 1.2
         vol_ok = vol_ratio is not None and vol_ratio > 1.0
@@ -209,9 +216,9 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
                            + (f", near BB lower={boll_lb:.0f}" if near_bb else ""),
         })
 
-    # Momentum BUY: 5d surge > 7% with volume confirmation
-    if ret_5d is not None and ret_5d > 7:
-        vol_high = vol_ratio is not None and vol_ratio > 1.5
+    # Momentum BUY: 5d surge > MOMENTUM_5D% with volume confirmation
+    if ret_5d is not None and ret_5d > MOMENTUM_5D:
+        vol_high = vol_ratio is not None and vol_ratio > MOMENTUM_STRONG_VOL
         vol_ok = vol_ratio is not None and vol_ratio > 1.0
         if vol_high:
             strength = "strong"
@@ -228,8 +235,8 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
 
     # === SELL signals ===
 
-    # Overbought: RSI > 70 + near 52w high
-    if rsi is not None and rsi > 70 and position_52w is not None and position_52w > 85:
+    # Overbought: RSI > RSI_UPPER + near 52w high
+    if rsi is not None and rsi > RSI_UPPER and position_52w is not None and position_52w > POSITION_52W_UPPER:
         vol_high = vol_ratio is not None and vol_ratio > 1.2
         if rsi > 80 and vol_high:
             strength = "strong"
@@ -245,7 +252,7 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
         })
 
     # Momentum breakdown: 5d sharp drop with high volume
-    if ret_5d is not None and ret_5d < -7 and vol_ratio is not None and vol_ratio > 1.0:
+    if ret_5d is not None and ret_5d < BREAKDOWN_5D and vol_ratio is not None and vol_ratio > BREAKDOWN_VOL_GATE:
         if vol_ratio > 2.0:
             strength = "strong"
         elif vol_ratio > 1.5:
@@ -260,7 +267,7 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
         })
 
     # Drawdown stop: 20d decline triggers stop-loss
-    if ret_20d is not None and ret_20d < -15:
+    if ret_20d is not None and ret_20d < DRAWDOWN_20D:
         strength = "strong" if ret_20d < -20 else "moderate"
         signals.append({
             "type": "SELL",
@@ -322,8 +329,9 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
                 "description": f"analyst divergence={div:.1f}%",
             })
 
-    # Sort by strength: strong > moderate
-    signals.sort(key=lambda s: 0 if s["strength"] == "strong" else 1)
+    # Sort by strength: strong > moderate > weak
+    _strength_order = {"strong": 0, "moderate": 1, "weak": 2}
+    signals.sort(key=lambda s: _strength_order.get(s["strength"], 3))
 
     return signals
 
@@ -443,7 +451,7 @@ def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
     return round(max(candidates), 2)
 
 
-def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> dict:
+def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False, macro: dict = None) -> dict:
     """Run full analysis for a single ticker.
 
     Retries up to 10 previous trading days when indicator data is unavailable
@@ -455,7 +463,8 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> d
             load_ohlcv(ticker, date_str, force_refresh=True)
 
         # Macro and analyst data are date-independent
-        macro = fetch_macro_context()
+        if macro is None:
+            macro = fetch_macro_context()
         analyst = fetch_analyst_target(ticker)
 
         # Date fallback: retry up to 10 days for indicator data
@@ -584,8 +593,10 @@ def main():
         "results": [],
     }
 
+    macro = fetch_macro_context()
+
     for ticker in tickers:
-        result = analyze_ticker(ticker.strip(), date_str, force_refresh=args.refresh)
+        result = analyze_ticker(ticker.strip(), date_str, force_refresh=args.refresh, macro=macro)
         result["is_watchlist"] = ticker in watchlist_tickers and ticker not in portfolio_tickers
         if args.factor_mode:
             try:

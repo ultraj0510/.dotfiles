@@ -71,7 +71,7 @@ def fetch_stock_data(ticker: str) -> dict | None:
     signals = check_signal(values)
 
     current_price = values.get("price")
-    if current_price is None or (hasattr(current_price, "item") and current_price != current_price):
+    if current_price is None or (isinstance(current_price, (int, float)) and current_price != current_price):
         return None
 
     return {
@@ -341,8 +341,8 @@ def _load_sbi_cookie() -> str | None:
     return None
 
 
-def _fetch_sbi_page(cookie: str) -> str | None:
-    """Fetch SBI portfolio page, return decoded HTML."""
+def _fetch_sbi_page(cookie: str) -> tuple[str | None, str]:
+    """Fetch SBI portfolio page, return (html, status)."""
     import urllib.request
     import urllib.error
 
@@ -359,19 +359,19 @@ def _fetch_sbi_page(cookie: str) -> str | None:
             raw = resp.read()
             if status != 200:
                 print(f"[WARN] SBI returned HTTP {status}", file=sys.stderr)
-                return None
+                return (None, "http_error")
             if len(raw) < 1000:
                 print(f"[WARN] SBI response too small ({len(raw)} bytes) — likely login page", file=sys.stderr)
-                return None
+                return (None, "login_page")
             for enc in ["cp932", "shift_jis", "utf-8"]:
                 try:
-                    return raw.decode(enc)
+                    return (raw.decode(enc), "ok")
                 except UnicodeDecodeError:
                     continue
-            return raw.decode("cp932", errors="replace")
+            return (raw.decode("cp932", errors="replace"), "ok")
     except Exception as e:
         print(f"[WARN] SBI page fetch failed: {e}", file=sys.stderr)
-        return None
+        return (None, "http_error")
 
 
 def _parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
@@ -646,21 +646,24 @@ def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
     return merged
 
 
-def sync_from_sbi(portfolio_path: str) -> bool:
-    """Sync holdings and account data from SBI. Returns True on success."""
+def sync_from_sbi(portfolio_path: str) -> str:
+    """Sync holdings and account data from SBI. Returns status string."""
     cookie = _load_sbi_cookie()
     if not cookie:
-        return False
+        return "no_cookie"
 
     # Fetch holdings from portfolio page (mobile UA)
-    html = _fetch_sbi_page(cookie)
-    if not html:
-        return False
+    html, fetch_status = _fetch_sbi_page(cookie)
+    if fetch_status == "login_page":
+        print("[AUTH_EXPIRED] Cookie rejected by SBI", file=sys.stderr)
+        return "auth_expired"
+    if html is None:
+        return "network_error"
 
     holdings, _ = _parse_sbi_holdings(html)
     if not holdings:
         print("[WARN] SBIから保有銘柄を抽出できませんでした。", file=sys.stderr)
-        return False
+        return "parse_error"
 
     # Fetch account data from account page (desktop UA for richer data)
     import urllib.request
@@ -699,7 +702,7 @@ def sync_from_sbi(portfolio_path: str) -> bool:
     if existing_holdings:
         merged = _merge_holdings(existing_holdings, holdings)
         if merged is None:
-            return False
+            return "parse_error"
     else:
         merged = holdings
 
@@ -715,7 +718,7 @@ def sync_from_sbi(portfolio_path: str) -> bool:
         yaml.safe_dump(portfolio, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     print(f"[OK] SBI同期完了: {len(holdings)}銘柄", file=sys.stderr)
-    return True
+    return "ok"
 
 
 def main():
@@ -729,13 +732,17 @@ def main():
     # SBI自動同期
     cookie = _load_sbi_cookie()
     if not args.skip_sync and cookie:
-        if not sync_from_sbi(portfolio_path):
-            print("[ERROR] SBI同期に失敗しました。Cookieの有効期限切れの可能性があります。", file=sys.stderr)
-            print("[ERROR] portfolio-authスキルでCookieを再取得してください: /oh-my-claudecode:portfolio-auth", file=sys.stderr)
-            sys.exit(1)
+        status = sync_from_sbi(portfolio_path)
+        if status != "ok":
+            if status == "auth_expired":
+                print("[AUTH_EXPIRED] SBIセッションが切れています。", file=sys.stderr)
+                sys.exit(2)
+            else:
+                print(f"[ERROR] SBI同期に失敗しました ({status})。", file=sys.stderr)
+                sys.exit(1)
         print()
     elif not args.skip_sync and not cookie:
-        print("[WARN] SBI_COOKIEが設定されていません。--skip-syncで既存データを使用します。", file=sys.stderr)
+        print("[WARN] SBI_COOKIEが設定されていません。", file=sys.stderr)
 
     if not os.path.isfile(portfolio_path):
         print(f"[ERROR] portfolio.yaml not found at {portfolio_path}", file=sys.stderr)
