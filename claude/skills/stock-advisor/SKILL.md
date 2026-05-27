@@ -249,7 +249,11 @@ done
 **損切り価格:** ¥X,XXX
 **短期 (1-4週):** [見通し]
 **中期 (1-6ヶ月):** [見通し]
-**所見:** [判断根拠 2-3行。シグナル・アナリスト評価・トレンドを踏まえた具体的な指示]
+**リスク指標:** VaR 95%=-X.XX% / CVaR 95%=-X.XX% / Skewness=X.XX / Kurtosis=X.XX
+**バックテスト:** Sharpe CI=[X.XX, X.XX] / Deflated Sharpe=X.XX / WF判定=[robust/unstable/insufficient_data]
+**所見:** [判断根拠 2-3行。シグナル・アナリスト評価・トレンド・リスク指標・WF判定を踏まえた具体的な指示]
+
+**必須**: 全銘柄の所見に VaR/CVaR、Sharpe CI、WF判定の数値を必ず含める。バックテスト結果は `$RESULTS_DIR/backtest/{TICKER}.json` から取得する。
 
 ---
 

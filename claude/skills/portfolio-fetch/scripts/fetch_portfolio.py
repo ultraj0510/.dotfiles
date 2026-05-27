@@ -53,38 +53,64 @@ def load_portfolio(portfolio_path: str = None) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def fetch_stock_data(ticker: str) -> dict | None:
-    """1銘柄の株価・指標・シグナルを取得する。"""
+def fetch_stock_data(ticker: str, fallback_price: float = None) -> dict | None:
+    """1銘柄の株価・指標・シグナルを取得する。
+
+    If yfinance fails but fallback_price is provided (e.g. from SBI sync),
+    returns a minimal dict with the SBI price. This prevents ¥0/data-failure
+    displays when the market is closed.
+    """
+    price = None
+    rsi = bb_lower = bb_upper = ma20 = atr = 0.0
+    signals = []
+    signal_desc = ""
+    market_phase = "neutral"
+    surge = False
+
     try:
         from data.fetcher import get_stock_data
         from indicators.calculator import calculate_indicators, get_latest_values
         from signals.engine import check_signal, describe_signals
+
+        df = get_stock_data(ticker, period="1y")
+        if df is not None:
+            df = calculate_indicators(df)
+            values = get_latest_values(df)
+            signals = check_signal(values)
+            signal_desc = describe_signals(signals)
+
+            p = values.get("price")
+            if p is not None and not (isinstance(p, (int, float)) and p != p):
+                price = float(p.iloc[0] if hasattr(p, "iloc") else p)
+
+            rsi = round(float(values.get("rsi", 0) or 0), 1)
+            bb_lower = round(float(values.get("bb_lower", 0) or 0), 0)
+            bb_upper = round(float(values.get("bb_upper", 0) or 0), 0)
+            ma20 = round(float(values.get("ma20", 0) or 0), 0)
+            atr = round(float(values.get("atr", 0) or 0), 0)
+            market_phase = values.get("market_phase", "neutral")
+            surge = bool(values.get("surge_days", 0) > 0)
     except ImportError:
-        return None
+        pass
 
-    df = get_stock_data(ticker, period="1y")
-    if df is None:
-        return None
+    # Use SBI-synced fallback price if yfinance failed
+    if price is None and fallback_price and fallback_price > 0:
+        price = fallback_price
 
-    df = calculate_indicators(df)
-    values = get_latest_values(df)
-    signals = check_signal(values)
-
-    current_price = values.get("price")
-    if current_price is None or (isinstance(current_price, (int, float)) and current_price != current_price):
+    if price is None or price <= 0:
         return None
 
     return {
-        "price": round(float(current_price.iloc[0] if hasattr(current_price, "iloc") else current_price), 0),
-        "rsi": round(float(values.get("rsi", 0) or 0), 1),
-        "bb_lower": round(float(values.get("bb_lower", 0) or 0), 0),
-        "bb_upper": round(float(values.get("bb_upper", 0) or 0), 0),
-        "ma20": round(float(values.get("ma20", 0) or 0), 0),
+        "price": round(price, 0),
+        "rsi": rsi,
+        "bb_lower": bb_lower,
+        "bb_upper": bb_upper,
+        "ma20": ma20,
         "signals": signals,
-        "signal_desc": describe_signals(signals),
-        "market_phase": values.get("market_phase", "neutral"),
-        "atr": round(float(values.get("atr", 0) or 0), 0),
-        "surge_detected": bool(values.get("surge_days", 0) > 0),
+        "signal_desc": signal_desc,
+        "market_phase": market_phase,
+        "atr": atr,
+        "surge_detected": surge,
     }
 
 
@@ -187,7 +213,8 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
         qty = h.get("quantity", 0)
         cost = h.get("cost_price", 0)
 
-        stock = fetch_stock_data(ticker)
+        fallback = h.get("current_price") or cost
+        stock = fetch_stock_data(ticker, fallback_price=fallback)
         credit_risks = {}
         if pos_type == "信用":
             if stock:
