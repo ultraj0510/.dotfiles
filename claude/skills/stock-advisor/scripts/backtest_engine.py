@@ -496,6 +496,39 @@ def _compute_realized_vol(returns_window: list, annualize: bool = True) -> float
     return daily_vol * math.sqrt(252) if annualize else daily_vol
 
 
+def _close_position(entry_date, exit_date, entry_price, close, ret, exit_reason,
+                    position, entry_rule, trend_state, vol_mult,
+                    high_since, low_since, actual_shares, margin_accrued,
+                    margin_mode, ticker, vol_ratio, cost_params,
+                    trades, daily_returns, total_tc):
+    """Record a trade, compute costs, reset position state. Returns updated state dict."""
+    direction = "long" if position == 1 else "short"
+    cost = round(margin_accrued, 2) if margin_mode else 0.0
+    trade = _build_trade(
+        entry_date, exit_date, entry_price, close, ret,
+        exit_reason, high_since, low_since,
+        entry_rule, direction,
+        trend_state_at_entry=trend_state,
+    )
+    trade["margin_cost"] = cost
+    trade["vol_multiplier"] = round(vol_mult, 4)
+    tc = _compute_transaction_cost(close, actual_shares, ticker, vol_ratio, cost_params)
+    trade["transaction_cost"] = tc
+    trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
+    trade["shares"] = actual_shares
+    trades.append(trade)
+    total_tc += tc["total"]
+    if daily_returns:
+        daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
+    return {
+        "total_transaction_cost": total_tc,
+        "position": 0, "entry_price": 0, "entry_date": None,
+        "entry_signal_rule": None, "entry_trend_state": None,
+        "highest_since_entry": 0.0, "lowest_since_entry": 0.0,
+        "margin_cost_accrued": 0.0,
+    }
+
+
 def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
                     margin_mode: bool = False,
                     margin_params: dict = None,
@@ -769,34 +802,23 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
             if position == 1:
                 # Close long
                 ret = (close - entry_price) / entry_price
-                cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
-                trade = _build_trade(
-                    entry_date, row["date"], entry_price, close, ret,
-                    "signal", highest_since_entry, lowest_since_entry,
-                    entry_signal_rule, "long",
-                    trend_state_at_entry=entry_trend_state,
-                )
-                trade["margin_cost"] = cost
-                trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-                tc = _compute_transaction_cost(close, actual_shares, ticker,
-                                               row.get("volume_ratio", 1.0),
-                                               cost_params)
-                trade["transaction_cost"] = tc
-                trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * actual_shares), 6)
-                total_transaction_cost += tc["total"]
-                if daily_returns:
-                    daily_returns[-1] -= tc["total"] / (entry_price * actual_shares)
-                trade["shares"] = actual_shares
-                trades.append(trade)
-                position = 0
-                entry_price = 0
-                entry_date = None
-                entry_signal_rule = None
-                entry_trend_state = None
+                state = _close_position(
+                    entry_date, row["date"], entry_price, close, ret, "signal",
+                    position, entry_signal_rule, entry_trend_state, entry_vol_multiplier,
+                    highest_since_entry, lowest_since_entry, actual_shares,
+                    margin_cost_accrued, margin_mode, ticker,
+                    row.get("volume_ratio", 1.0), cost_params,
+                    trades, daily_returns, total_transaction_cost)
+                total_transaction_cost = state["total_transaction_cost"]
+                position = state["position"]
+                entry_price = state["entry_price"]
+                entry_date = state["entry_date"]
+                entry_signal_rule = state["entry_signal_rule"]
+                entry_trend_state = state["entry_trend_state"]
                 entry_vol_multiplier = 1.0
-                highest_since_entry = 0.0
-                lowest_since_entry = 0.0
-                margin_cost_accrued = 0.0
+                highest_since_entry = state["highest_since_entry"]
+                lowest_since_entry = state["lowest_since_entry"]
+                margin_cost_accrued = state["margin_cost_accrued"]
                 # Try short entry (gated by trend state)
                 if margin_mode and trend_state in SHORT_TREND_GATE:
                     position = -1
@@ -831,25 +853,14 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
             ret = (last_row["close"] - entry_price) / entry_price
         else:
             ret = (entry_price - last_row["close"]) / entry_price
-        cost = round(margin_cost_accrued, 2) if margin_mode else 0.0
-        direction = "long" if position == 1 else "short"
-        trade = _build_trade(
-            entry_date, last_row["date"], entry_price, last_row["close"], ret,
-            "end_of_period", highest_since_entry, lowest_since_entry,
-            entry_signal_rule, direction,
-            trend_state_at_entry=entry_trend_state,
-        )
-        trade["margin_cost"] = cost
-        trade["vol_multiplier"] = round(entry_vol_multiplier, 4)
-        tc = _compute_transaction_cost(last_row["close"], 100, ticker,
-                                       last_row.get("volume_ratio", 1.0),
-                                       cost_params)
-        trade["transaction_cost"] = tc
-        trade["return_after_cost"] = round(ret - (cost + tc["total"]) / (entry_price * 100), 6)
-        total_transaction_cost += tc["total"]
-        if daily_returns:
-            daily_returns[-1] -= tc["total"] / (entry_price * 100)
-        trades.append(trade)
+        state = _close_position(
+            entry_date, last_row["date"], entry_price, last_row["close"], ret, "end_of_period",
+            position, entry_signal_rule, entry_trend_state, entry_vol_multiplier,
+            highest_since_entry, lowest_since_entry, actual_shares,
+            margin_cost_accrued, margin_mode, ticker,
+            last_row.get("volume_ratio", 1.0), cost_params,
+            trades, daily_returns, total_transaction_cost)
+        total_transaction_cost = state["total_transaction_cost"]
 
     return _compute_metrics(trades, daily_returns, total_transaction_cost)
 
