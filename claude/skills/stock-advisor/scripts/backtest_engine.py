@@ -191,6 +191,13 @@ def _is_rule_allowed(rule: str, signal_type: int, strategy_mode: str) -> bool:
     return rule in mode_rules[key]
 
 
+def _apply_rule_gate(signal_val, rule, strength, signal_type, strategy_mode):
+    """Apply strategy mode gate: if rule is not allowed, clear signal/rule/strength."""
+    if signal_val != 0 and rule and not _is_rule_allowed(rule, signal_type, strategy_mode):
+        return 0, None, None
+    return signal_val, rule, strength
+
+
 def generate_signals(ticker: str, start_date: str, end_date: str,
                      thresholds: dict = None,
                      strategy_mode: str = "default") -> pd.DataFrame:
@@ -311,10 +318,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_strength = "strong"
             else:
                 signal_strength = "moderate"
-        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
-            signal = 0
-            signal_rule = None
-            signal_strength = None
+        signal, signal_rule, signal_strength = _apply_rule_gate(
+                signal, signal_rule, signal_strength, 1, strategy_mode)
 
         # MA support bounce BUY
         if signal == 0 and (sma_50 is not None and sma_200 is not None and sma_50 > sma_200
@@ -326,10 +331,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_strength = "moderate"
             else:
                 signal_strength = "weak"
-        if signal == 1 and not _is_rule_allowed(signal_rule, 1, strategy_mode):
-            signal = 0
-            signal_rule = None
-            signal_strength = None
+        signal, signal_rule, signal_strength = _apply_rule_gate(
+                signal, signal_rule, signal_strength, 1, strategy_mode)
 
         # ============================================================
         # Pass 2: SELL rules (first-match-wins, overwrites BUY)
@@ -346,9 +349,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_strength = "strong"
             else:
                 signal_strength = "moderate"
-        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
-            sell_signal = 0
-            sell_rule = None
+        sell_signal, sell_rule, signal_strength = _apply_rule_gate(
+                sell_signal, sell_rule, signal_strength, -1, strategy_mode)
 
         # Momentum breakdown SELL
         if sell_signal == 0 and (ret_5d is not None
@@ -364,9 +366,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                     signal_strength = "moderate"
                 else:
                     signal_strength = "weak"
-        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
-            sell_signal = 0
-            sell_rule = None
+        sell_signal, sell_rule, signal_strength = _apply_rule_gate(
+                sell_signal, sell_rule, signal_strength, -1, strategy_mode)
 
         # Drawdown stop SELL
         if sell_signal == 0 and ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
@@ -376,10 +377,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 signal_strength = "strong"
             else:
                 signal_strength = "moderate"
-        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
-            sell_signal = 0
-            sell_rule = None
-            signal_strength = None
+        sell_signal, sell_rule, signal_strength = _apply_rule_gate(
+                sell_signal, sell_rule, signal_strength, -1, strategy_mode)
 
         # Death cross SELL: SMA ratio proximity detection
         if sell_signal == 0 and sma_50 is not None and sma_200 is not None and sma_200 > 0 \
@@ -389,9 +388,8 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 sell_signal = -1
                 sell_rule = "death_cross"
             signal_strength = "strong"
-        if sell_signal == -1 and not _is_rule_allowed(sell_rule, -1, strategy_mode):
-            sell_signal = 0
-            sell_rule = None
+        sell_signal, sell_rule, signal_strength = _apply_rule_gate(
+                sell_signal, sell_rule, signal_strength, -1, strategy_mode)
 
         # SELL overwrites BUY when both fire on the same day
         if sell_signal == -1:
