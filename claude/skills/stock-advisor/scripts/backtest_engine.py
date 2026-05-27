@@ -1520,9 +1520,15 @@ def main():
     if not end_date:
         end_date = get_latest_trading_day()
 
-    # Check backtest result cache
+    start_date = args.start
+    if not start_date:
+        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=3)
+        start_date = start_dt.strftime("%Y-%m-%d")
+
+    # Check backtest result cache (must be after start_date is resolved)
     if not args.no_cache and not args.tune and args.strategy != "all":
-        cached = load_cached_result(args.ticker, args.strategy, end_date,
+        cached = load_cached_result(args.ticker, args.strategy,
+                                    start_date, end_date,
                                     max_age=args.cache_ttl)
         if cached is not None:
             cached.pop("_config_hash", None)
@@ -1537,11 +1543,6 @@ def main():
             if args.summary:
                 _print_summary(cached)
             return
-
-    start_date = args.start
-    if not start_date:
-        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=3)
-        start_date = start_dt.strftime("%Y-%m-%d")
 
     result = {
         "ticker": args.ticker,
@@ -1608,7 +1609,7 @@ def main():
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
     if not args.no_cache and not args.tune and args.strategy != "all":
-        save_cached_result(args.ticker, args.strategy, end_date, result)
+        save_cached_result(args.ticker, args.strategy, start_date, end_date, result)
 
     if args.output:
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)

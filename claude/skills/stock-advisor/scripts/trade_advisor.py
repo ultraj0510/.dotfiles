@@ -205,6 +205,10 @@ def run_backtest_win_rates(ticker: str, date_str: str, target_years: int,
     if backtest_result is not None:
         return _extract_win_rates_from_result(backtest_result)
 
+    end_dt = datetime.strptime(date_str, "%Y-%m-%d")
+    start_dt = end_dt - timedelta(days=int(365.25 * target_years))
+    start_date = start_dt.strftime("%Y-%m-%d")
+
     # Check cache first (existing 1h file cache)
     cached = _load_cache(ticker, target_years)
     if cached is not None:
@@ -212,13 +216,10 @@ def run_backtest_win_rates(ticker: str, date_str: str, target_years: int,
 
     # Also check the new backtest result cache (24h TTL)
     from backtest_cache import load_cached_result as _lcr
-    bt_cached = _lcr(ticker, "default", date_str)
+    bt_cached = _lcr(ticker, "default", start_date, date_str)
     if bt_cached is not None:
         return _extract_win_rates_from_result(bt_cached)
 
-    end_dt = datetime.strptime(date_str, "%Y-%m-%d")
-    start_dt = end_dt - timedelta(days=int(365.25 * target_years))
-    start_date = start_dt.strftime("%Y-%m-%d")
 
     original_handler = signal.signal(signal.SIGALRM, _timeout_handler)
     signal.alarm(30)
