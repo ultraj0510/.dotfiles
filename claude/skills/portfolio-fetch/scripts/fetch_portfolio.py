@@ -345,6 +345,51 @@ def _load_sbi_cookie() -> str | None:
     return None
 
 
+def _read_sbi_cookies() -> list[dict]:
+    """Read SBI cookies as Playwright-compatible objects with full attributes."""
+    import json as _json
+
+    raw = os.environ.get("SBI_COOKIE", "").strip()
+    if not raw:
+        cf = os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")
+        if os.path.isfile(cf):
+            raw = open(cf).read().strip()
+    if not raw:
+        return []
+
+    # JSON array from Cookie-Editor export
+    if raw.startswith("["):
+        try:
+            data = _json.loads(raw)
+            cookies = []
+            for obj in data:
+                c = {"name": obj["name"], "value": obj["value"],
+                     "domain": obj.get("domain", ".sbisec.co.jp"),
+                     "path": obj.get("path", "/")}
+                if obj.get("secure"):
+                    c["secure"] = True
+                if obj.get("httpOnly"):
+                    c["httpOnly"] = True
+                st = obj.get("sameSite")
+                if st and st not in ("unspecified", None):
+                    st = st.replace("_", "-").lower()
+                    st_map = {"no-restriction": "None", "lax": "Lax", "strict": "Strict", "none": "None"}
+                    c["sameSite"] = st_map.get(st, "Lax")
+                cookies.append(c)
+            return cookies
+        except (_json.JSONDecodeError, KeyError):
+            pass
+
+    # Plain string format
+    cookies = []
+    for pair in raw.split("; "):
+        if "=" in pair:
+            n, v = pair.split("=", 1)
+            cookies.append({"name": n.strip(), "value": v.strip(),
+                           "domain": ".sbisec.co.jp", "path": "/"})
+    return cookies
+
+
 def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tuple[str | None, str]:
     """Fetch SBI portfolio page via Playwright, return (html, status).
 
@@ -357,34 +402,53 @@ def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tup
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return _fetch_sbi_page_urllib(cookie, url, user_agent)
+        return _fetch_sbi_page_urllib(cookie, url, user_agent)  # urllib uses cookie string
 
-    # Parse cookie string into Playwright format
-    cookie_list = []
-    for pair in cookie.split("; "):
-        if "=" in pair:
-            n, v = pair.split("=", 1)
-            cookie_list.append({"name": n.strip(), "value": v.strip(),
-                                "domain": ".site1.sbisec.co.jp", "path": "/"})
+    cookie_list = _read_sbi_cookies()
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(locale="ja-JP", timezone_id="Asia/Tokyo")
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
+            context = browser.new_context(
+                locale="ja-JP",
+                timezone_id="Asia/Tokyo",
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            print(f"[DEBUG] Setting {len(cookie_list)} cookies, JSESSIONID={'...' if any(c['name']=='JSESSIONID' for c in cookie_list) else 'MISSING'}", file=sys.stderr)
             context.add_cookies(cookie_list)
             page = context.new_page()
+
+            # Hide automation
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            # Navigate to portfolio page directly
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            try:
-                page.wait_for_selector("table", timeout=5000)
-            except Exception:
-                pass
+            page.wait_for_timeout(3000)
+
             current_url = page.url
             if "login" in current_url.lower():
+                html = page.content()
+                debug_path = "/tmp/sbi_debug.html"
+                try:
+                    with open(debug_path, "w", encoding="utf-8") as df:
+                        df.write(html)
+                    print(f"[DEBUG] Login redirect. HTML saved to {debug_path} ({len(html)} chars). URL: {current_url}", file=sys.stderr)
+                except Exception:
+                    pass
                 browser.close()
                 return (None, "login_page")
+
             html = page.content()
             browser.close()
-            if len(html) < 2000:
+
+            if len(html) < 5000:
                 return (None, "login_page")
             return (html, "ok")
     except Exception as e:
