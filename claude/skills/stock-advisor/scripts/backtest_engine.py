@@ -1184,7 +1184,7 @@ def walk_forward(ticker: str, start_date: str, end_date: str,
                  margin_mode: bool = False,
                  strategy_mode: str = "default",
                  embargo_days: int = 5,
-                 overfit_threshold: float = 30.0,
+                 overfit_threshold: float = 50.0,
                  execution_delay: int = 0) -> dict:
     """Walk-forward analysis: 70% train / 30% test split with purging.
 

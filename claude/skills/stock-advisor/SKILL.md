@@ -229,6 +229,16 @@ done
 
 ### Step 3: 以下のフォーマットで出力する（省略・変更禁止）
 
+**時価の取得優先順位（必須）:**
+
+1. **portfolio.yaml の `current_price`（SBI同期）を正とする**
+2. SBIデータがない場合のみ signal_engine.json の価格を参照
+3. 両方ない場合は取得単価で代替し、その旨を注記
+
+レポート中の「現在値」は必ず上記優先順位で取得すること。
+signal_engine.py の yfinance 価格は市場時間外に不正確なため単独使用禁止。
+portfolio.yaml の価格はSBI同期時に更新されるため最新の信頼できる価格。
+
 最終レポートは Write ツールで `$RESULTS_DIR/report.md` に保存すること。
 
 ```
