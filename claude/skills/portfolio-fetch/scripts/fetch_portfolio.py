@@ -663,6 +663,14 @@ def sync_from_sbi(portfolio_path: str) -> str:
     holdings, _ = _parse_sbi_holdings(html)
     if not holdings:
         print("[WARN] SBIから保有銘柄を抽出できませんでした。", file=sys.stderr)
+        # Save raw HTML for debugging pattern mismatch
+        debug_path = "/tmp/sbi_debug.html"
+        try:
+            with open(debug_path, "w", encoding="utf-8") as df:
+                df.write(html)
+            print(f"[DEBUG] SBI HTML saved to {debug_path} ({len(html)} chars)", file=sys.stderr)
+        except Exception:
+            pass
         return "parse_error"
 
     # Fetch account data from account page (desktop UA for richer data)
