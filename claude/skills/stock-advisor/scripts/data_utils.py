@@ -20,6 +20,17 @@ from yfinance.exceptions import YFRateLimitError
 
 logger = logging.getLogger(__name__)
 
+
+def safe_float(val):
+    """Convert a value to float, returning None for invalid/missing data."""
+    if val is None or val == "N/A":
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 CACHE_DIR = os.path.expanduser("~/.claude/skills/stock-advisor/scripts/cache/")
 
 # === Extracted from y_finance.py:10 ===

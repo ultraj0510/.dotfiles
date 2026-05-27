@@ -27,6 +27,7 @@ from data_utils import (
     _CUSTOM_INDICATORS,
     _get_stock_stats_bulk,
     load_ohlcv,
+    safe_float,
     yf_retry,
 )
 from signal_rules import (
@@ -169,16 +170,16 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
     """Apply rule-based signal detection to indicator values."""
     signals = []
 
-    rsi = _safe_float(indicators.get("rsi"))
-    boll_lb = _safe_float(indicators.get("boll_lb"))
-    close = _safe_float(indicators.get("close"))
-    position_52w = _safe_float(indicators.get("52w_position"))
-    ret_5d = _safe_float(indicators.get("5d_return"))
-    vol_ratio = _safe_float(indicators.get("volume_ratio"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
-    sma_50 = _safe_float(indicators.get("close_50_sma"))
-    sma_200 = _safe_float(indicators.get("close_200_sma"))
-    ret_10d = _safe_float(indicators.get("10d_return"))
+    rsi = safe_float(indicators.get("rsi"))
+    boll_lb = safe_float(indicators.get("boll_lb"))
+    close = safe_float(indicators.get("close"))
+    position_52w = safe_float(indicators.get("52w_position"))
+    ret_5d = safe_float(indicators.get("5d_return"))
+    vol_ratio = safe_float(indicators.get("volume_ratio"))
+    ret_20d = safe_float(indicators.get("20d_return"))
+    sma_50 = safe_float(indicators.get("close_50_sma"))
+    sma_200 = safe_float(indicators.get("close_200_sma"))
+    ret_10d = safe_float(indicators.get("10d_return"))
 
     # Compute trend state for filter and adaptive logic
     trend_state = compute_trend_state(indicators)
@@ -340,10 +341,10 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
     """Compute an overall sentiment score from -100 (strong sell) to +100 (strong buy)."""
     score = 0
 
-    rsi = _safe_float(indicators.get("rsi"))
-    pos_52w = _safe_float(indicators.get("52w_position"))
-    ret_5d = _safe_float(indicators.get("5d_return"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
+    rsi = safe_float(indicators.get("rsi"))
+    pos_52w = safe_float(indicators.get("52w_position"))
+    ret_5d = safe_float(indicators.get("5d_return"))
+    ret_20d = safe_float(indicators.get("20d_return"))
 
     # RSI contribution
     if rsi is not None:
@@ -401,10 +402,10 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
 
 
 def compute_trend_state(indicators: dict) -> str:
-    close = _safe_float(indicators.get("close"))
-    sma_50 = _safe_float(indicators.get("close_50_sma"))
-    sma_200 = _safe_float(indicators.get("close_200_sma"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
+    close = safe_float(indicators.get("close"))
+    sma_50 = safe_float(indicators.get("close_50_sma"))
+    sma_200 = safe_float(indicators.get("close_200_sma"))
+    ret_20d = safe_float(indicators.get("20d_return"))
 
     if close is None or sma_50 is None or sma_200 is None:
         return "unknown"
@@ -435,10 +436,10 @@ def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
     Formula: max(BB_lower, analyst_target_mean * 0.75)
     Returns None when neither value is available.
     """
-    bb_lower = _safe_float(indicators.get("boll_lb"))
+    bb_lower = safe_float(indicators.get("boll_lb"))
     target_mean = analyst.get("target_mean")
     if target_mean is not None:
-        target_mean = _safe_float(target_mean)
+        target_mean = safe_float(target_mean)
 
     candidates = []
     if bb_lower is not None:
@@ -511,15 +512,6 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False, macr
             "error": str(e),
         }
 
-
-def _safe_float(val):
-    """Convert indicator value to float, returning None on failure."""
-    if val is None or val == "N/A":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
 
 
 def load_default_tickers() -> list:

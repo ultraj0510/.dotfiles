@@ -22,7 +22,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from data_utils import _CUSTOM_INDICATORS, _get_stock_stats_bulk, load_ohlcv
+from data_utils import _CUSTOM_INDICATORS, _get_stock_stats_bulk, load_ohlcv, safe_float
 from signal_engine import compute_trend_state, get_latest_trading_day
 from backtest_cache import load_cached_result, save_cached_result
 from signal_rules import (
@@ -163,14 +163,6 @@ ALL_INDICATORS = [
 ] + sorted(_CUSTOM_INDICATORS)
 
 
-def _safe_float(val):
-    if val is None or val == "N/A":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
 
 # Strategy mode rule sets
 STRATEGY_ALLOWED_RULES = {
@@ -245,27 +237,27 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
 
     rows = []
     for d in dates:
-        rsi = _safe_float(indicator_data["rsi"].get(d))
-        pos_52w = _safe_float(indicator_data["52w_position"].get(d))
-        ret_5d = _safe_float(indicator_data["5d_return"].get(d))
-        vol_ratio = _safe_float(indicator_data["volume_ratio"].get(d))
-        ret_20d = _safe_float(indicator_data["20d_return"].get(d))
-        atr = _safe_float(indicator_data["atr"].get(d))
-        sma_50 = _safe_float(indicator_data["close_50_sma"].get(d))
-        sma_200 = _safe_float(indicator_data["close_200_sma"].get(d))
-        ret_10d = _safe_float(indicator_data["10d_return"].get(d))
+        rsi = safe_float(indicator_data["rsi"].get(d))
+        pos_52w = safe_float(indicator_data["52w_position"].get(d))
+        ret_5d = safe_float(indicator_data["5d_return"].get(d))
+        vol_ratio = safe_float(indicator_data["volume_ratio"].get(d))
+        ret_20d = safe_float(indicator_data["20d_return"].get(d))
+        atr = safe_float(indicator_data["atr"].get(d))
+        sma_50 = safe_float(indicator_data["close_50_sma"].get(d))
+        sma_200 = safe_float(indicator_data["close_200_sma"].get(d))
+        ret_10d = safe_float(indicator_data["10d_return"].get(d))
         close_val = close_map.get(d, 0)
         if isinstance(close_val, pd.Series):
             close_val = float(close_val.iloc[0]) if not close_val.empty else 0
         else:
             close_val = float(close_val) if close_val else 0
-        high_val = _safe_float(high_map.get(d))
+        high_val = safe_float(high_map.get(d))
         if high_val is None:
             high_val = 0
-        low_val = _safe_float(low_map.get(d))
+        low_val = safe_float(low_map.get(d))
         if low_val is None:
             low_val = 0
-        boll_lb = _safe_float(indicator_data["boll_lb"].get(d))
+        boll_lb = safe_float(indicator_data["boll_lb"].get(d))
 
         # Compute trend state for filter and adaptive logic
         trend_state = compute_trend_state({
@@ -283,7 +275,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and trend_state != "strong_downtrend"):
             signal = 1
             signal_rule = "oversold_reversal"
-            vol_r = _safe_float(vol_ratio) if vol_ratio else None
+            vol_r = safe_float(vol_ratio) if vol_ratio else None
             if boll_lb is not None and close_val is not None and close_val <= boll_lb * 1.02 and vol_r and vol_r > 1.2:
                 signal_strength = "strong"
             elif boll_lb is not None and close_val is not None and close_val <= boll_lb * 1.05:
@@ -299,9 +291,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             signal = 1
             signal_rule = "momentum"
             if vol_ratio is not None:
-                if _safe_float(vol_ratio) > 1.5:
+                if safe_float(vol_ratio) > 1.5:
                     signal_strength = "strong"
-                elif _safe_float(vol_ratio) > 1.0:
+                elif safe_float(vol_ratio) > 1.0:
                     signal_strength = "moderate"
                 else:
                     signal_strength = "weak"
@@ -315,7 +307,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and vol_ratio is not None and vol_ratio > 0.8):
             signal = 1
             signal_rule = "trend_following"
-            if vol_ratio is not None and _safe_float(vol_ratio) > 1.2:
+            if vol_ratio is not None and safe_float(vol_ratio) > 1.2:
                 signal_strength = "strong"
             else:
                 signal_strength = "moderate"
@@ -350,7 +342,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
             sell_signal = -1
             sell_rule = "overbought"
-            if rsi is not None and rsi > 80 and vol_ratio is not None and _safe_float(vol_ratio) > 1.2:
+            if rsi is not None and rsi > 80 and vol_ratio is not None and safe_float(vol_ratio) > 1.2:
                 signal_strength = "strong"
             else:
                 signal_strength = "moderate"
@@ -366,9 +358,9 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             sell_signal = -1
             sell_rule = "momentum_breakdown"
             if vol_ratio is not None:
-                if _safe_float(vol_ratio) > 2.0:
+                if safe_float(vol_ratio) > 2.0:
                     signal_strength = "strong"
-                elif _safe_float(vol_ratio) > 1.5:
+                elif safe_float(vol_ratio) > 1.5:
                     signal_strength = "moderate"
                 else:
                     signal_strength = "weak"
@@ -862,7 +854,7 @@ def simulate_trades(signals_df: pd.DataFrame, risk_params: dict = None,
     return _compute_metrics(trades, daily_returns, total_transaction_cost)
 
 
-def _compute_signal_census(signals_df, trades):
+def compute_signal_census(signals_df, trades):
     """Compute per-rule signal counts and win rates from signal_rule column and trade data.
 
     BUY rules (signal=1) are entry rules — win rate is meaningful.
@@ -1747,7 +1739,7 @@ def main():
                                       strategy_mode=sm)
             baseline = simulate_trades(sig_df, margin_mode=margin_mode,
                                        execution_delay=execution_delay)
-            baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+            baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
                                       margin_mode=margin_mode, strategy_mode=sm,
                                       execution_delay=execution_delay)
@@ -1761,7 +1753,7 @@ def main():
         sig_df = generate_signals(args.ticker, start_date, end_date)
         baseline = simulate_trades(sig_df, margin_mode=margin_mode,
                                    execution_delay=execution_delay)
-        baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+        baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
         result["baseline"] = baseline
         wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
                                   execution_delay=execution_delay)
@@ -1770,7 +1762,7 @@ def main():
         sig_df = generate_signals(args.ticker, start_date, end_date,
                                   strategy_mode=args.strategy)
         baseline = simulate_trades(sig_df, margin_mode=margin_mode)
-        baseline["signal_census"] = _compute_signal_census(sig_df, baseline["trades"])
+        baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
         result["baseline"] = baseline
 
         # Walk-forward analysis (rolling windows)

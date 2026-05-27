@@ -22,12 +22,12 @@ import yfinance as yf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from data_utils import yf_retry, load_ohlcv
+from data_utils import yf_retry, load_ohlcv, safe_float
 from signal_engine import analyze_ticker, get_latest_trading_day
 from backtest_engine import (
     generate_signals,
     simulate_trades,
-    _compute_signal_census,
+    compute_signal_census,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,14 +94,6 @@ def _save_cache(ticker: str, target_years: int, per_rule: dict,
             "max_holding_days": max_holding_days,
         }, f, ensure_ascii=False, indent=2, default=str)
 
-
-def _safe_float(val):
-    if val is None or val == "N/A":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
 
 
 class BacktestTimeoutError(Exception):
@@ -225,7 +217,7 @@ def run_backtest_win_rates(ticker: str, date_str: str, target_years: int,
     try:
         sig_df = generate_signals(ticker, start_date, date_str)
         metrics = simulate_trades(sig_df, ticker=ticker)
-        census = _compute_signal_census(sig_df, metrics.get("trades", []))
+        census = compute_signal_census(sig_df, metrics.get("trades", []))
         signal.alarm(0)
 
         per_rule = {}
@@ -416,9 +408,9 @@ def compute_target_prices(
     opinion: str,
 ):
     """Compute target prices and stop loss."""
-    boll_ub = _safe_float(indicators.get("boll_ub"))
-    boll_lb = _safe_float(indicators.get("boll_lb"))
-    atr = _safe_float(indicators.get("atr"))
+    boll_ub = safe_float(indicators.get("boll_ub"))
+    boll_lb = safe_float(indicators.get("boll_lb"))
+    atr = safe_float(indicators.get("atr"))
 
     target1 = None
     stop_loss = None
@@ -832,7 +824,7 @@ def main():
         advisory["max_holding_days"] = max_holding_days
 
         # 7. Risk assessment
-        atr_val = _safe_float(analysis.get("indicators", {}).get("atr"))
+        atr_val = safe_float(analysis.get("indicators", {}).get("atr"))
         risk = assess_risk(
             market_price, args.shares, args.mode,
             args.portfolio_value, analysis.get("indicators", {}),
