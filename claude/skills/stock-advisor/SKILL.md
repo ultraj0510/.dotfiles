@@ -53,12 +53,11 @@ SBI同期をスキップしたい場合: `--skip-sync` フラグを付与。
 **エラー処理（自動リトライ禁止）:**
 
 - `rc == 0` → 正常。Step 1.5 へ進む。
-- `rc == 2` または出力に `[AUTH_EXPIRED]` を含む → **必ず AskUserQuestion でユーザーに確認**:
-  - 「SBI再認証する」→ `/oh-my-claudecode:portfolio-auth` を実行し、認証後に Step 1 を `--skip-sync` なしで再実行
-  - 「キャッシュデータで続行」→ `--skip-sync` で再実行。portfolio.yaml の `last_updated` を確認し、3日以上前ならユーザーに警告
+- `rc == 2` または出力に `[AUTH_EXPIRED]` を含む → **必ず AskUserQuestion でユーザーに確認**。SBIデータが正のため、キャッシュ続行は不可:
+  - 「SBI再認証する」→ `/oh-my-claudecode:portfolio-auth` を実行し、認証後に Step 1 を再実行
   - 「中断」→ ワークフローを停止
-- `rc == 1`（`[AUTH_EXPIRED]` なし）→ ネットワーク障害の可能性。AskUserQuestion で「SBIに接続できません。キャッシュで続行しますか？」と確認。
-- SBI_COOKIE 未設定 → `--skip-sync` で続行。
+- `rc == 1`（`[AUTH_EXPIRED]` なし）→ ネットワーク障害の可能性。AskUserQuestion で「SBIに接続できません。キャッシュで続行しますか？」と確認。`portfolio.yaml` の `last_updated` を確認し、**1日以上前**ならユーザーに警告（「SBIデータが1日以上古いです」）。
+- SBI_COOKIE 未設定 → `--skip-sync` で続行。`last_updated` が1日以上前なら警告。
 
 **非営業日の判定:** signal_engine.py の出力に含まれる `weekday_ja`（曜日）と `is_trading_day`（取引日判定）を参照すること。曜日を推測せず、必ず JSON 出力の値を使用する。yfinance は直近営業日の終値を返すため、非営業日でもパイプライン全体のテスト実行が可能。データ鮮度は `## Macro Context` に明示される。
 

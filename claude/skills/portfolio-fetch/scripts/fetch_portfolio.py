@@ -691,11 +691,12 @@ def sync_from_sbi(portfolio_path: str) -> str:
             pass
 
     existing_account = existing.get("account", {})
-    existing_account["total_assets"] = account.get("total_assets") or existing_account.get("total_assets", 0)
-    existing_account["available_cash"] = account.get("available_cash") or existing_account.get("available_cash", 0)
-    existing_account["margin_ratio"] = account.get("margin_ratio") or existing_account.get("margin_ratio")
-    existing_account["buying_power"] = account.get("buying_power") or existing_account.get("buying_power")
-    existing_account["margin_principal"] = account.get("margin_principal") or existing_account.get("margin_principal")
+    # SBI is authoritative: only fall back to existing if SBI returns None.
+    # Using `or` would treat 0 as falsy, masking a true zero balance.
+    for key in ("total_assets", "available_cash", "margin_ratio", "buying_power", "margin_principal"):
+        val = account.get(key)
+        if val is not None:
+            existing_account[key] = val
 
     # Merge holdings: SBI is truth for qty/price; preserve manual metadata
     existing_holdings = existing.get("holdings", [])
