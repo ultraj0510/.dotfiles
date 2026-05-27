@@ -218,7 +218,6 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
     # If any SELL rule fires, it overwrites the BUY signal for that day.
 
     rows = []
-    prev_date = None
     for d in dates:
         rsi = _safe_float(indicator_data["rsi"].get(d))
         pos_52w = _safe_float(indicator_data["52w_position"].get(d))
@@ -358,7 +357,6 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             "signal": signal,
             "signal_rule": signal_rule,
         })
-        prev_date = d
 
     return pd.DataFrame(rows)
 
