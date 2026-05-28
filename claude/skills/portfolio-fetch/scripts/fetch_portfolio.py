@@ -327,11 +327,11 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
 
 # --- SBI sync ---
 
-# SBI now serves all pages from www.sbisec.co.jp (site1 redirects to error).
-# Params must match the links on the actual www.sbisec.co.jp navigation.
-_SBI_PORTFOLIO_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
-_SBI_PORTFOLIO_URL_DESKTOP = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
-_SBI_ACCOUNT_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETacR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_acc"
+# Portfolio pages require the authenticated site1 host; www redirects to login
+# with otherwise-valid Cookie headers in some sessions.
+_SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_PORTFOLIO_URL_DESKTOP = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETacR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_acc"
 
 _MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
 _DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -346,43 +346,96 @@ _SBI_TICKER_MAP = {
 }
 
 
+def _parse_cookie_input(raw: str) -> dict[str, str]:
+    raw = raw.strip()
+    if not raw:
+        return {}
+    if raw.startswith("[") or raw.startswith("{"):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            data = data.get("tokens", data)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+        if isinstance(data, list):
+            result: dict[str, str] = {}
+            for obj in data:
+                if isinstance(obj, dict) and obj.get("name") and obj.get("value") is not None:
+                    result[str(obj["name"])] = str(obj["value"])
+            return result
+    tokens: dict[str, str] = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if "=" in part:
+            key, _, value = part.partition("=")
+            tokens[key.strip()] = value.strip()
+    return tokens
+
+
+def _reconstruct_cookie_header(tokens: dict[str, str]) -> str:
+    return "; ".join(f"{k}={v}" for k, v in tokens.items())
+
+
+def _cookie_source_candidates() -> list[Path]:
+    return [
+        Path(os.path.expanduser("~/.agents/skills/portfolio-auth/.tokens.json")),
+        Path(os.path.expanduser("~/.agents/skills/portfolio-auth/.cookie")),
+        Path(os.path.expanduser("~/.claude/skills/portfolio-auth/.tokens.json")),
+        Path(os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")),
+    ]
+
+
+def _read_cookie_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    raw = path.read_text().strip()
+    if path.name == ".tokens.json":
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        tokens = data.get("tokens", data) if isinstance(data, dict) else {}
+    else:
+        tokens = _parse_cookie_input(raw)
+    if not tokens:
+        return None
+    print(f"[INFO] SBI Cookie source: {path}", file=sys.stderr)
+    return _reconstruct_cookie_header(tokens)
+
+
 def _load_sbi_cookie() -> str | None:
-    """SBI_COOKIE env var or .cookie file.
+    """SBI_COOKIE env var > .agents auth files > .claude auth files.
 
     SBI_COOKIE can be a JSON array of cookie objects or a raw cookie string.
     Returns a standard cookie header string (name=value; name=value).
     """
     env_val = os.environ.get("SBI_COOKIE", "").strip()
     if env_val:
-        if env_val.startswith("["):
-            try:
-                cookies = json.loads(env_val)
-                return "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return env_val
-    cookie_path = os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")
-    if os.path.isfile(cookie_path):
-        raw = Path(cookie_path).read_text().strip()
-        if raw.startswith("["):
-            try:
-                cookies = json.loads(raw)
-                return "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return raw
+        return _reconstruct_cookie_header(_parse_cookie_input(env_val))
+    for path in _cookie_source_candidates():
+        cookie = _read_cookie_file(path)
+        if cookie:
+            return cookie
     return None
+
+
+def _raw_cookie_source() -> str:
+    raw = os.environ.get("SBI_COOKIE", "").strip()
+    if raw:
+        return raw
+    for path in _cookie_source_candidates():
+        if path.is_file():
+            return path.read_text().strip()
+    return ""
 
 
 def _read_sbi_cookies() -> list[dict]:
     """Read SBI cookies as Playwright-compatible objects with full attributes."""
     import json as _json
 
-    raw = os.environ.get("SBI_COOKIE", "").strip()
-    if not raw:
-        cf = os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")
-        if os.path.isfile(cf):
-            raw = open(cf).read().strip()
+    raw = _raw_cookie_source()
     if not raw:
         return []
 
@@ -410,13 +463,38 @@ def _read_sbi_cookies() -> list[dict]:
             pass
 
     # Plain string format
-    cookies = []
-    for pair in raw.split("; "):
-        if "=" in pair:
-            n, v = pair.split("=", 1)
-            cookies.append({"name": n.strip(), "value": v.strip(),
-                           "domain": ".sbisec.co.jp", "path": "/"})
-    return cookies
+    return [
+        {"name": name, "value": value, "domain": ".sbisec.co.jp", "path": "/"}
+        for name, value in _parse_cookie_input(raw).items()
+    ]
+
+
+def _classify_sbi_html(html: str, url: str = "") -> str | None:
+    lowered_url = url.lower()
+    lowered_html = html.lower()
+    login_markers = [
+        "login-entry",
+        "ログインページです",
+        "ログインしてください",
+        "ユーザーネーム",
+        "name=\"user_id\"",
+        "name=\"password\"",
+    ]
+    if "login" in lowered_url or any(marker in lowered_html or marker in html for marker in login_markers):
+        return "auth_expired"
+    maintenance_markers = ["メンテナンス中", "ただいまメンテナンス"]
+    if "maintenance" in lowered_url or any(marker in lowered_html or marker in html for marker in maintenance_markers):
+        return "maintenance"
+    return None
+
+
+def _sbi_headers(cookie: str, user_agent: str | None = None) -> dict[str, str]:
+    return {
+        "Cookie": cookie,
+        "User-Agent": user_agent or _DESKTOP_UA,
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://www.sbisec.co.jp/",
+    }
 
 
 def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tuple[str | None, str]:
@@ -463,22 +541,17 @@ def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tup
 
             current_url = page.url
             if "login" in current_url.lower():
-                html = page.content()
-                debug_path = "/tmp/sbi_debug.html"
-                try:
-                    with open(debug_path, "w", encoding="utf-8") as df:
-                        df.write(html)
-                    print(f"[DEBUG] Login redirect. HTML saved to {debug_path} ({len(html)} chars). URL: {current_url}", file=sys.stderr)
-                except Exception:
-                    pass
                 browser.close()
-                return (None, "login_page")
+                return (None, "auth_expired")
 
             html = page.content()
             browser.close()
 
+            html_status = _classify_sbi_html(html, current_url)
+            if html_status:
+                return (None, html_status)
             if len(html) < 5000:
-                return (None, "login_page")
+                return (None, "auth_expired")
             return (html, "ok")
     except Exception as e:
         print(f"[WARN] Playwright fetch failed: {e}", file=sys.stderr)
@@ -490,18 +563,22 @@ def _fetch_sbi_page_urllib(cookie: str, url: str, user_agent: str) -> tuple[str 
     import urllib.request, urllib.error
     if user_agent is None:
         user_agent = _MOBILE_UA
-    req = urllib.request.Request(url, headers={"Cookie": cookie, "User-Agent": user_agent})
+    req = urllib.request.Request(url, headers=_sbi_headers(cookie, user_agent))
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read()
             if resp.getcode() != 200 or len(raw) < 1000:
-                return (None, "login_page" if len(raw) < 1000 else "http_error")
+                return (None, "auth_expired" if len(raw) < 1000 else "http_error")
             for enc in ["cp932", "shift_jis", "utf-8"]:
                 try:
-                    return (raw.decode(enc), "ok")
+                    html = raw.decode(enc)
+                    status = _classify_sbi_html(html, resp.geturl())
+                    return (None, status) if status else (html, "ok")
                 except UnicodeDecodeError:
                     continue
-            return (raw.decode("cp932", errors="replace"), "ok")
+            html = raw.decode("cp932", errors="replace")
+            status = _classify_sbi_html(html, resp.geturl())
+            return (None, status) if status else (html, "ok")
     except Exception as e:
         print(f"[WARN] urllib fetch failed: {e}", file=sys.stderr)
         return (None, "http_error")
@@ -717,14 +794,7 @@ def _parse_sbi_account(html: str) -> dict[str, float]:
 
 
 def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
-    """Merge SBI holdings into existing, preserving manual metadata.
-
-    Merge key: (ticker, position_type).
-    Sub-key for spot: account_type. Sub-key for margin: open_date.
-    Holdings in existing but not in SBI are removed (sold).
-    Returns None if SBI data appears incomplete (<50% of existing).
-    """
-    # Safety guard: if SBI returns way fewer holdings than existing
+    """Merge SBI holdings into existing data while preserving manual metadata."""
     if len(sbi_holdings) < len(existing) * 0.5:
         print(
             f"[WARN] SBI holdings ({len(sbi_holdings)}) < 50% of existing "
@@ -733,49 +803,26 @@ def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
         )
         return None
 
-    # Index existing holdings by merge key
-    existing_index: dict[tuple, list[dict]] = {}
-    for h in existing:
-        key = (h.get("ticker"), h.get("position_type", "現物"))
-        existing_index.setdefault(key, []).append(h)
+    def key_for(holding: dict) -> tuple:
+        if holding.get("position_type", "現物") == "信用":
+            return (
+                holding.get("ticker"),
+                holding.get("position_type", "現物"),
+                holding.get("open_date"),
+            )
+        return (
+            holding.get("ticker"),
+            holding.get("position_type", "現物"),
+            holding.get("account_type"),
+        )
 
+    existing_index = {key_for(h): h for h in existing}
     merged = []
-    seen_keys: dict[tuple, int] = {}  # (key) -> count consumed
-
     for sbi_h in sbi_holdings:
-        key = (sbi_h.get("ticker"), sbi_h.get("position_type", "現物"))
-        existing_entries = existing_index.get(key, [])
-
-        if not existing_entries:
-            # New holding from SBI
-            merged.append(sbi_h)
-            continue
-
-        idx = seen_keys.get(key, 0)
-        if idx < len(existing_entries):
-            old = existing_entries[idx]
-            seen_keys[key] = idx + 1
-            # Update qty/price from SBI, preserve metadata
-            old["quantity"] = sbi_h["quantity"]
-            old["cost_price"] = sbi_h.get("cost_price", old.get("cost_price"))
-            old["current_price"] = sbi_h.get("current_price")
-            old["name"] = sbi_h.get("name", old.get("name"))
-            old["account_type"] = sbi_h.get("account_type", old.get("account_type"))
-            merged.append(old)
-        else:
-            # More SBI entries than existing for this key — add new
-            merged.append(sbi_h)
-
-    # Delete entries in existing but not in SBI (sold)
-    sbi_keys = {(h.get("ticker"), h.get("position_type", "現物")) for h in sbi_holdings}
-    removed = 0
-    for key, entries in existing_index.items():
-        if key not in sbi_keys:
-            removed += len(entries)
-
-    if removed:
-        print(f"[OK] SBIに存在しない{removed}件の保有を削除しました", file=sys.stderr)
-
+        old = existing_index.get(key_for(sbi_h), {})
+        item = dict(old)
+        item.update(sbi_h)
+        merged.append(item)
     return merged
 
 
@@ -787,17 +834,26 @@ def sync_from_sbi(portfolio_path: str) -> str:
 
     # Fetch holdings from portfolio page (mobile UA first, desktop as fallback)
     html, fetch_status = _fetch_sbi_page(cookie)
-    if fetch_status == "login_page":
+    if fetch_status in ("login_page", "auth_expired"):
         print("[AUTH_EXPIRED] Cookie rejected by SBI", file=sys.stderr)
         return "auth_expired"
+    if fetch_status == "maintenance":
+        print("[INFO] SBIサイトがメンテナンス中です。しばらく待ってから再実行してください。", file=sys.stderr)
+        return "maintenance"
     if html is None:
         return "network_error"
 
     holdings, _ = _parse_sbi_holdings(html)
+    html_status = _classify_sbi_html(html)
+    if html_status:
+        return html_status
     if not holdings:
         # Mobile page may be JS-rendered SPA. Retry with desktop UA.
         print("[INFO] Mobile parse returned 0 holdings, retrying with desktop UA...", file=sys.stderr)
         html2, status2 = _fetch_sbi_page(cookie, url=_SBI_PORTFOLIO_URL_DESKTOP, user_agent=_DESKTOP_UA)
+        if status2 == "auth_expired":
+            print("[AUTH_EXPIRED] Cookie rejected by SBI desktop page", file=sys.stderr)
+            return "auth_expired"
         if html2:
             holdings, _ = _parse_sbi_holdings(html2)
             if holdings:
@@ -821,7 +877,7 @@ def sync_from_sbi(portfolio_path: str) -> str:
     try:
         req = urllib.request.Request(
             _SBI_ACCOUNT_URL,
-            headers={"Cookie": cookie},
+            headers=_sbi_headers(cookie, _DESKTOP_UA),
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read()
@@ -858,14 +914,18 @@ def sync_from_sbi(portfolio_path: str) -> str:
 
     portfolio = {
         "last_updated": datetime.now(timezone.utc).isoformat(),
+        "last_successful_sync_at": datetime.now(timezone.utc).isoformat(),
         "last_sync_source": "SBI",
+        "sync_status": "ok",
         "account": existing_account,
         "holdings": merged,
     }
 
     os.makedirs(os.path.dirname(portfolio_path), exist_ok=True)
-    with open(portfolio_path, "w", encoding="utf-8") as f:
+    tmp_path = f"{portfolio_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(portfolio, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    os.replace(tmp_path, portfolio_path)
 
     print(f"[OK] SBI同期完了: {len(holdings)}銘柄", file=sys.stderr)
     return "ok"
@@ -875,6 +935,7 @@ def main():
     parser = argparse.ArgumentParser(description="market-pulse データ取得")
     parser.add_argument("--all", action="store_true", help="全銘柄詳細表示")
     parser.add_argument("--skip-sync", action="store_true", help="SBI自動同期スキップ")
+    parser.add_argument("--use-cache-on-fail", action="store_true", help="SBI同期失敗時にキャッシュ表示を続行")
     args = parser.parse_args()
 
     portfolio_path = os.path.join(_STOCK_ANALYZE_DIR, "portfolio.yaml")
@@ -884,7 +945,16 @@ def main():
     if not args.skip_sync and cookie:
         status = sync_from_sbi(portfolio_path)
         if status != "ok":
-            if status == "auth_expired":
+            if args.use_cache_on_fail:
+                last_upd = "不明"
+                if os.path.isfile(portfolio_path):
+                    try:
+                        cached = load_portfolio(portfolio_path)
+                        last_upd = cached.get("last_successful_sync_at") or cached.get("last_updated", "不明")
+                    except Exception:
+                        pass
+                print(f"[NOTICE] SBI同期に失敗したためキャッシュデータを表示します（status: {status}, 最終SBI同期: {last_upd}）")
+            elif status == "auth_expired":
                 print("[AUTH_EXPIRED] SBIセッションが切れています。", file=sys.stderr)
                 sys.exit(2)
             else:

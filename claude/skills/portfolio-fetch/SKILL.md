@@ -17,7 +17,7 @@ stock-price-analyze の分析モジュールで全保有銘柄のテクニカル
 ## 手順
 
 ```bash
-# 要アクション銘柄のみ（デフォルト）
+# 要アクション銘柄のみ（デフォルト。SBI同期失敗時は非0終了）
 ~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio
 
 # 全銘柄詳細
@@ -25,7 +25,12 @@ stock-price-analyze の分析モジュールで全保有銘柄のテクニカル
 
 # SBI自動同期をスキップ
 ~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio --skip-sync
+
+# SBI同期失敗時にキャッシュ表示を続行
+~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio --use-cache-on-fail
 ```
+
+実行後は先頭3行を必ず確認し、`[AUTH_EXPIRED]`, `[ERROR]`, `[NOTICE]`, `[WARN]` があれば同期状態を判断する。
 
 ## 出力
 
