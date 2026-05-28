@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-SBI_CHECK_URL = "https://www.sbisec.co.jp/ETGate"
+SBI_CHECK_URL = "https://site1.sbisec.co.jp/ETGate/?OutSide=on&getFlg=on"
 COOKIE_FILE = Path(__file__).parent / ".cookie"
 
 

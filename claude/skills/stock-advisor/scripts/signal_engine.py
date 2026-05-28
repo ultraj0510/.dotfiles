@@ -27,7 +27,15 @@ from data_utils import (
     _CUSTOM_INDICATORS,
     _get_stock_stats_bulk,
     load_ohlcv,
+    safe_float,
     yf_retry,
+)
+from signal_rules import (
+    RSI_LOWER, RSI_UPPER,
+    POSITION_52W_LOWER, POSITION_52W_UPPER,
+    MOMENTUM_5D, MOMENTUM_STRONG_VOL,
+    BREAKDOWN_5D, BREAKDOWN_VOL_GATE,
+    DRAWDOWN_20D, BB_PROXIMITY,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,16 +170,16 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
     """Apply rule-based signal detection to indicator values."""
     signals = []
 
-    rsi = _safe_float(indicators.get("rsi"))
-    boll_lb = _safe_float(indicators.get("boll_lb"))
-    close = _safe_float(indicators.get("close"))
-    position_52w = _safe_float(indicators.get("52w_position"))
-    ret_5d = _safe_float(indicators.get("5d_return"))
-    vol_ratio = _safe_float(indicators.get("volume_ratio"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
-    sma_50 = _safe_float(indicators.get("close_50_sma"))
-    sma_200 = _safe_float(indicators.get("close_200_sma"))
-    ret_10d = _safe_float(indicators.get("10d_return"))
+    rsi = safe_float(indicators.get("rsi"))
+    boll_lb = safe_float(indicators.get("boll_lb"))
+    close = safe_float(indicators.get("close"))
+    position_52w = safe_float(indicators.get("52w_position"))
+    ret_5d = safe_float(indicators.get("5d_return"))
+    vol_ratio = safe_float(indicators.get("volume_ratio"))
+    ret_20d = safe_float(indicators.get("20d_return"))
+    sma_50 = safe_float(indicators.get("close_50_sma"))
+    sma_200 = safe_float(indicators.get("close_200_sma"))
+    ret_10d = safe_float(indicators.get("10d_return"))
 
     # Compute trend state for filter and adaptive logic
     trend_state = compute_trend_state(indicators)
@@ -183,13 +191,13 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
 
     # === BUY signals ===
 
-    # Oversold reversal: RSI < 30 + near BB lower + 52w low zone
+    # Oversold reversal: RSI < RSI_LOWER + near BB lower + 52w low zone
     # Trend filter: suppress in strong_downtrend, downgrade in downtrend
-    if (rsi is not None and rsi < 30
-            and position_52w is not None and position_52w < 25
+    if (rsi is not None and rsi < RSI_LOWER
+            and position_52w is not None and position_52w < POSITION_52W_LOWER
             and trend_state != "strong_downtrend"):
         near_bb = False
-        if close is not None and boll_lb is not None and close <= boll_lb * 1.02:
+        if close is not None and boll_lb is not None and close <= boll_lb * BB_PROXIMITY:
             near_bb = True
         vol_high = vol_ratio is not None and vol_ratio > 1.2
         vol_ok = vol_ratio is not None and vol_ratio > 1.0
@@ -209,9 +217,9 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
                            + (f", near BB lower={boll_lb:.0f}" if near_bb else ""),
         })
 
-    # Momentum BUY: 5d surge > 7% with volume confirmation
-    if ret_5d is not None and ret_5d > 7:
-        vol_high = vol_ratio is not None and vol_ratio > 1.5
+    # Momentum BUY: 5d surge > MOMENTUM_5D% with volume confirmation
+    if ret_5d is not None and ret_5d > MOMENTUM_5D:
+        vol_high = vol_ratio is not None and vol_ratio > MOMENTUM_STRONG_VOL
         vol_ok = vol_ratio is not None and vol_ratio > 1.0
         if vol_high:
             strength = "strong"
@@ -228,8 +236,8 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
 
     # === SELL signals ===
 
-    # Overbought: RSI > 70 + near 52w high
-    if rsi is not None and rsi > 70 and position_52w is not None and position_52w > 85:
+    # Overbought: RSI > RSI_UPPER + near 52w high
+    if rsi is not None and rsi > RSI_UPPER and position_52w is not None and position_52w > POSITION_52W_UPPER:
         vol_high = vol_ratio is not None and vol_ratio > 1.2
         if rsi > 80 and vol_high:
             strength = "strong"
@@ -245,7 +253,7 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
         })
 
     # Momentum breakdown: 5d sharp drop with high volume
-    if ret_5d is not None and ret_5d < -7 and vol_ratio is not None and vol_ratio > 1.0:
+    if ret_5d is not None and ret_5d < BREAKDOWN_5D and vol_ratio is not None and vol_ratio > BREAKDOWN_VOL_GATE:
         if vol_ratio > 2.0:
             strength = "strong"
         elif vol_ratio > 1.5:
@@ -260,7 +268,7 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
         })
 
     # Drawdown stop: 20d decline triggers stop-loss
-    if ret_20d is not None and ret_20d < -15:
+    if ret_20d is not None and ret_20d < DRAWDOWN_20D:
         strength = "strong" if ret_20d < -20 else "moderate"
         signals.append({
             "type": "SELL",
@@ -322,8 +330,9 @@ def classify_signals(indicators: dict, macro: dict, analyst: dict) -> list:
                 "description": f"analyst divergence={div:.1f}%",
             })
 
-    # Sort by strength: strong > moderate
-    signals.sort(key=lambda s: 0 if s["strength"] == "strong" else 1)
+    # Sort by strength: strong > moderate > weak
+    _strength_order = {"strong": 0, "moderate": 1, "weak": 2}
+    signals.sort(key=lambda s: _strength_order.get(s["strength"], 3))
 
     return signals
 
@@ -332,10 +341,10 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
     """Compute an overall sentiment score from -100 (strong sell) to +100 (strong buy)."""
     score = 0
 
-    rsi = _safe_float(indicators.get("rsi"))
-    pos_52w = _safe_float(indicators.get("52w_position"))
-    ret_5d = _safe_float(indicators.get("5d_return"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
+    rsi = safe_float(indicators.get("rsi"))
+    pos_52w = safe_float(indicators.get("52w_position"))
+    ret_5d = safe_float(indicators.get("5d_return"))
+    ret_20d = safe_float(indicators.get("20d_return"))
 
     # RSI contribution
     if rsi is not None:
@@ -393,10 +402,10 @@ def compute_overall_score(indicators: dict, signals: list) -> dict:
 
 
 def compute_trend_state(indicators: dict) -> str:
-    close = _safe_float(indicators.get("close"))
-    sma_50 = _safe_float(indicators.get("close_50_sma"))
-    sma_200 = _safe_float(indicators.get("close_200_sma"))
-    ret_20d = _safe_float(indicators.get("20d_return"))
+    close = safe_float(indicators.get("close"))
+    sma_50 = safe_float(indicators.get("close_50_sma"))
+    sma_200 = safe_float(indicators.get("close_200_sma"))
+    ret_20d = safe_float(indicators.get("20d_return"))
 
     if close is None or sma_50 is None or sma_200 is None:
         return "unknown"
@@ -427,10 +436,10 @@ def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
     Formula: max(BB_lower, analyst_target_mean * 0.75)
     Returns None when neither value is available.
     """
-    bb_lower = _safe_float(indicators.get("boll_lb"))
+    bb_lower = safe_float(indicators.get("boll_lb"))
     target_mean = analyst.get("target_mean")
     if target_mean is not None:
-        target_mean = _safe_float(target_mean)
+        target_mean = safe_float(target_mean)
 
     candidates = []
     if bb_lower is not None:
@@ -443,7 +452,7 @@ def compute_suggested_entry(indicators: dict, analyst: dict) -> float:
     return round(max(candidates), 2)
 
 
-def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> dict:
+def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False, macro: dict = None) -> dict:
     """Run full analysis for a single ticker.
 
     Retries up to 10 previous trading days when indicator data is unavailable
@@ -455,7 +464,8 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> d
             load_ohlcv(ticker, date_str, force_refresh=True)
 
         # Macro and analyst data are date-independent
-        macro = fetch_macro_context()
+        if macro is None:
+            macro = fetch_macro_context()
         analyst = fetch_analyst_target(ticker)
 
         # Date fallback: retry up to 10 days for indicator data
@@ -502,15 +512,6 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False) -> d
             "error": str(e),
         }
 
-
-def _safe_float(val):
-    """Convert indicator value to float, returning None on failure."""
-    if val is None or val == "N/A":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
 
 
 def load_default_tickers() -> list:
@@ -584,8 +585,10 @@ def main():
         "results": [],
     }
 
+    macro = fetch_macro_context()
+
     for ticker in tickers:
-        result = analyze_ticker(ticker.strip(), date_str, force_refresh=args.refresh)
+        result = analyze_ticker(ticker.strip(), date_str, force_refresh=args.refresh, macro=macro)
         result["is_watchlist"] = ticker in watchlist_tickers and ticker not in portfolio_tickers
         if args.factor_mode:
             try:

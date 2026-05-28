@@ -53,38 +53,64 @@ def load_portfolio(portfolio_path: str = None) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def fetch_stock_data(ticker: str) -> dict | None:
-    """1銘柄の株価・指標・シグナルを取得する。"""
+def fetch_stock_data(ticker: str, fallback_price: float = None) -> dict | None:
+    """1銘柄の株価・指標・シグナルを取得する。
+
+    If yfinance fails but fallback_price is provided (e.g. from SBI sync),
+    returns a minimal dict with the SBI price. This prevents ¥0/data-failure
+    displays when the market is closed.
+    """
+    price = None
+    rsi = bb_lower = bb_upper = ma20 = atr = 0.0
+    signals = []
+    signal_desc = ""
+    market_phase = "neutral"
+    surge = False
+
     try:
         from data.fetcher import get_stock_data
         from indicators.calculator import calculate_indicators, get_latest_values
         from signals.engine import check_signal, describe_signals
+
+        df = get_stock_data(ticker, period="1y")
+        if df is not None:
+            df = calculate_indicators(df)
+            values = get_latest_values(df)
+            signals = check_signal(values)
+            signal_desc = describe_signals(signals)
+
+            p = values.get("price")
+            if p is not None and not (isinstance(p, (int, float)) and p != p):
+                price = float(p.iloc[0] if hasattr(p, "iloc") else p)
+
+            rsi = round(float(values.get("rsi", 0) or 0), 1)
+            bb_lower = round(float(values.get("bb_lower", 0) or 0), 0)
+            bb_upper = round(float(values.get("bb_upper", 0) or 0), 0)
+            ma20 = round(float(values.get("ma20", 0) or 0), 0)
+            atr = round(float(values.get("atr", 0) or 0), 0)
+            market_phase = values.get("market_phase", "neutral")
+            surge = bool(values.get("surge_days", 0) > 0)
     except ImportError:
-        return None
+        pass
 
-    df = get_stock_data(ticker, period="1y")
-    if df is None:
-        return None
+    # Use SBI-synced fallback price if yfinance failed
+    if price is None and fallback_price and fallback_price > 0:
+        price = fallback_price
 
-    df = calculate_indicators(df)
-    values = get_latest_values(df)
-    signals = check_signal(values)
-
-    current_price = values.get("price")
-    if current_price is None or (hasattr(current_price, "item") and current_price != current_price):
+    if price is None or price <= 0:
         return None
 
     return {
-        "price": round(float(current_price.iloc[0] if hasattr(current_price, "iloc") else current_price), 0),
-        "rsi": round(float(values.get("rsi", 0) or 0), 1),
-        "bb_lower": round(float(values.get("bb_lower", 0) or 0), 0),
-        "bb_upper": round(float(values.get("bb_upper", 0) or 0), 0),
-        "ma20": round(float(values.get("ma20", 0) or 0), 0),
+        "price": round(price, 0),
+        "rsi": rsi,
+        "bb_lower": bb_lower,
+        "bb_upper": bb_upper,
+        "ma20": ma20,
         "signals": signals,
-        "signal_desc": describe_signals(signals),
-        "market_phase": values.get("market_phase", "neutral"),
-        "atr": round(float(values.get("atr", 0) or 0), 0),
-        "surge_detected": bool(values.get("surge_days", 0) > 0),
+        "signal_desc": signal_desc,
+        "market_phase": market_phase,
+        "atr": atr,
+        "surge_detected": surge,
     }
 
 
@@ -187,7 +213,8 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
         qty = h.get("quantity", 0)
         cost = h.get("cost_price", 0)
 
-        stock = fetch_stock_data(ticker)
+        fallback = h.get("current_price") or cost
+        stock = fetch_stock_data(ticker, fallback_price=fallback)
         credit_risks = {}
         if pos_type == "信用":
             if stock:
@@ -301,7 +328,11 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
 # --- SBI sync ---
 
 _SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
+_SBI_PORTFOLIO_URL_DESKTOP = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
 _SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETacR001Control&_ActionID=DefaultAID&getFlg=on"
+
+_MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
+_DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 _SBI_TICKER_MAP = {
     "ＮＦ金価格": "1328.T",
     "日鉄鉱": "1515.T",
@@ -341,37 +372,137 @@ def _load_sbi_cookie() -> str | None:
     return None
 
 
-def _fetch_sbi_page(cookie: str) -> str | None:
-    """Fetch SBI portfolio page, return decoded HTML."""
-    import urllib.request
-    import urllib.error
+def _read_sbi_cookies() -> list[dict]:
+    """Read SBI cookies as Playwright-compatible objects with full attributes."""
+    import json as _json
 
-    req = urllib.request.Request(
-        _SBI_PORTFOLIO_URL,
-        headers={
-            "Cookie": cookie,
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-        },
-    )
+    raw = os.environ.get("SBI_COOKIE", "").strip()
+    if not raw:
+        cf = os.path.expanduser("~/.claude/skills/portfolio-auth/.cookie")
+        if os.path.isfile(cf):
+            raw = open(cf).read().strip()
+    if not raw:
+        return []
+
+    # JSON array from Cookie-Editor export
+    if raw.startswith("["):
+        try:
+            data = _json.loads(raw)
+            cookies = []
+            for obj in data:
+                c = {"name": obj["name"], "value": obj["value"],
+                     "domain": obj.get("domain", ".sbisec.co.jp"),
+                     "path": obj.get("path", "/")}
+                if obj.get("secure"):
+                    c["secure"] = True
+                if obj.get("httpOnly"):
+                    c["httpOnly"] = True
+                st = obj.get("sameSite")
+                if st and st not in ("unspecified", None):
+                    st = st.replace("_", "-").lower()
+                    st_map = {"no-restriction": "None", "lax": "Lax", "strict": "Strict", "none": "None"}
+                    c["sameSite"] = st_map.get(st, "Lax")
+                cookies.append(c)
+            return cookies
+        except (_json.JSONDecodeError, KeyError):
+            pass
+
+    # Plain string format
+    cookies = []
+    for pair in raw.split("; "):
+        if "=" in pair:
+            n, v = pair.split("=", 1)
+            cookies.append({"name": n.strip(), "value": v.strip(),
+                           "domain": ".sbisec.co.jp", "path": "/"})
+    return cookies
+
+
+def _fetch_sbi_page(cookie: str, url: str = None, user_agent: str = None) -> tuple[str | None, str]:
+    """Fetch SBI portfolio page via Playwright, return (html, status).
+
+    Uses headless Chromium to navigate SBI's internal redirect chain.
+    Falls back to urllib if Playwright is unavailable.
+    """
+    if url is None:
+        url = _SBI_PORTFOLIO_URL
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return _fetch_sbi_page_urllib(cookie, url, user_agent)  # urllib uses cookie string
+
+    cookie_list = _read_sbi_cookies()
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
+            context = browser.new_context(
+                locale="ja-JP",
+                timezone_id="Asia/Tokyo",
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            print(f"[DEBUG] Setting {len(cookie_list)} cookies, JSESSIONID={'...' if any(c['name']=='JSESSIONID' for c in cookie_list) else 'MISSING'}", file=sys.stderr)
+            context.add_cookies(cookie_list)
+            page = context.new_page()
+
+            # Hide automation
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            # Navigate to portfolio page directly
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            current_url = page.url
+            if "login" in current_url.lower():
+                html = page.content()
+                debug_path = "/tmp/sbi_debug.html"
+                try:
+                    with open(debug_path, "w", encoding="utf-8") as df:
+                        df.write(html)
+                    print(f"[DEBUG] Login redirect. HTML saved to {debug_path} ({len(html)} chars). URL: {current_url}", file=sys.stderr)
+                except Exception:
+                    pass
+                browser.close()
+                return (None, "login_page")
+
+            html = page.content()
+            browser.close()
+
+            if len(html) < 5000:
+                return (None, "login_page")
+            return (html, "ok")
+    except Exception as e:
+        print(f"[WARN] Playwright fetch failed: {e}", file=sys.stderr)
+        return (None, "http_error")
+
+
+def _fetch_sbi_page_urllib(cookie: str, url: str, user_agent: str) -> tuple[str | None, str]:
+    """Fallback: fetch SBI page via urllib (no JS rendering)."""
+    import urllib.request, urllib.error
+    if user_agent is None:
+        user_agent = _MOBILE_UA
+    req = urllib.request.Request(url, headers={"Cookie": cookie, "User-Agent": user_agent})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            status = resp.getcode()
             raw = resp.read()
-            if status != 200:
-                print(f"[WARN] SBI returned HTTP {status}", file=sys.stderr)
-                return None
-            if len(raw) < 1000:
-                print(f"[WARN] SBI response too small ({len(raw)} bytes) — likely login page", file=sys.stderr)
-                return None
+            if resp.getcode() != 200 or len(raw) < 1000:
+                return (None, "login_page" if len(raw) < 1000 else "http_error")
             for enc in ["cp932", "shift_jis", "utf-8"]:
                 try:
-                    return raw.decode(enc)
+                    return (raw.decode(enc), "ok")
                 except UnicodeDecodeError:
                     continue
-            return raw.decode("cp932", errors="replace")
+            return (raw.decode("cp932", errors="replace"), "ok")
     except Exception as e:
-        print(f"[WARN] SBI page fetch failed: {e}", file=sys.stderr)
-        return None
+        print(f"[WARN] urllib fetch failed: {e}", file=sys.stderr)
+        return (None, "http_error")
 
 
 def _parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
@@ -646,21 +777,40 @@ def _merge_holdings(existing: list, sbi_holdings: list) -> list | None:
     return merged
 
 
-def sync_from_sbi(portfolio_path: str) -> bool:
-    """Sync holdings and account data from SBI. Returns True on success."""
+def sync_from_sbi(portfolio_path: str) -> str:
+    """Sync holdings and account data from SBI. Returns status string."""
     cookie = _load_sbi_cookie()
     if not cookie:
-        return False
+        return "no_cookie"
 
-    # Fetch holdings from portfolio page (mobile UA)
-    html = _fetch_sbi_page(cookie)
-    if not html:
-        return False
+    # Fetch holdings from portfolio page (mobile UA first, desktop as fallback)
+    html, fetch_status = _fetch_sbi_page(cookie)
+    if fetch_status == "login_page":
+        print("[AUTH_EXPIRED] Cookie rejected by SBI", file=sys.stderr)
+        return "auth_expired"
+    if html is None:
+        return "network_error"
 
     holdings, _ = _parse_sbi_holdings(html)
     if not holdings:
+        # Mobile page may be JS-rendered SPA. Retry with desktop UA.
+        print("[INFO] Mobile parse returned 0 holdings, retrying with desktop UA...", file=sys.stderr)
+        html2, status2 = _fetch_sbi_page(cookie, url=_SBI_PORTFOLIO_URL_DESKTOP, user_agent=_DESKTOP_UA)
+        if html2:
+            holdings, _ = _parse_sbi_holdings(html2)
+            if holdings:
+                html = html2  # use desktop response for debug saving
+    if not holdings:
         print("[WARN] SBIから保有銘柄を抽出できませんでした。", file=sys.stderr)
-        return False
+        # Save raw HTML for debugging pattern mismatch
+        debug_path = "/tmp/sbi_debug.html"
+        try:
+            with open(debug_path, "w", encoding="utf-8") as df:
+                df.write(html)
+            print(f"[DEBUG] SBI HTML saved to {debug_path} ({len(html)} chars)", file=sys.stderr)
+        except Exception:
+            pass
+        return "parse_error"
 
     # Fetch account data from account page (desktop UA for richer data)
     import urllib.request
@@ -688,18 +838,19 @@ def sync_from_sbi(portfolio_path: str) -> bool:
             pass
 
     existing_account = existing.get("account", {})
-    existing_account["total_assets"] = account.get("total_assets") or existing_account.get("total_assets", 0)
-    existing_account["available_cash"] = account.get("available_cash") or existing_account.get("available_cash", 0)
-    existing_account["margin_ratio"] = account.get("margin_ratio") or existing_account.get("margin_ratio")
-    existing_account["buying_power"] = account.get("buying_power") or existing_account.get("buying_power")
-    existing_account["margin_principal"] = account.get("margin_principal") or existing_account.get("margin_principal")
+    # SBI is authoritative: only fall back to existing if SBI returns None.
+    # Using `or` would treat 0 as falsy, masking a true zero balance.
+    for key in ("total_assets", "available_cash", "margin_ratio", "buying_power", "margin_principal"):
+        val = account.get(key)
+        if val is not None:
+            existing_account[key] = val
 
     # Merge holdings: SBI is truth for qty/price; preserve manual metadata
     existing_holdings = existing.get("holdings", [])
     if existing_holdings:
         merged = _merge_holdings(existing_holdings, holdings)
         if merged is None:
-            return False
+            return "parse_error"
     else:
         merged = holdings
 
@@ -715,7 +866,7 @@ def sync_from_sbi(portfolio_path: str) -> bool:
         yaml.safe_dump(portfolio, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     print(f"[OK] SBI同期完了: {len(holdings)}銘柄", file=sys.stderr)
-    return True
+    return "ok"
 
 
 def main():
@@ -729,13 +880,17 @@ def main():
     # SBI自動同期
     cookie = _load_sbi_cookie()
     if not args.skip_sync and cookie:
-        if not sync_from_sbi(portfolio_path):
-            print("[ERROR] SBI同期に失敗しました。Cookieの有効期限切れの可能性があります。", file=sys.stderr)
-            print("[ERROR] portfolio-authスキルでCookieを再取得してください: /oh-my-claudecode:portfolio-auth", file=sys.stderr)
-            sys.exit(1)
+        status = sync_from_sbi(portfolio_path)
+        if status != "ok":
+            if status == "auth_expired":
+                print("[AUTH_EXPIRED] SBIセッションが切れています。", file=sys.stderr)
+                sys.exit(2)
+            else:
+                print(f"[ERROR] SBI同期に失敗しました ({status})。", file=sys.stderr)
+                sys.exit(1)
         print()
     elif not args.skip_sync and not cookie:
-        print("[WARN] SBI_COOKIEが設定されていません。--skip-syncで既存データを使用します。", file=sys.stderr)
+        print("[WARN] SBI_COOKIEが設定されていません。", file=sys.stderr)
 
     if not os.path.isfile(portfolio_path):
         print(f"[ERROR] portfolio.yaml not found at {portfolio_path}", file=sys.stderr)

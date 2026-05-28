@@ -22,12 +22,12 @@ import yfinance as yf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from data_utils import yf_retry, load_ohlcv
+from data_utils import yf_retry, load_ohlcv, safe_float
 from signal_engine import analyze_ticker, get_latest_trading_day
 from backtest_engine import (
     generate_signals,
     simulate_trades,
-    _compute_signal_census,
+    compute_signal_census,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,14 +95,6 @@ def _save_cache(ticker: str, target_years: int, per_rule: dict,
         }, f, ensure_ascii=False, indent=2, default=str)
 
 
-def _safe_float(val):
-    if val is None or val == "N/A":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
 
 class BacktestTimeoutError(Exception):
     pass
@@ -150,27 +142,82 @@ def compute_pnl(market_price: float, cost_basis: float, shares: int):
     return pnl, pnl_pct
 
 
-def run_backtest_win_rates(ticker: str, date_str: str, target_years: int):
+def _extract_win_rates_from_result(bt_result: dict):
+    """Extract per-rule win rates from a pre-computed backtest result dict.
+
+    Returns (per_rule, active_rules, max_holding_days) matching the format
+    expected by callers of run_backtest_win_rates().
+    """
+    census = bt_result.get("baseline", {}).get("signal_census", {})
+    trades = bt_result.get("baseline", {}).get("trades", [])
+
+    per_rule = {}
+    active_rules = []
+    max_holding_days = 0
+
+    for rule_name, info in census.items():
+        if rule_name == "totals":
+            continue
+        wr = info.get("win_rate")
+        cnt = info.get("count", 0)
+        per_rule[rule_name] = {
+            "win_rate": round(wr, 1) if wr is not None else None,
+            "trade_count": cnt,
+        }
+        if wr is not None and cnt > 0:
+            entry = {
+                "rule": rule_name,
+                "historical_win_rate": round(wr, 1),
+                "trade_count": cnt,
+            }
+            if cnt < 5:
+                entry["caveat"] = "low_sample"
+            active_rules.append(entry)
+
+    for t in trades:
+        hd = t.get("holding_days", 0)
+        if hd > max_holding_days:
+            max_holding_days = hd
+
+    return per_rule, active_rules, max_holding_days
+
+
+def run_backtest_win_rates(ticker: str, date_str: str, target_years: int,
+                           backtest_result: dict = None):
     """Run a backtest and compute per-rule signal win rates.
 
     Results are cached for 1 hour. Returns (per_rule, active_win_rates_list,
     max_holding_days) or (None, [], 0) on failure/timeout.
+
+    If backtest_result is provided, extracts win rates from it without
+    re-running the backtest.
     """
-    # Check cache first
-    cached = _load_cache(ticker, target_years)
-    if cached is not None:
-        return cached
+    # If pre-computed backtest result provided, extract win rates directly
+    if backtest_result is not None:
+        return _extract_win_rates_from_result(backtest_result)
 
     end_dt = datetime.strptime(date_str, "%Y-%m-%d")
     start_dt = end_dt - timedelta(days=int(365.25 * target_years))
     start_date = start_dt.strftime("%Y-%m-%d")
+
+    # Check cache first (existing 1h file cache)
+    cached = _load_cache(ticker, target_years)
+    if cached is not None:
+        return cached
+
+    # Also check the new backtest result cache (24h TTL)
+    from backtest_cache import load_cached_result as _lcr
+    bt_cached = _lcr(ticker, "default", start_date, date_str)
+    if bt_cached is not None:
+        return _extract_win_rates_from_result(bt_cached)
+
 
     original_handler = signal.signal(signal.SIGALRM, _timeout_handler)
     signal.alarm(30)
     try:
         sig_df = generate_signals(ticker, start_date, date_str)
         metrics = simulate_trades(sig_df, ticker=ticker)
-        census = _compute_signal_census(sig_df, metrics.get("trades", []))
+        census = compute_signal_census(sig_df, metrics.get("trades", []))
         signal.alarm(0)
 
         per_rule = {}
@@ -361,9 +408,9 @@ def compute_target_prices(
     opinion: str,
 ):
     """Compute target prices and stop loss."""
-    boll_ub = _safe_float(indicators.get("boll_ub"))
-    boll_lb = _safe_float(indicators.get("boll_lb"))
-    atr = _safe_float(indicators.get("atr"))
+    boll_ub = safe_float(indicators.get("boll_ub"))
+    boll_lb = safe_float(indicators.get("boll_lb"))
+    atr = safe_float(indicators.get("atr"))
 
     target1 = None
     stop_loss = None
@@ -666,6 +713,7 @@ def main():
                         help="ポートフォリオ評価額合計 (円)")
     parser.add_argument("--output", "-o", help="JSON出力ファイルパス")
     parser.add_argument("--date", help="基準日 YYYY-MM-DD (default: 直近取引日)")
+    parser.add_argument("--backtest-result", help="Pre-computed backtest result JSON (skips live backtest)")
     parser.add_argument("--factor-mode", action="store_true",
                         help="ファクタースコアを計算し仲裁マトリクスを適用")
     args = parser.parse_args()
@@ -728,8 +776,13 @@ def main():
             return
 
         # 4. Run backtest for signal win rates
+        bt_result = None
+        if args.backtest_result and os.path.exists(args.backtest_result):
+            with open(args.backtest_result) as f:
+                bt_result = json.load(f)
         per_rule, active_rules, max_holding_days = run_backtest_win_rates(
             args.ticker, date_str, args.target_years,
+            backtest_result=bt_result,
         )
 
         signal_win_rates = {
@@ -771,7 +824,7 @@ def main():
         advisory["max_holding_days"] = max_holding_days
 
         # 7. Risk assessment
-        atr_val = _safe_float(analysis.get("indicators", {}).get("atr"))
+        atr_val = safe_float(analysis.get("indicators", {}).get("atr"))
         risk = assess_risk(
             market_price, args.shares, args.mode,
             args.portfolio_value, analysis.get("indicators", {}),
