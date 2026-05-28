@@ -402,44 +402,12 @@ def main():
         print("\n保有銘柄がありません。portfolio.yaml を確認してください。")
         return
 
-    # --- Analysis ---
-    results = []
-    for h in holdings:
-        ticker = h.get("ticker")
-        if not ticker:
-            continue
-        stock = fetch_stock_data(ticker, fallback_price=h.get("current_price"))
-        if h.get("position_type") == "信用":
-            price = h.get("current_price", 0)
-            if isinstance(price, dict):
-                price = price.get("current_price", 0) or 0
-            credit_risks = calc_credit_risks(h, float(price), account.get("margin_ratio"))
-        else:
-            credit_risks = {}
-        score = score_action(h, stock, credit_risks)
-        results.append({
-            "holding": h,
-            "stock": stock,
-            "score": score,
-            "credit_risks": credit_risks,
-        })
-
-    # Sort by score descending
-    results.sort(key=lambda r: r["score"], reverse=True)
-
-    if not args.all:
-        # Show only actionable items (score >= 5) or all if requested
-        actionable = [r for r in results if r["score"] >= 5]
-        if actionable:
-            print(f"\n## 要アクション銘柄 ({len(actionable)}件)\n")
-        else:
-            print("\n## 要アクション銘柄 (0件)\n")
-            print("全銘柄アクション不要です。")
-        display_results = actionable if actionable else results
-        format_output(display_results, portfolios=portfolio, show_all=False)
+    show_all = args.all
+    if not show_all:
+        print(f"\n## 要アクション銘柄 ({len(holdings)}件)\n")
     else:
-        print(f"\n## 全銘柄詳細 ({len(results)}件)\n")
-        format_output(results, portfolios=portfolio, show_all=True)
+        print(f"\n## 全銘柄詳細 ({len(holdings)}件)\n")
+    format_output(holdings, portfolios=portfolio, show_all=show_all)
 
 
 if __name__ == "__main__":
