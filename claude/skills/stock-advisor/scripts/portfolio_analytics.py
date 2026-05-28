@@ -100,7 +100,7 @@ def compute_stress_test(portfolio: dict) -> dict:
                 if sd is not None and not sd.empty:
                     sd = sd.set_index("Date")
                     sr = sd["Close"].pct_change().dropna()
-                    topix = yf.download("^TOPX", period="1y", progress=False)
+                    topix = yf.download("1306.T", period="1y", progress=False)
                     if not topix.empty:
                         tr = topix["Close"].pct_change().dropna()
                         ci = sr.index.intersection(tr.index)
