@@ -1414,7 +1414,7 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
     if total_trades == 0:
         verdict = "no_trades"
     else:
-        if overfit_count == n_windows:
+        if overfit_count > 2:
             verdict = "insufficient_data"
         elif overfit_count > 0:
             verdict = "unstable"
@@ -1740,7 +1740,7 @@ def _print_summary(result):
 def main():
     parser = argparse.ArgumentParser(description="Backtest engine for stock trading signals")
     parser.add_argument("--ticker", required=True, help="Ticker to backtest")
-    parser.add_argument("--start", help="Start date YYYY-MM-DD (default: 3 years ago)")
+    parser.add_argument("--start", help="Start date YYYY-MM-DD (default: 5 years ago)")
     parser.add_argument("--end", help="End date YYYY-MM-DD (default: latest trading day)")
     parser.add_argument("--tune", action="store_true", help="Run grid search parameter tuning")
     parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
@@ -1763,7 +1763,7 @@ def main():
 
     start_date = args.start
     if not start_date:
-        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=3)
+        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=5)
         start_date = start_dt.strftime("%Y-%m-%d")
 
     # Check backtest result cache (must be after start_date is resolved)

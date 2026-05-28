@@ -9,27 +9,42 @@ Usage:
   python3 auth_sbi.py --save    # SBI_COOKIE環境変数の値を検証→保存
 """
 
+import json
 import os
 import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
 
-SBI_CHECK_URL = "https://www.sbisec.co.jp/ETGate"
+# Use a page that REQUIRES authentication. www.sbisec.co.jp/ETGate is public
+# and always returns 200 even with expired cookies (false positive).
+SBI_CHECK_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on"
 COOKIE_FILE = Path(__file__).parent / ".cookie"
+
+
+def _build_cookie_header(raw: str, names: set) -> str:
+    """Build a Cookie header string from JSON array or plain string format."""
+    if raw.startswith("["):
+        try:
+            data = json.loads(raw)
+            pairs = [f"{c['name']}={c['value']}" for c in data if c["name"] in names]
+            return "; ".join(pairs)
+        except json.JSONDecodeError:
+            pass
+
+    pairs = []
+    for pair in raw.split("; "):
+        if "=" in pair:
+            name = pair.split("=", 1)[0].strip()
+            if name in names:
+                pairs.append(pair)
+    return "; ".join(pairs)
 
 
 def validate(cookie: str) -> tuple[str, str | None]:
     """Returns (status, error_message_or_None)."""
-    # Only send essential cookies to avoid HTTP 400 from oversized header
     essential = {"JSESSIONID", "AWSALB", "AWSALBCORS"}
-    pairs = []
-    for pair in cookie.split("; "):
-        if "=" in pair:
-            name = pair.split("=", 1)[0].strip()
-            if name in essential:
-                pairs.append(pair)
-    slim_cookie = "; ".join(pairs) if pairs else cookie
+    slim_cookie = _build_cookie_header(cookie, essential)
     req = urllib.request.Request(SBI_CHECK_URL, headers={"Cookie": slim_cookie})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -39,8 +54,11 @@ def validate(cookie: str) -> tuple[str, str | None]:
     except Exception as e:
         return ("ERROR", str(e))
 
-    if "login" in url.lower() or "/ETGate/login" in url:
-        return ("EXPIRED", None)
+    # Any redirect away from the authenticated page means the session is
+    # invalid. Unauthenticated urllib requests get bounced to either
+    # login.sbisec.co.jp or search.sbisec.co.jp/attention/maintenance.html.
+    if url != SBI_CHECK_URL:
+        return ("EXPIRED", f"redirected to {url[:80]}")
     return ("OK", None)
 
 

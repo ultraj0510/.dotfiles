@@ -327,9 +327,11 @@ def format_output(holdings: list, portfolios: list, show_all: bool = False):
 
 # --- SBI sync ---
 
-_SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
-_SBI_PORTFOLIO_URL_DESKTOP = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETpfR001Control&_ActionID=DefaultAID&ref_from=1&ref_to=50&fold_item=it_general_fold_flg&fold_item_flg=1&getFlg=on"
-_SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_DataStoreID=DSWPLETacR001Control&_ActionID=DefaultAID&getFlg=on"
+# SBI now serves all pages from www.sbisec.co.jp (site1 redirects to error).
+# Params must match the links on the actual www.sbisec.co.jp navigation.
+_SBI_PORTFOLIO_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_PORTFOLIO_URL_DESKTOP = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_ACCOUNT_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETacR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_acc"
 
 _MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
 _DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
