@@ -79,7 +79,7 @@ def fetch_sbi_page(url: str = None, user_agent: str = None) -> tuple[str | None,
             html = page.content()
             browser.close()
             html_status = classify_sbi_html(html, current_url)
-            if html_status:
+            if html_status and html_status != "OK":
                 return (None, "auth_expired" if html_status == "EXPIRED" else html_status.lower())
             if len(html) < 5000:
                 return (None, "auth_expired")

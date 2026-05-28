@@ -409,7 +409,13 @@ def main():
         if not ticker:
             continue
         stock = fetch_stock_data(ticker, fallback_price=h.get("current_price"))
-        credit_risks = calc_credit_risks(h, account) if h.get("position_type") == "信用" else {}
+        if h.get("position_type") == "信用":
+            price = h.get("current_price", 0)
+            if isinstance(price, dict):
+                price = price.get("current_price", 0) or 0
+            credit_risks = calc_credit_risks(h, float(price), account.get("margin_ratio"))
+        else:
+            credit_risks = {}
         score = score_action(h, stock, credit_risks)
         results.append({
             "holding": h,
@@ -430,10 +436,10 @@ def main():
             print("\n## 要アクション銘柄 (0件)\n")
             print("全銘柄アクション不要です。")
         display_results = actionable if actionable else results
-        format_output(display_results, portfolios=[], show_all=False)
+        format_output(display_results, portfolios=portfolio, show_all=False)
     else:
         print(f"\n## 全銘柄詳細 ({len(results)}件)\n")
-        format_output(results, portfolios=[], show_all=True)
+        format_output(results, portfolios=portfolio, show_all=True)
 
 
 if __name__ == "__main__":
