@@ -15,13 +15,22 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-SBI_CHECK_URL = "https://site1.sbisec.co.jp/ETGate/?OutSide=on&getFlg=on"
+SBI_CHECK_URL = "https://www.sbisec.co.jp/ETGate"
 COOKIE_FILE = Path(__file__).parent / ".cookie"
 
 
 def validate(cookie: str) -> tuple[str, str | None]:
     """Returns (status, error_message_or_None)."""
-    req = urllib.request.Request(SBI_CHECK_URL, headers={"Cookie": cookie})
+    # Only send essential cookies to avoid HTTP 400 from oversized header
+    essential = {"JSESSIONID", "AWSALB", "AWSALBCORS"}
+    pairs = []
+    for pair in cookie.split("; "):
+        if "=" in pair:
+            name = pair.split("=", 1)[0].strip()
+            if name in essential:
+                pairs.append(pair)
+    slim_cookie = "; ".join(pairs) if pairs else cookie
+    req = urllib.request.Request(SBI_CHECK_URL, headers={"Cookie": slim_cookie})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             url = resp.geturl()
