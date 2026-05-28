@@ -284,6 +284,31 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         STRENGTH_WEIGHT = {"strong": 2.0, "moderate": 1.0, "weak": 0.5}
         contributions = []  # (rule, direction, strength, score)
 
+        # IC-based rule filter: compute recent IC to exclude weak rules
+        ic_filter = {}
+        if len(rows) >= 60:
+            recent = pd.DataFrame(rows[-60:])
+            if "close" in recent.columns and len(recent) > 10:
+                closes = recent["close"].values
+                for horizon, hdays in [("5d", 5)]:
+                    if len(closes) > hdays:
+                        fwd = np.zeros(len(closes))
+                        fwd[:-hdays] = (closes[hdays:] - closes[:-hdays]) / closes[:-hdays]
+                        rule_sigs = {}
+                        for ri, row in recent.iterrows():
+                            r, s = row.get("signal_rule"), row.get("signal", 0)
+                            if r and s != 0:
+                                pos = recent.index.get_loc(ri) if ri in recent.index else -1
+                                if isinstance(pos, int) and 0 <= pos < len(fwd):
+                                    rule_sigs.setdefault(r, {"s": [], "f": []})
+                                    rule_sigs[r]["s"].append(s)
+                                    rule_sigs[r]["f"].append(fwd[pos])
+                        for rn, d in rule_sigs.items():
+                            if len(d["s"]) >= 5:
+                                from numpy import corrcoef
+                                ic_val = corrcoef(d["s"], d["f"])[0, 1]
+                                ic_filter[rn] = abs(ic_val) >= 0.05
+
         # --- BUY rules ---
         # Oversold reversal
         if (rsi is not None and rsi < thresholds["rsi_lower"]
@@ -296,7 +321,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 st = "moderate"
             else:
                 st = "weak"
-            if _is_rule_allowed("oversold_reversal", 1, strategy_mode):
+            if _is_rule_allowed("oversold_reversal", 1, strategy_mode) and ic_filter.get("oversold_reversal", True):
                 contributions.append(("oversold_reversal", 1, st, STRENGTH_WEIGHT[st]))
 
         # Momentum BUY
@@ -307,7 +332,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 st = "moderate"
             else:
                 st = "weak"
-            if _is_rule_allowed("momentum", 1, strategy_mode):
+            if _is_rule_allowed("momentum", 1, strategy_mode) and ic_filter.get("momentum", True):
                 contributions.append(("momentum", 1, st, STRENGTH_WEIGHT[st]))
 
         # Trend following BUY
@@ -316,7 +341,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and ret_10d is not None and ret_10d > 3
                 and vol_ratio and safe_float(vol_ratio) > 0.8):
             st = "strong" if (vol_ratio and safe_float(vol_ratio) > 1.2) else "moderate"
-            if _is_rule_allowed("trend_following", 1, strategy_mode):
+            if _is_rule_allowed("trend_following", 1, strategy_mode) and ic_filter.get("trend_following", True):
                 contributions.append(("trend_following", 1, st, STRENGTH_WEIGHT[st]))
 
         # MA support bounce BUY
@@ -324,7 +349,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and close_val and sma_50 * 0.98 <= close_val <= sma_50 * 1.02
                 and rsi is not None and rsi < 45):
             st = "moderate" if (rsi and rsi < 35) else "weak"
-            if _is_rule_allowed("ma_support_bounce", 1, strategy_mode):
+            if _is_rule_allowed("ma_support_bounce", 1, strategy_mode) and ic_filter.get("ma_support_bounce", True):
                 contributions.append(("ma_support_bounce", 1, st, STRENGTH_WEIGHT[st]))
 
         # --- SELL rules ---
@@ -332,7 +357,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if (rsi is not None and rsi > thresholds["rsi_upper"]
                 and pos_52w is not None and pos_52w > thresholds["position_52w_upper"]):
             st = "strong" if (rsi and rsi > 80 and vol_ratio and safe_float(vol_ratio) > 1.2) else "moderate"
-            if _is_rule_allowed("overbought", -1, strategy_mode):
+            if _is_rule_allowed("overbought", -1, strategy_mode) and ic_filter.get("overbought", True):
                 contributions.append(("overbought", -1, st, -STRENGTH_WEIGHT[st]))
 
         # Momentum breakdown SELL
@@ -342,13 +367,13 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             if vr > 2.0: st = "strong"
             elif vr > 1.5: st = "moderate"
             else: st = "weak"
-            if _is_rule_allowed("momentum_breakdown", -1, strategy_mode):
+            if _is_rule_allowed("momentum_breakdown", -1, strategy_mode) and ic_filter.get("momentum_breakdown", True):
                 contributions.append(("momentum_breakdown", -1, st, -STRENGTH_WEIGHT[st]))
 
         # Drawdown stop SELL
         if ret_20d is not None and ret_20d < thresholds["drawdown_20d"]:
             st = "strong" if (ret_20d and ret_20d < -20) else "moderate"
-            if _is_rule_allowed("drawdown_stop", -1, strategy_mode):
+            if _is_rule_allowed("drawdown_stop", -1, strategy_mode) and ic_filter.get("drawdown_stop", True):
                 contributions.append(("drawdown_stop", -1, st, -STRENGTH_WEIGHT[st]))
 
         # Death cross SELL
@@ -356,12 +381,14 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                 and close_val < sma_50 and sma_50 < sma_200):
             sma_ratio = sma_50 / sma_200
             if 0.99 <= sma_ratio <= 1.01:
-                if _is_rule_allowed("death_cross", -1, strategy_mode):
+                if _is_rule_allowed("death_cross", -1, strategy_mode) and ic_filter.get("death_cross", True):
                     contributions.append(("death_cross", -1, "strong", -2.0))
 
         # Resolve ensemble: sum all contributions
         total_score = sum(c[3] for c in contributions)
-        if total_score >= 1.0:
+        # Regime filter: in strong_downtrend, require stronger conviction for BUY
+        buy_threshold = 2.0 if trend_state == "strong_downtrend" else 1.0
+        if total_score >= buy_threshold:
             signal = 1
             best = max(contributions, key=lambda x: abs(x[3]))
             signal_rule = best[0]
