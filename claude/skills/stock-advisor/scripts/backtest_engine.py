@@ -284,30 +284,32 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         STRENGTH_WEIGHT = {"strong": 2.0, "moderate": 1.0, "weak": 0.5}
         contributions = []  # (rule, direction, strength, score)
 
-        # IC-based rule filter: compute recent IC to exclude weak rules
+        # IC-based rule filter: exclude rules with weak recent predictive power
         ic_filter = {}
-        if len(rows) >= 60:
-            recent = pd.DataFrame(rows[-60:])
-            if "close" in recent.columns and len(recent) > 10:
-                closes = recent["close"].values
-                for horizon, hdays in [("5d", 5)]:
+        try:
+            if len(rows) >= 60:
+                recent = pd.DataFrame(rows[-60:])
+                closes = recent.get("close")
+                if closes is not None and len(closes) > 10:
+                    closes = closes.values
+                    hdays = 5
                     if len(closes) > hdays:
                         fwd = np.zeros(len(closes))
                         fwd[:-hdays] = (closes[hdays:] - closes[:-hdays]) / closes[:-hdays]
                         rule_sigs = {}
-                        for ri, row in recent.iterrows():
-                            r, s = row.get("signal_rule"), row.get("signal", 0)
-                            if r and s != 0:
-                                pos = recent.index.get_loc(ri) if ri in recent.index else -1
-                                if isinstance(pos, int) and 0 <= pos < len(fwd):
-                                    rule_sigs.setdefault(r, {"s": [], "f": []})
-                                    rule_sigs[r]["s"].append(s)
-                                    rule_sigs[r]["f"].append(fwd[pos])
-                        for rn, d in rule_sigs.items():
-                            if len(d["s"]) >= 5:
-                                from numpy import corrcoef
-                                ic_val = corrcoef(d["s"], d["f"])[0, 1]
+                        for i, row in enumerate(rows[-60:]):
+                            r = row.get("signal_rule")
+                            s = row.get("signal", 0)
+                            if r and s != 0 and i < len(fwd):
+                                rule_sigs.setdefault(r, {"s": [], "f": []})
+                                rule_sigs[r]["s"].append(s)
+                                rule_sigs[r]["f"].append(fwd[i])
+                        for rn, rd in rule_sigs.items():
+                            if len(rd["s"]) >= 5:
+                                ic_val = np.corrcoef(rd["s"], rd["f"])[0, 1]
                                 ic_filter[rn] = abs(ic_val) >= 0.05
+        except Exception:
+            pass  # IC filter unavailable — use all rules
 
         # --- BUY rules ---
         # Oversold reversal
@@ -1761,7 +1763,7 @@ def main():
 
     start_date = args.start
     if not start_date:
-        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=5)
+        start_dt = pd.to_datetime(end_date) - pd.DateOffset(years=3)
         start_date = start_dt.strftime("%Y-%m-%d")
 
     # Check backtest result cache (must be after start_date is resolved)
