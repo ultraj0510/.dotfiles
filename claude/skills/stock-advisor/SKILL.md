@@ -88,6 +88,12 @@ done
 
 レポートは Write ツールで `$RESULTS_DIR/report.md` に保存。
 
+**検証**: レポート保存後、以下でポジション数が portfolio.yaml と一致するか確認:
+```bash
+echo "portfolio.yaml: $(python3 -c "import yaml; print(len(yaml.safe_load(open('$HOME/code/playground/stock-price-analyze/portfolio.yaml'))['holdings']))") positions"
+grep -c '^####\|^### .* — .*（.*%）' "$RESULTS_DIR/report.md" | tail -1
+```
+
 ### 後処理
 
 ```bash
