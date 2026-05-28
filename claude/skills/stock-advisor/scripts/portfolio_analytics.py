@@ -102,10 +102,13 @@ def compute_stress_test(portfolio: dict) -> dict:
                     sr = sd["Close"].pct_change().dropna()
                     topix = yf.download("1306.T", period="1y", progress=False)
                     if not topix.empty:
-                        tr = topix["Close"].pct_change().dropna()
+                        tr_col = topix["Close"]
+                        if isinstance(tr_col, pd.DataFrame):
+                            tr_col = tr_col.iloc[:, 0]
+                        tr = tr_col.pct_change().dropna()
                         ci = sr.index.intersection(tr.index)
                         if len(ci) > 60:
-                            beta = float(np.cov(sr.loc[ci], tr.loc[ci])[0, 1] / np.var(tr.loc[ci]))
+                            beta = float(np.cov(sr.loc[ci], tr.loc[ci])[0, 1] / np.var(tr.loc[ci].values))
             except Exception:
                 pass
             est_drop = params["market_drop"] * beta
