@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 
 import yaml
 
-from .cookie_store import read_cookie_objects
-from .sbi_auth import classify_sbi_html
+from cookie_store import read_cookie_objects
+from sbi_auth import classify_sbi_html
 
 # SBI URLs — www.sbisec.co.jp is the canonical domain.
 _SBI_PORTFOLIO_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
@@ -90,7 +90,7 @@ def fetch_sbi_page(url: str = None, user_agent: str = None) -> tuple[str | None,
 
 
 def _fetch_sbi_page_urllib(url: str, user_agent: str = None) -> tuple[str | None, str]:
-    from .cookie_store import read_cookie
+    from cookie_store import read_cookie
     cookie = read_cookie()
     if not cookie:
         return (None, "auth_expired")
@@ -261,7 +261,7 @@ def merge_holdings(existing: list, sbi_holdings: list) -> list | None:
 
 def sync_from_sbi(portfolio_path: str, cookie: str = None) -> str:
     if cookie is None:
-        from .cookie_store import read_cookie
+        from cookie_store import read_cookie
         cookie = read_cookie()
     if not cookie:
         return "no_cookie"
@@ -298,7 +298,7 @@ def sync_from_sbi(portfolio_path: str, cookie: str = None) -> str:
     # Account data
     account: dict[str, float] = {}
     try:
-        from .cookie_store import read_cookie
+        from cookie_store import read_cookie
         c = read_cookie()
         req = urllib.request.Request(_SBI_ACCOUNT_URL, headers=_sbi_headers(c, _DESKTOP_UA))
         with urllib.request.urlopen(req, timeout=15) as resp:

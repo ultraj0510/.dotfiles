@@ -12,6 +12,19 @@ Usage:
 import os
 import sys
 
+# Auto-discover a venv with Playwright if system python3 lacks it
+try:
+    from playwright.sync_api import sync_playwright  # noqa: F401
+except ImportError:
+    candidates = [
+        os.path.expanduser("~/.claude/skills/stock-advisor/scripts/.venv/bin/python"),
+        os.path.expanduser("~/.agents/skills/portfolio-auth/.venv/bin/python"),
+        os.path.expanduser("~/.dotfiles/claude/skills/portfolio-auth/.venv/bin/python"),
+    ]
+    for venv_python in candidates:
+        if os.path.isfile(venv_python) and os.access(venv_python, os.X_OK):
+            os.execv(venv_python, [venv_python] + sys.argv)
+
 _CORE = os.path.expanduser("~/.dotfiles/portfolio-core")
 if _CORE not in sys.path:
     sys.path.insert(0, _CORE)
