@@ -62,21 +62,29 @@ def cmd_default():
         print("")
         print("設定手順:")
         print("  1. ブラウザで https://www.sbisec.co.jp/ にログイン")
-        print("  2. 開発ツール → ストレージ → Cookie から主要Cookieをコピー")
-        print("  3. export SBI_COOKIE=\"JSESSIONID=...; AWSALB=...; ...\"")
-        print(f"  4. python3 {__file__} --save")
+        print("  2. Cookie-Editorでエクスポート（JSON形式）")
+        print("  3. /portfolio-auth にJSONを貼り付けて実行")
         sys.exit(1)
 
     status, err = validate(cookie)
     print(f"STATUS: {status}")
     if status == "OK":
         print("SBI証券セッションは有効です。")
+        # Auto-save valid cookies to persist session
+        _save_cookie(cookie)
     elif status == "EXPIRED":
-        print("Cookieの有効期限が切れています。ブラウザで再ログインし、上記手順3-4で再設定してください。")
+        print("Cookieの有効期限が切れています。ブラウザで再ログインし、/portfolio-auth に新しいCookieを貼り付けてください。")
         sys.exit(1)
     else:
         print(f"検証エラー: {err}")
         sys.exit(1)
+
+
+def _save_cookie(cookie_str: str):
+    """Save cookie to file with restricted permissions."""
+    COOKIE_FILE.write_text(cookie_str)
+    COOKIE_FILE.chmod(0o600)
+    print(f"Cookieを保存しました: {COOKIE_FILE}")
 
 
 def cmd_save():
@@ -94,10 +102,7 @@ def cmd_save():
         print("SBI_COOKIE の値が正しいか確認してください。")
         sys.exit(1)
 
-    COOKIE_FILE.write_text(cookie)
-    COOKIE_FILE.chmod(0o600)
-    print("OK: Cookieを保存しました。")
-    print(f"保存先: {COOKIE_FILE}")
+    _save_cookie(cookie)
 
 
 if __name__ == "__main__":
