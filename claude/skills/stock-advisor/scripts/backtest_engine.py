@@ -921,6 +921,56 @@ def compute_signal_census(signals_df, trades):
     return census
 
 
+def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
+    """Compute Information Coefficient (Spearman correlation) per signal rule.
+
+    IC measures predictive power by correlating signal direction with
+    forward returns at 5d, 10d, 20d horizons. t-stat > 2 = significant.
+    """
+    if signals_df.empty or "close" not in signals_df.columns:
+        return {}
+    closes = signals_df["close"].values
+    ic_results = {}
+    for horizon, label in [(5, "5d"), (10, "10d"), (20, "20d")]:
+        if len(closes) <= horizon:
+            continue
+        fwd_ret = np.zeros(len(closes))
+        fwd_ret[:-horizon] = (closes[horizon:] - closes[:-horizon]) / closes[:-horizon]
+        rule_data = {}
+        for idx, row in signals_df.iterrows():
+            rule, sig = row.get("signal_rule"), row.get("signal", 0)
+            if not rule or sig == 0:
+                continue
+            pos = signals_df.index.get_loc(idx) if idx in signals_df.index else idx
+            if isinstance(pos, int) and pos < len(fwd_ret):
+                rule_data.setdefault(rule, {"signals": [], "fwd": []})
+                rule_data[rule]["signals"].append(sig)
+                rule_data[rule]["fwd"].append(fwd_ret[pos])
+        per_rule = {}
+        for rule, d in rule_data.items():
+            s, fw = np.array(d["signals"]), np.array(d["fwd"])
+            if len(s) < 5:
+                continue
+            try:
+                from scipy.stats import spearmanr
+                ic, pval = spearmanr(s, fw)
+            except ImportError:
+                ic = np.corrcoef(s, fw)[0, 1] if len(s) > 1 else 0
+                pval = None
+            n = len(s)
+            denom = max(1 - ic * ic, 0.0001)
+            t_stat = ic * np.sqrt((n - 2) / denom) if abs(ic) < 1 else 0
+            per_rule[rule] = {
+                "ic": round(float(ic), 4), "n_signals": n,
+                "t_stat": round(float(t_stat), 2),
+                "significant": abs(t_stat) > 2,
+                "p_value": round(float(pval), 4) if pval is not None else None,
+            }
+        if per_rule:
+            ic_results[label] = per_rule
+    return ic_results
+
+
 def _empty_metrics():
     return {
         "sharpe_ratio": 0.0,
@@ -1780,6 +1830,11 @@ def main():
         wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
                                   strategy_mode=args.strategy)
         result["walk_forward"] = wf
+
+    # Signal IC (Information Coefficient)
+    ic_result = compute_signal_ic(sig_df)
+    if ic_result:
+        result["signal_ic"] = ic_result
 
     if args.tune:
         tune_result = grid_search(args.ticker, start_date, end_date, margin_mode=margin_mode)
