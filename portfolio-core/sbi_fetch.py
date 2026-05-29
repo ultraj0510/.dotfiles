@@ -18,10 +18,10 @@ import yaml
 from cookie_store import read_cookie_objects
 from sbi_auth import classify_sbi_html
 
-# SBI URLs — www.sbisec.co.jp is the canonical domain.
-_SBI_PORTFOLIO_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
-_SBI_PORTFOLIO_URL_DESKTOP = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
-_SBI_ACCOUNT_URL = "https://www.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETacR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_acc"
+# SBI URLs — JSESSIONID is hostOnly for site1.sbisec.co.jp.
+_SBI_PORTFOLIO_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_PORTFOLIO_URL_DESKTOP = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
+_SBI_ACCOUNT_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETacR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETacR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_acc"
 
 _MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
 _DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -42,7 +42,7 @@ def _sbi_headers(cookie: str, user_agent: str | None = None) -> dict[str, str]:
         "Cookie": cookie,
         "User-Agent": user_agent or _DESKTOP_UA,
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Referer": "https://www.sbisec.co.jp/",
+        "Referer": "https://site1.sbisec.co.jp/",
     }
 
 
