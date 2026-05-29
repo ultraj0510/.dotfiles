@@ -647,12 +647,13 @@ Append this section after execution:
 ```markdown
 ## Review Notes
 
-- Dotfiles portfolio-auth commit:
-- Dotfiles workspace ownership commit:
-- Playground hygiene commit:
-- Personal data policy decision:
-- Remaining uncommitted changes:
-- Verification commands run:
+- Dotfiles portfolio-auth commit: `09dfbc0` fix: harden SBI cookie refresh handling (7 files, 4 tests pass)
+- Dotfiles workspace ownership commit: `5bd6e58` chore: manage code workspace config in dotfiles (21 files)
+- Playground hygiene commit: `6678d1e` chore: ignore generated workspace state (3 files)
+- Playground portfolio data commit: `f6c9d3a` chore: keep portfolio data local (18 files, portfolio.yaml+results/ untracked, example added)
+- Personal data policy decision: Keep real portfolio.yaml local-only, commit redacted portfolio.example.yaml. Approved by user.
+- Remaining uncommitted changes: None (all 4 repos clean)
+- Verification commands run: check_workspace.py (hygiene ok), sync_agents.py (7 agents), Codex TOML parse (ok), 4 test passes, py_compile all clear
 ```
 
 ## Self-Review
