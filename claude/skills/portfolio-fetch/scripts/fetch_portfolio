@@ -14,6 +14,7 @@ _discover_python() {
     fi
 
     local candidates=(
+        "$HOME/.claude/skills/stock-advisor/scripts/.venv/bin/python"
         "$HOME/code/deepcode/TradingAgents/.venv/bin/python3"
         "$HOME/code/playground/stock-price-analyze/.venv/bin/python3"
         "$HOME/code/playground/stock-price-analyze/venv312/bin/python3"

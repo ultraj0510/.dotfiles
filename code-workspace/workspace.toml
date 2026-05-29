@@ -1,0 +1,36 @@
+[workspace]
+root = "/Users/fujie/code"
+source_of_truth = "workspace.md"
+default_plan_dir = "docs/plans"
+default_lessons_file = "docs/lessons.md"
+
+[tools]
+codex_entrypoint = "AGENTS.md"
+claude_entrypoint = "CLAUDE.md"
+shared_agent_source = "ai/agents/stock-analysis"
+sync_agents = "ai/tools/sync_agents.py"
+
+[runtime]
+root = "runtime"
+omc = "runtime/omc"
+stock_advisor_workspace = "runtime/stock-advisor/workspace"
+stock_results = "runtime/stock-price-analyze-results"
+
+[projects.current]
+stock_price_analyze = "playground/stock-price-analyze"
+playground_repo = "playground"
+learning_ddd = "learning-ddd"
+
+[projects.proposed]
+stock_analysis_workspace = "projects/stock-analysis-workspace"
+learning_ddd = "projects/learning-ddd"
+
+[references.current]
+claude_code_best_practice = "references/claude-code-best-practice"
+
+[references.proposed]
+claude_code_best_practice = "references/claude-code-best-practice"
+
+[generated]
+claude_agents = ".claude/agents"
+codex_agents = ".codex/agents"
