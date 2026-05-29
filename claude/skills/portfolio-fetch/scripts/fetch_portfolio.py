@@ -345,9 +345,8 @@ def main():
     portfolio_path = os.path.join(_STOCK_ANALYZE_DIR, "portfolio.yaml")
 
     # SBI自動同期 (uses portfolio-core)
-    cookie = _read_sbi_cookie()
-    if not args.skip_sync and cookie:
-        status = _sync_from_sbi(portfolio_path, cookie)
+    if not args.skip_sync:
+        status = _sync_from_sbi(portfolio_path)
         if status != "ok":
             if args.use_cache_on_fail:
                 last_upd = "不明"
@@ -365,9 +364,6 @@ def main():
                 print(f"[ERROR] SBI同期に失敗しました ({status})。", file=sys.stderr)
                 sys.exit(1)
         print()
-    elif not args.skip_sync and not cookie:
-        print("[WARN] SBI_COOKIEが設定されていません。", file=sys.stderr)
-
     if not os.path.isfile(portfolio_path):
         print(f"[ERROR] portfolio.yaml not found at {portfolio_path}", file=sys.stderr)
         sys.exit(1)

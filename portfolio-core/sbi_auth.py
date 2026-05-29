@@ -5,11 +5,12 @@ Extracted from Claude版 portfolio-auth/auth_sbi.py.
 
 import json
 
+from cookie_store import CRITICAL_KEYS  # noqa: E402 — single source of truth
+
 # SBI portfolio page (requires authentication).
 # Use site1.sbisec.co.jp directly — JSESSIONID is hostOnly for this domain
 # and won't be sent to www.sbisec.co.jp. SBI serves authenticated pages from site1.
 SBI_CHECK_URL = "https://site1.sbisec.co.jp/ETGate/?_ControlID=WPLETpfR001Control&_PageID=DefaultPID&_ActionID=DefaultAID&_DataStoreID=DSWPLETpfR001Control&OutSide=on&getFlg=on&_scpr=intpr=hn_trade"
-CRITICAL_KEYS = ["JSESSIONID", "__lt__sid", "__lt__cid", "AWSALBCORS"]
 
 
 def parse_cookies(raw: str) -> dict[str, str]:

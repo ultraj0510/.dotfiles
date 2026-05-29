@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from cookie_store import read_cookie_objects
+from cookie_store import read_cookie_bundle
 from sbi_auth import classify_sbi_html
 
 # SBI URLs — JSESSIONID is hostOnly for site1.sbisec.co.jp.
@@ -49,12 +49,19 @@ def _sbi_headers(cookie: str, user_agent: str | None = None) -> dict[str, str]:
 def fetch_sbi_page(url: str = None, user_agent: str = None) -> tuple[str | None, str]:
     if url is None:
         url = _SBI_PORTFOLIO_URL
+
+    bundle = read_cookie_bundle()
+    cookie_list = bundle["cookie_objects"]
+    if not cookie_list:
+        print("[AUTH_EXPIRED] No Playwright cookies available from cookie source", file=sys.stderr)
+        return (None, "auth_expired")
+    print(f"[INFO] SBI Cookie source: {bundle['source']} fingerprint={bundle['fingerprint']} saved_at={bundle.get('saved_at', '-')}", file=sys.stderr)
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return _fetch_sbi_page_urllib(url, user_agent)
 
-    cookie_list = read_cookie_objects()
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -90,8 +97,8 @@ def fetch_sbi_page(url: str = None, user_agent: str = None) -> tuple[str | None,
 
 
 def _fetch_sbi_page_urllib(url: str, user_agent: str = None) -> tuple[str | None, str]:
-    from cookie_store import read_cookie
-    cookie = read_cookie()
+    bundle = read_cookie_bundle()
+    cookie = bundle["cookie_header"]
     if not cookie:
         return (None, "auth_expired")
     if user_agent is None:
@@ -259,11 +266,9 @@ def merge_holdings(existing: list, sbi_holdings: list) -> list | None:
     return merged
 
 
-def sync_from_sbi(portfolio_path: str, cookie: str = None) -> str:
-    if cookie is None:
-        from cookie_store import read_cookie
-        cookie = read_cookie()
-    if not cookie:
+def sync_from_sbi(portfolio_path: str) -> str:
+    bundle = read_cookie_bundle()
+    if not bundle["cookie_objects"]:
         return "no_cookie"
     html, fetch_status = fetch_sbi_page()
     if fetch_status in ("auth_expired",):
@@ -298,8 +303,8 @@ def sync_from_sbi(portfolio_path: str, cookie: str = None) -> str:
     # Account data
     account: dict[str, float] = {}
     try:
-        from cookie_store import read_cookie
-        c = read_cookie()
+        bundle2 = read_cookie_bundle()
+        c = bundle2["cookie_header"]
         req = urllib.request.Request(_SBI_ACCOUNT_URL, headers=_sbi_headers(c, _DESKTOP_UA))
         with urllib.request.urlopen(req, timeout=15) as resp:
             acc_html = resp.read().decode("cp932", errors="replace")
