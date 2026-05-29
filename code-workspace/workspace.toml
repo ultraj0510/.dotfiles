@@ -16,19 +16,11 @@ omc = "runtime/omc"
 stock_advisor_workspace = "runtime/stock-advisor/workspace"
 stock_results = "runtime/stock-price-analyze-results"
 
-[projects.current]
+[projects]
 stock_price_analyze = "playground/stock-price-analyze"
 playground_repo = "playground"
-learning_ddd = "learning-ddd"
 
-[projects.proposed]
-stock_analysis_workspace = "projects/stock-analysis-workspace"
-learning_ddd = "projects/learning-ddd"
-
-[references.current]
-claude_code_best_practice = "references/claude-code-best-practice"
-
-[references.proposed]
+[references]
 claude_code_best_practice = "references/claude-code-best-practice"
 
 [generated]
