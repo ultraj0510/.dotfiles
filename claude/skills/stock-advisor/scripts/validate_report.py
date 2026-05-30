@@ -24,6 +24,9 @@ KNOWN_METADATA_TOKENS = {
     "risk_posture", "advisory_plan", "protective_stop_price",
     "portfolio_weight_pct", "cost_basis_weight_pct", "unrealized_pnl_pct",
     "downside_10pct_yen", "report_action", "order_shares", "order_type", "limit_price",
+    # Trend states (from signal_engine trend_state field)
+    "strong_uptrend", "strong_downtrend", "downtrend", "ranging",
+    "uptrend",
 }
 
 
@@ -49,11 +52,13 @@ def check_invented_signals(report_text: str, signals_path: str, quant_decisions_
     """Return an error message if the report invents a signal name, else None."""
     known = _known_signal_rules(signals_path)
     known.update(KNOWN_METADATA_TOKENS)
-    # Also allow veto names from quant_decisions (e.g. negative_walk_forward)
+    # Also allow veto and risk_flag names from quant_decisions
     with open(quant_decisions_path) as f:
         qd = json.load(f)
     for d in qd.get("decisions", []):
         for v in d.get("vetoes", []):
+            known.add(v)
+        for v in d.get("risk_flags", []):
             known.add(v)
     # Also allow WF verdict terms from backtest dir
     if backtest_dir and os.path.isdir(backtest_dir):
