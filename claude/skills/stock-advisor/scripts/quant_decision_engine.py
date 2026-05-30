@@ -279,10 +279,7 @@ def _range_rebalance_plan(signal_info: dict, current_qty: int, portfolio_weight_
     atr = float(signal_info.get("atr", 0) or 0)
 
     trim_shares = max(100, (current_qty // 10 // 100) * 100)
-    if portfolio_weight_pct is not None and portfolio_weight_pct < 30:
-        trim_shares = min(trim_shares, 300)
-    else:
-        trim_shares = min(trim_shares, 300)
+    trim_shares = min(trim_shares, 300)
 
     trim_trigger = boll_mid or current_price
     reentry_watch = boll_lb or (current_price - atr if atr else current_price * 0.95)

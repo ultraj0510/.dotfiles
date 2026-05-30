@@ -952,7 +952,6 @@ def _safe_spearmanr(signal_values, forward_returns) -> tuple:
         return None, None
     from scipy.stats import spearmanr
     ic, pval = spearmanr(signal_values, forward_returns)
-    import numpy as np
     if np.isnan(ic):
         return None, None
     if pval is not None and np.isnan(pval):
