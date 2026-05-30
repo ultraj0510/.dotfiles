@@ -37,7 +37,7 @@ def _underscore_tokens(text: str) -> list[str]:
     return re.findall(r"\b[a-z]+[a-z0-9]*(?:_[a-z0-9]+)+\b", text)
 
 
-def check_invented_signals(report_text: str, signals_path: str, quant_decisions_path: str) -> str | None:
+def check_invented_signals(report_text: str, signals_path: str, quant_decisions_path: str, backtest_dir: str = "") -> str | None:
     """Return an error message if the report invents a signal name, else None."""
     known = _known_signal_rules(signals_path)
     # Also allow veto names from quant_decisions (e.g. negative_walk_forward)
@@ -46,6 +46,15 @@ def check_invented_signals(report_text: str, signals_path: str, quant_decisions_
     for d in qd.get("decisions", []):
         for v in d.get("vetoes", []):
             known.add(v)
+    # Also allow WF verdict terms from backtest dir
+    if backtest_dir and os.path.isdir(backtest_dir):
+        for fname in os.listdir(backtest_dir):
+            if fname.endswith(".json"):
+                with open(os.path.join(backtest_dir, fname)) as f:
+                    data = json.load(f)
+                v = data.get("walk_forward", {}).get("consensus", {}).get("verdict", "")
+                if v:
+                    known.add(v)
     tokens = _underscore_tokens(report_text)
     for token in tokens:
         if token not in known:
@@ -145,7 +154,7 @@ def validate(
 
     errors: list[str] = []
 
-    err = check_invented_signals(report_text, signals_path, quant_decisions_path)
+    err = check_invented_signals(report_text, signals_path, quant_decisions_path, backtest_dir)
     if err:
         errors.append(err)
 
