@@ -73,6 +73,58 @@ def test_skeleton_uses_validator_compatible_position_headings_and_labels():
     assert "ストップ標準価格" not in report, "Old label ストップ標準価格 should not appear"
 
 
+def test_skeleton_displays_risk_flags_separately_from_vetoes_and_formats_neutral():
+    from report_skeleton_builder import build_report
+
+    report = build_report({
+        "account": {},
+        "holdings": [
+            {"ticker": "5803.T", "name": "フジクラ", "position_type": "現物", "quantity": 200, "cost_price": 4600, "current_price": 4771},
+            {"ticker": "1515.T", "name": "日鉄鉱", "position_type": "現物", "quantity": 3000, "cost_price": 3552, "current_price": 2397},
+        ],
+        "signals": {},
+        "backtest": {},
+        "quant_decisions": {
+            "decisions": {
+                "5803.T": {
+                    "report_action": "REDUCE",
+                    "order_shares": 300,
+                    "order_type": "limit",
+                    "limit_price": 4771,
+                    "vetoes": [],
+                    "risk_flags": ["negative_walk_forward"],
+                    "risk_posture": "neutral",
+                },
+                "1515.T": {
+                    "report_action": "HOLD",
+                    "order_shares": 0,
+                    "vetoes": [],
+                    "risk_flags": ["position_over_cap_loss_concentration"],
+                    "risk_posture": "rebalance_on_strength",
+                    "advisory_plan": {
+                        "mode": "trim_on_rebound_rebuy_on_pullback",
+                        "trim_shares": 300,
+                        "trim_trigger_price": 2440.4,
+                        "reentry_watch_price": 2162.25,
+                        "max_reentry_shares": 300,
+                        "reentry_allowed_after_trim": True,
+                        "reentry_requires": ["trim_filled", "price_near_lower_band", "rsi_below_40_or_reversal_signal"],
+                    },
+                },
+            }
+        },
+    })
+
+    assert "| 銘柄コード | 名称 | 指示 | 株数 | 注文方法 | 指値 | 注意点 |" in report
+    assert "| 5803.T | フジクラ | 一部売却 | 300 | limit | ¥4,771 | negative_walk_forward |" in report
+    assert "| リスク姿勢 | 通常 |" in report
+    assert "| 注意点 | negative_walk_forward |" in report
+    assert "| 戦略 | 反発売り・押し目買い監視 |" in report
+    assert "| 反発売り目安 | ¥2,440 |" in report
+    assert "| 押し目買い監視 | ¥2,162 |" in report
+    assert "neutral" not in report
+
+
 def test_skeleton_deduplicates_ticker_level_active_orders():
     from report_skeleton_builder import build_report
 

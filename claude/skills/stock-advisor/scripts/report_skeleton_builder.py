@@ -24,7 +24,18 @@ def action_ja(action: str) -> str:
 
 
 def risk_posture_ja(value: str) -> str:
-    return {"protect_profit": "利益保護", "rebalance_on_strength": "上昇時リバランス", "hold_core": "中核保有", "reduce_risk": "リスク削減", "watch": "監視"}.get(value, value)
+    return {"neutral": "通常", "protect_profit": "利益保護", "rebalance_on_strength": "上昇時リバランス", "hold_core": "中核保有", "reduce_risk": "リスク削減", "watch": "監視"}.get(value, value)
+
+
+def risk_flag_text(flags: list[str]) -> str:
+    return ", ".join(flags) if flags else "-"
+
+
+def advisory_mode_ja(mode: str) -> str:
+    return {
+        "trail_stop": "トレーリングストップ",
+        "trim_on_rebound_rebuy_on_pullback": "反発売り・押し目買い監視",
+    }.get(mode, mode)
 
 
 def format_verdict(verdict: str) -> str:
@@ -95,16 +106,18 @@ def build_report(context: dict) -> str:
                 "limit_price": dec.get("limit_price"),
                 "confidence": dec.get("confidence", ""),
                 "vetoes": dec.get("vetoes", []),
+                "risk_flags": dec.get("risk_flags", []),
                 "explanations": dec.get("explanations", []),
             })
 
     if active_orders:
-        lines.append("| チャート | 名称 | 指示 | 株数 | 注文方法 | 値引き | 状態 |")
+        lines.append("| 銘柄コード | 名称 | 指示 | 株数 | 注文方法 | 指値 | 注意点 |")
         lines.append("|---|---|---|---|---|---|---|")
         for o in active_orders:
             limit_str = yen(o["limit_price"]) if o["limit_price"] else "-"
-            veto_str = ", ".join(o["vetoes"]) if o["vetoes"] else "-"
-            lines.append(f"| {o['ticker']} | {o['name']} | {action_ja(o['action'])} | {o['order_shares']} | {o['order_type']} | {limit_str} | {veto_str} |")
+            status_flags = o["vetoes"] or o["risk_flags"]
+            status_str = risk_flag_text(status_flags) if status_flags else "-"
+            lines.append(f"| {o['ticker']} | {o['name']} | {action_ja(o['action'])} | {o['order_shares']} | {o['order_type']} | {limit_str} | {status_str} |")
     else:
         lines.append("現在注文のある指示はありません。")
 
@@ -140,8 +153,21 @@ def build_report(context: dict) -> str:
         lines.append(f"| 含み損益率 | {pnl_pct:+.2f}% |")
         if expiry_date:
             lines.append(f"| 信用期限 | {expiry_date} |")
-        lines.append(f"| リスク姿勢 | {risk_posture_ja(dec.get('risk_posture', 'neutral'))} |")
+        posture = dec.get("risk_posture") or "neutral"
+        lines.append(f"| リスク姿勢 | {risk_posture_ja(posture)} |")
         lines.append(f"| ストップ目安価格 | {yen(dec.get('protective_stop_price'))} |")
+
+        risk_flags_list = dec.get("risk_flags", [])
+        if risk_flags_list:
+            lines.append(f"| 注意点 | {risk_flag_text(risk_flags_list)} |")
+
+        plan = dec.get("advisory_plan") or {}
+        if plan:
+            lines.append(f"| 戦略 | {advisory_mode_ja(plan.get('mode', ''))} |")
+            if plan.get("trim_trigger_price") is not None:
+                lines.append(f"| 反発売り目安 | {yen(plan['trim_trigger_price'])} |")
+            if plan.get("reentry_watch_price") is not None:
+                lines.append(f"| 押し目買い監視 | {yen(plan['reentry_watch_price'])} |")
 
         # Signal section
         score_obj = sig_info.get("score", {})
