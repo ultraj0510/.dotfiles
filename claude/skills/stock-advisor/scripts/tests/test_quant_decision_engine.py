@@ -286,6 +286,56 @@ class TestMakeDecision:
         }
         assert "position_over_cap_loss_concentration" in decision.risk_flags
 
+    def test_non_blocking_negative_walk_forward_caps_confidence_at_moderate(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14,
+            "losses": 19,
+            "avg_win_pct": 25.25,
+            "avg_loss_pct": -6.94,
+            "walk_forward": {
+                "sharpe_oos": -0.3,
+                "verdict": "unstable",
+                "overfit_detected": False,
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 200, "current_price": 4771, "cost_price": 4600, "position_type": "現物"},
+                {"ticker": "5803.T", "quantity": 100, "current_price": 4771, "cost_price": 5321, "position_type": "信用"},
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert decision.order_shares == 300
+        assert "negative_walk_forward" in decision.risk_flags
+        assert decision.confidence == "moderate"
+
+    def test_position_concentration_risk_flag_caps_confidence_at_moderate(self):
+        signal = {"action": "HOLD", "current_price": 65850, "atr": 4695.38}
+        bt = {
+            "total_trades": 9,
+            "wins": 7,
+            "losses": 2,
+            "avg_win_pct": 50.07,
+            "avg_loss_pct": -10.37,
+            "walk_forward": {"verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert "position_over_cap_watch" in decision.risk_flags
+        assert decision.confidence == "moderate"
+
     def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
         # Renamed: now exercises the range rebalance plan (same logic, broader advisory metadata)
         signal = {

@@ -271,6 +271,20 @@ def _protective_stop_price(signal_info: dict, entry_price: float, atr: float) ->
     return None
 
 
+CONFIDENCE_CAPPING_RISK_FLAGS = {
+    "negative_walk_forward",
+    "overfit_walk_forward",
+    "low_sample",
+    "position_over_cap_watch",
+    "position_over_cap_loss_concentration",
+    "correlation_concentration",
+}
+
+
+def _has_confidence_capping_risk(risk_flags: list[str]) -> bool:
+    return any(flag in CONFIDENCE_CAPPING_RISK_FLAGS for flag in risk_flags)
+
+
 def _range_rebalance_plan(signal_info: dict, current_qty: int, portfolio_weight_pct: float | None) -> dict:
     indicators = signal_info.get("indicators", {})
     current_price = _indicator_float(signal_info, "close") or float(signal_info.get("current_price", 0))
@@ -417,7 +431,9 @@ def make_decision(
     confidence = "moderate"
     if "low_sample" in vetoes or "overfit_walk_forward" in vetoes:
         confidence = "low"
-    if ev > 1.0 and len(vetoes) == 0:
+    elif "low_sample" in risk_flags or "overfit_walk_forward" in risk_flags:
+        confidence = "low"
+    elif ev > 1.0 and len(vetoes) == 0 and not _has_confidence_capping_risk(risk_flags):
         confidence = "high"
 
     # --- Order sizing ---
