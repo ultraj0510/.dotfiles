@@ -1,0 +1,225 @@
+import json
+import os
+import tempfile
+import pytest
+
+# Add scripts dir to path for imports
+import sys
+_scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
+
+import yaml  # available in venv
+from quant_decision_engine import make_decision, load_backtest
+from quant_schema import QuantDecision
+
+
+def make_portfolio(holdings=None, total_assets=10_000_000, available_cash=5_000_000):
+    return {
+        "account": {"total_assets": total_assets, "available_cash": available_cash},
+        "holdings": holdings or [],
+    }
+
+
+class TestMakeDecision:
+    def test_positive_ev_buy_produces_buy(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 50, "wins": 30, "losses": 20,
+            "avg_win_pct": 5.0, "avg_loss_pct": -2.5,
+            "walk_forward": {"sharpe_is": 1.0, "sharpe_oos": 0.8},
+        }
+        pf = make_portfolio(holdings=[
+            {"ticker": "7203.T", "quantity": 100, "current_price": 1000, "cost_price": 950, "position_type": "現物"}
+        ])
+        d = make_decision("7203.T", signal, bt, pf, {})
+        assert d.action == "BUY"
+        assert d.order_shares > 0
+
+    def test_negative_ev_buy_becomes_no_trade(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 10, "wins": 3, "losses": 7,
+            "avg_win_pct": 1.0, "avg_loss_pct": -3.0,
+            "walk_forward": {"sharpe_is": 0.5, "sharpe_oos": 0.3},
+        }
+        # p_win_shrunk = (3+5)/(10+10) = 0.4
+        # ev = 0.4*1.0 + 0.6*(-3.0) - 0.5 = 0.4 - 1.8 - 0.5 = -1.9
+        pf = make_portfolio()
+        d = make_decision("7203.T", signal, bt, pf, {})
+        assert d.action == "NO_TRADE"
+
+    def test_risk_reducing_sell_survives_negative_ev(self):
+        signal = {"action": "SELL", "current_price": 1000, "atr": 20, "reduce_shares": 100}
+        bt = {
+            "total_trades": 10, "wins": 3, "losses": 7,
+            "avg_win_pct": 1.0, "avg_loss_pct": -3.0,
+            "walk_forward": {"sharpe_is": 0.5, "sharpe_oos": 0.3},
+        }
+        pf = make_portfolio(holdings=[
+            {"ticker": "7203.T", "quantity": 100, "current_price": 1000, "cost_price": 950, "position_type": "現物"}
+        ])
+        d = make_decision("7203.T", signal, bt, pf, {})
+        assert d.action == "SELL"
+        assert d.order_type == "limit"
+        assert d.limit_price is not None
+
+    def test_hold_stays_hold(self):
+        signal = {"action": "HOLD", "current_price": 1000, "atr": 20}
+        pf = make_portfolio(holdings=[
+            {"ticker": "7203.T", "quantity": 100, "current_price": 1000, "cost_price": 950, "position_type": "現物"}
+        ])
+        d = make_decision("7203.T", signal, None, pf, {})
+        assert d.action == "HOLD"
+        assert d.order_shares == 0
+
+    def test_low_sample_lowers_confidence(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 3, "wins": 2, "losses": 1,
+            "avg_win_pct": 5.0, "avg_loss_pct": -2.5,
+            "walk_forward": {"sharpe_is": 1.0, "sharpe_oos": 0.8},
+        }
+        pf = make_portfolio()
+        d = make_decision("7203.T", signal, bt, pf, {})
+        assert d.confidence == "low"
+        assert "low_sample" in d.vetoes
+
+    def test_empty_signal_defaults_to_hold(self):
+        signal = {}
+        pf = make_portfolio()
+        d = make_decision("7203.T", signal, None, pf, {})
+        assert d.action in ("HOLD", "NO_TRADE")
+        assert d.order_shares == 0
+
+
+    def test_actual_portfolio_analytics_shape_triggers_correlation_veto(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 50, "wins": 30, "losses": 20,
+            "avg_win_pct": 5.0, "avg_loss_pct": -2.5,
+            "walk_forward": {"sharpe_is": 1.0, "sharpe_oos": 0.8},
+        }
+        pf = make_portfolio(holdings=[
+            {"ticker": "7203.T", "quantity": 100, "current_price": 1000, "cost_price": 950, "position_type": "現物"},
+            {"ticker": "8306.T", "quantity": 1200, "current_price": 1000, "cost_price": 900, "position_type": "現物"},
+        ])
+        pa = {
+            "correlation": {
+                "risk_concentration": "high",
+                "max_correlation": {"pair": ["7203.T", "8306.T"], "value": 0.9},
+            },
+            "stress_test": {},
+        }
+        d = make_decision("7203.T", signal, bt, pf, pa)
+        assert "correlation_concentration" in d.vetoes
+        assert d.order_shares == 900
+
+
+class TestCLIFixture:
+    """Run quant_decision_engine.py with test fixtures and verify output."""
+    def test_fixture_cli_smoke(self):
+        import subprocess
+
+        fixture_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "fixtures", "quant_decision",
+        )
+        venv_python = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".venv", "bin", "python",
+        )
+        engine = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "quant_decision_engine.py",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = os.path.join(tmpdir, "quant_decisions.json")
+            subprocess.run(
+                [
+                    venv_python, engine,
+                    "--portfolio", os.path.join(fixture_dir, "portfolio.yaml"),
+                    "--signals", os.path.join(fixture_dir, "signals.json"),
+                    "--backtest-dir", os.path.join(fixture_dir, "backtest"),
+                    "--portfolio-analytics", os.path.join(fixture_dir, "portfolio_analytics.json"),
+                    "-o", output,
+                ],
+                capture_output=True, text=True, check=True,
+            )
+            with open(output) as f:
+                data = json.load(f)
+
+        assert len(data["decisions"]) >= 1
+        d = data["decisions"][0]
+        assert d["ticker"] == "7203.T"
+        assert "correlation_concentration" in d["vetoes"]
+        assert d["order_shares"] == 900
+
+
+class TestLoadBacktest:
+    def test_normalizes_backtest_json(self):
+        """load_backtest should normalize nested backtest engine output to flat format."""
+        raw = {
+            "ticker": "7203.T",
+            "baseline": {
+                "trade_count": 50,
+                "win_rate": 60.0,
+                "avg_win_pct": 5.0,
+                "avg_loss_pct": -3.0,
+                "sharpe_ratio": 1.2,
+                "max_drawdown": 15.0,
+            },
+            "walk_forward": {
+                "train_metrics": {"sharpe_ratio": 1.5},
+                "test_metrics": {"sharpe_ratio": 1.0},
+                "overfit_detected": False,
+                "consensus": {"verdict": "robust", "mean_sharpe": 1.1},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "7203.T.json")
+            with open(path, "w") as f:
+                json.dump(raw, f)
+            result = load_backtest(tmpdir, "7203.T")
+
+        assert result is not None
+        assert result["total_trades"] == 50
+        assert result["wins"] == 30  # 50 * 60% = 30
+        assert result["losses"] == 20
+        assert result["avg_win_pct"] == 5.0
+        assert result["avg_loss_pct"] == -3.0
+        assert result["walk_forward"]["sharpe_is"] == 1.5
+        assert result["walk_forward"]["sharpe_oos"] == 1.0
+        assert result["walk_forward"]["verdict"] == "robust"
+
+    def test_missing_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = load_backtest(tmpdir, "NONEXISTENT.T")
+        assert result is None
+
+    def test_already_flat_format(self):
+        """load_backtest should pass through already-normalized dicts."""
+        flat = {
+            "total_trades": 10,
+            "wins": 6,
+            "losses": 4,
+            "avg_win_pct": 4.0,
+            "avg_loss_pct": -2.0,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "7974.T.json")
+            with open(path, "w") as f:
+                json.dump(flat, f)
+            result = load_backtest(tmpdir, "7974.T")
+        assert result["total_trades"] == 10
+        assert result["wins"] == 6
+        assert result["losses"] == 4
+
+    def test_empty_json_returns_none(self):
+        raw = {}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "EMPTY.T.json")
+            with open(path, "w") as f:
+                json.dump(raw, f)
+            result = load_backtest(tmpdir, "EMPTY.T")
+        assert result is None

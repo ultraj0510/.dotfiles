@@ -1,0 +1,14 @@
+account:
+  total_assets: 10000000
+  available_cash: 5000000
+holdings:
+  - ticker: 7203.T
+    quantity: 100
+    current_price: 1000
+    cost_price: 950
+    position_type: 現物
+  - ticker: 8306.T
+    quantity: 1200
+    current_price: 1000
+    cost_price: 900
+    position_type: 現物

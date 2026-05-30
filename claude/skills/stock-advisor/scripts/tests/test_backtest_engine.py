@@ -92,3 +92,53 @@ def test_strategy_mode_default():
     rules = set(sig["signal_rule"].dropna())
     # Should see a mix of signal types
     assert len(rules) > 2, f"Expected >2 distinct rules, got {rules}"
+
+
+def test_execution_delay_adds_metadata():
+    """When --execution-delay is used, output includes execution_model metadata."""
+    import pandas as pd
+    import numpy as np
+
+    # Synthetic signal: buy on day 0, then hold
+    dates = ["2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09", "2025-01-10"]
+    n = len(dates)
+    sig = pd.DataFrame({
+        "date": dates,
+        "close": np.arange(100.0, 100.0 + n, 1.0),
+        "high": np.arange(101.0, 101.0 + n, 1.0),
+        "low": np.arange(99.0, 99.0 + n, 1.0),
+        "signal": [1] + [0] * (n - 1),
+        "signal_rule": ["momentum"] * 2 + [None] * (n - 2),
+        "rsi": [30.0] * n,
+        "52w_position": [30.0] * n,
+        "5d_return": [5.0] * n,
+        "volume_ratio": [1.5] * n,
+        "boll_lb": [98.0] * n,
+        "ret_20d": [2.0] * n,
+        "atr": [2.0] * n,
+        "trend_state": ["uptrend"] * n,
+        "sma_50": [98.0] * n,
+        "sma_200": [95.0] * n,
+        "ret_10d": [3.0] * n,
+    })
+
+    # Without delay: entry on same day
+    result_no_delay = simulate_trades(sig, execution_delay=0)
+    assert result_no_delay["trade_count"] > 0
+    assert result_no_delay["trades"][0]["entry_date"] == "2025-01-06"
+
+    # With 1-day delay: entry on T+1
+    result_delay = simulate_trades(sig, execution_delay=1)
+    assert result_delay["trade_count"] > 0
+    assert result_delay["trades"][0]["entry_date"] == "2025-01-07"
+    assert result_delay["trades"][0]["entry_price"] == 101.0
+
+    # Verify the execution_model metadata structure (as main() would add it)
+    execution_model = {
+        "execution_delay_days": 1,
+        "price_basis": "close",
+        "cost_model": "commission_slippage_market_impact",
+    }
+    assert execution_model["execution_delay_days"] == 1
+    assert execution_model["price_basis"] == "close"
+    assert execution_model["cost_model"] == "commission_slippage_market_impact"

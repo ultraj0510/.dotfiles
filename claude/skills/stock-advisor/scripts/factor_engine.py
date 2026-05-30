@@ -179,6 +179,90 @@ def compute_factors(ticker: str) -> dict:
     }
 
 
+def _compute_single_ticker_factors(ticker: str) -> dict[str, float]:
+    """Compute raw factor scores for a single ticker using compute_factors."""
+    result = compute_factors(ticker)
+    scores = result.get("factor_scores", {})
+    # Convert None scores to 0 for ranking purposes
+    return {k: (v if v is not None else 0.0) for k, v in scores.items()}
+
+
+def compute_cross_sectional_factors(tickers: list[str]) -> dict:
+    """
+    Compute cross-sectional factor rankings across a universe of tickers.
+
+    Ranks each ticker on value, momentum, quality, and volatility factors
+    relative to the current universe, then computes a composite rank.
+
+    Args:
+        tickers: List of ticker symbols (e.g. ['7203.T', '7974.T'])
+
+    Returns:
+        dict with keys: universe_size, ranked (list of per-ticker dicts), warnings
+    """
+    if len(tickers) < 3:
+        return {
+            "universe_size": len(tickers),
+            "ranked": [],
+            "warnings": ["cross_sectional_universe_too_small"],
+        }
+
+    # Compute factor scores for each ticker
+    results = []
+    errors = []
+    for ticker in tickers:
+        try:
+            factor_scores = _compute_single_ticker_factors(ticker)
+            results.append({"ticker": ticker, "factor_scores": factor_scores})
+        except Exception as e:
+            errors.append(f"{ticker}: {e}")
+
+    if not results:
+        return {
+            "universe_size": len(tickers),
+            "ranked": [],
+            "warnings": ["cross_sectional_all_tickers_failed"],
+        }
+
+    # Rank each factor dimension across the universe
+    for factor_name in ["value", "momentum", "quality", "volatility"]:
+        scores = sorted({r["factor_scores"].get(factor_name, 0.0) for r in results})
+        if not scores:
+            continue
+        n = len(scores)
+        if n == 1:
+            for r in results:
+                r["factor_scores"][f"{factor_name}_rank"] = 0
+                r["factor_scores"][f"{factor_name}_percentile"] = 1.0
+        else:
+            for r in results:
+                score = r["factor_scores"].get(factor_name, 0.0)
+                rank = scores.index(score)
+                r["factor_scores"][f"{factor_name}_rank"] = rank
+                r["factor_scores"][f"{factor_name}_percentile"] = rank / (n - 1)
+
+    # Compute composite score as average of factor percentiles
+    for r in results:
+        percentiles = [
+            r["factor_scores"].get(f, 0.0)
+            for f in ["value_percentile", "momentum_percentile", "quality_percentile", "volatility_percentile"]
+        ]
+        r["composite_percentile"] = sum(percentiles) / len(percentiles) if percentiles else 0.0
+
+    # Sort by composite percentile descending
+    results.sort(key=lambda x: x["composite_percentile"], reverse=True)
+
+    # Assign ranks
+    for i, r in enumerate(results):
+        r["composite_rank"] = i + 1
+
+    return {
+        "universe_size": len(tickers),
+        "ranked": results,
+        "warnings": errors if errors else [],
+    }
+
+
 def classify_factor_signal(composite_z: float) -> str:
     """Classify factor composite Z-score into signal strength."""
     if composite_z is None:

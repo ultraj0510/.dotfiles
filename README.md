@@ -136,6 +136,13 @@ python3 -m py_compile \
   claude/skills/portfolio-fetch/scripts/fetch_portfolio.py
 ```
 
+stock-advisor のテストは専用 venv 経由で実行する（system Python には `numpy`, `pandas`, `yfinance` が入っていないため）:
+
+```bash
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  -m pytest -q ~/.claude/skills/stock-advisor/scripts/tests
+```
+
 ## 運用メモ
 
 - READMEは公開repoの入口なので、個人情報や運用中の証券データを書かない。
