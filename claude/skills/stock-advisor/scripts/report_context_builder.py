@@ -29,6 +29,16 @@ class DateAwareEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+def build_macro_context(signals_data: dict) -> dict:
+    if signals_data.get("macro_context"):
+        return signals_data["macro_context"]
+    for entry in signals_data.get("results", []):
+        macro = entry.get("macro")
+        if isinstance(macro, dict) and macro:
+            return macro
+    return {}
+
+
 def load_portfolio(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
@@ -157,7 +167,7 @@ def build_context(
         "backtest": backtest,
         "correlations": correlations,
         "quant_decisions": quant,
-        "macro_context": signals_data.get("macro_context", {}),
+        "macro_context": build_macro_context(signals_data),
     }
 
 

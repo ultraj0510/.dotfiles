@@ -931,6 +931,17 @@ def compute_signal_census(signals_df, trades):
     return census
 
 
+def _safe_spearmanr(signal_values, forward_returns) -> tuple:
+    """Safe spearmanr that returns None,None for degenerate inputs."""
+    if len(signal_values) < 2 or len(forward_returns) < 2:
+        return None, None
+    if len(set(signal_values)) <= 1 or len(set(forward_returns)) <= 1:
+        return None, None
+    from scipy.stats import spearmanr
+    ic, pval = spearmanr(signal_values, forward_returns)
+    return float(ic), float(pval)
+
+
 def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
     """Compute Information Coefficient (Spearman correlation) per signal rule.
 
@@ -962,8 +973,9 @@ def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
             if len(s) < 5:
                 continue
             try:
-                from scipy.stats import spearmanr
-                ic, pval = spearmanr(s, fw)
+                ic, pval = _safe_spearmanr(s, fw)
+                if ic is None:
+                    continue
             except ImportError:
                 ic = np.corrcoef(s, fw)[0, 1] if len(s) > 1 else 0
                 pval = None

@@ -142,3 +142,10 @@ def test_execution_delay_adds_metadata():
     assert execution_model["execution_delay_days"] == 1
     assert execution_model["price_basis"] == "close"
     assert execution_model["cost_model"] == "commission_slippage_market_impact"
+
+
+def test_safe_spearmanr_returns_none_for_constant_input():
+    from backtest_engine import _safe_spearmanr
+    ic, pval = _safe_spearmanr([1, 1, 1], [0.01, 0.02, 0.03])
+    assert ic is None
+    assert pval is None

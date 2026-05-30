@@ -17,6 +17,14 @@ import json
 import os
 import re
 import sys
+import yaml
+
+KNOWN_METADATA_TOKENS = {
+    "open_date", "expiry_date", "quant_decisions", "report_context",
+    "risk_posture", "advisory_plan", "protective_stop_price",
+    "portfolio_weight_pct", "cost_basis_weight_pct", "unrealized_pnl_pct",
+    "downside_10pct_yen", "report_action", "order_shares", "order_type", "limit_price",
+}
 
 
 def _known_signal_rules(signals_path: str) -> set[str]:
@@ -40,6 +48,7 @@ def _underscore_tokens(text: str) -> list[str]:
 def check_invented_signals(report_text: str, signals_path: str, quant_decisions_path: str, backtest_dir: str = "") -> str | None:
     """Return an error message if the report invents a signal name, else None."""
     known = _known_signal_rules(signals_path)
+    known.update(KNOWN_METADATA_TOKENS)
     # Also allow veto names from quant_decisions (e.g. negative_walk_forward)
     with open(quant_decisions_path) as f:
         qd = json.load(f)
@@ -142,11 +151,25 @@ def check_walk_forward_verdicts(
     return None
 
 
+def check_position_count(report_text: str, portfolio_path: str | None) -> str | None:
+    if not portfolio_path:
+        return None
+    with open(portfolio_path) as f:
+        portfolio = yaml.safe_load(f) or {}
+    expected = len(portfolio.get("holdings", []))
+    # Count position headings: "#### 5803.T フジクラ（現物） — 一部売却（+3.7%）" or "### 285A.T ..."
+    actual = len(re.findall(r"^(#### .+|### .+ — .+（[-+0-9.]+%）)$", report_text, re.MULTILINE))
+    if actual != expected:
+        return f"position count mismatch: portfolio={expected}, report={actual}"
+    return None
+
+
 def validate(
     report_path: str,
     signals_path: str,
     quant_decisions_path: str,
     backtest_dir: str,
+    portfolio_path: str | None = None,
 ) -> list[str]:
     """Run all checks. Returns a list of error messages (empty = clean)."""
     with open(report_path) as f:
@@ -170,6 +193,10 @@ def validate(
     if err:
         errors.append(err)
 
+    err = check_position_count(report_text, portfolio_path)
+    if err:
+        errors.append(err)
+
     return errors
 
 
@@ -189,10 +216,13 @@ def main() -> None:
     parser.add_argument(
         "--backtest-dir", required=True, help="Path to backtest directory"
     )
+    parser.add_argument(
+        "--portfolio", help="Optional portfolio.yaml path for position-count validation"
+    )
     args = parser.parse_args()
 
     errors = validate(
-        args.report, args.signals, args.quant_decisions, args.backtest_dir
+        args.report, args.signals, args.quant_decisions, args.backtest_dir, args.portfolio
     )
     if errors:
         print("Validation FAILED:", file=sys.stderr)
