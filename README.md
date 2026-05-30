@@ -1,16 +1,18 @@
 # dotfiles
 
-Claude Code 環境の個人設定を管理するリポジトリ。  
-WSL2 ホストとdevcontainerの両方で動作するよう、相対シンボリックリンクで構成されています。
+Claude Code と個人の開発ワークスペースを管理するための dotfiles リポジトリです。
 
-## 使い方
+このリポジトリは、Claude Code のグローバル指示、プラグイン一覧、自作スキル、Git設定、株式ポートフォリオ取得の共通コード、Codex/Claude Code 兼用ワークスペース設定をまとめて管理します。
 
-### 新しい環境でのセットアップ
+## セットアップ
+
+### 新しい環境
 
 ```bash
-# bootstrap（dotfiles クローン + install.sh 実行）
-curl -fsSL https://raw.githubusercontent.com/ultraj0510/dotfiles/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ultraj0510/.dotfiles/main/bootstrap.sh | bash
 ```
+
+`bootstrap.sh` は `~/.dotfiles` が存在しない場合は clone し、存在する場合は `git pull` してから `install.sh` を実行します。
 
 ### 手動インストール
 
@@ -18,72 +20,131 @@ curl -fsSL https://raw.githubusercontent.com/ultraj0510/dotfiles/main/bootstrap.
 bash ~/.dotfiles/install.sh
 ```
 
-`install.sh` は冪等です。再実行しても安全。
+`install.sh` は冪等です。既存ファイルがある場合は `~/.dotfiles-backup/<timestamp>/` に退避してから symlink を作成します。
 
-## ディレクトリ構成
+## 管理対象
 
-```
+```text
 ~/.dotfiles/
-├── install.sh              # シンボリックリンク作成 + プラグイン自動インストール
-├── bootstrap.sh            # 新マシン初期セットアップ（git clone → install.sh）
+├── bootstrap.sh                 # 新環境向け bootstrap
+├── install.sh                   # symlink 作成と Claude Code plugin セットアップ
 ├── bash/
-│   └── aliases.sh          # API切り替えエイリアス（claude / claude-mimo）
+│   └── aliases.sh               # shell alias
 ├── claude/
-│   ├── CLAUDE.md           # Claude グローバル指示（個人スタイル）
-│   ├── settings.local.json # Claude ツール権限設定
-│   ├── agents/             # 自作サブエージェント定義（*.md）
-│   ├── skills/             # 自作スキル（*.md）
-│   │   ├── market-pulse/   # 毎朝のポートフォリオ確認
-│   │   ├── stock-analyze/  # 日本株分析
-│   │   └── download-photos/# 8122.jpカート写真ダウンロード
-│   ├── marketplaces.txt    # 登録するマーケットプレイス一覧
-│   ├── plugins.txt         # 自動インストールするプラグイン一覧
-│   └── statusline.sh       # ステータスライン表示スクリプト
-└── git/
-    └── .gitconfig          # Git設定
+│   ├── CLAUDE.md                # Claude Code user-level instructions
+│   ├── marketplaces.txt         # Claude Code plugin marketplaces
+│   ├── plugins.txt              # install 対象 plugin
+│   ├── settings.json            # Claude Code settings template/reference
+│   ├── settings.local.json      # local permissions/settings
+│   └── skills/                  # Claude Code custom skills
+├── code-workspace/
+│   ├── AGENTS.md                # Codex workspace entrypoint
+│   ├── CLAUDE.md                # Claude Code workspace entrypoint
+│   ├── workspace.md             # shared workspace rules
+│   ├── workspace.toml           # machine-readable workspace manifest
+│   └── docs/                    # plans, lessons, archived notes
+├── git/
+│   └── .gitconfig               # Git config
+├── portfolio-core/              # SBI portfolio auth/fetch shared implementation
+└── tests/                       # regression tests
 ```
 
-`install.sh` が作成するシンボリックリンク：
+## `install.sh` が作るリンク
 
-| dotfiles | → | リンク先 |
-|----------|---|---------|
-| `git/.gitconfig` | → | `~/.gitconfig` |
-| `bash/aliases.sh` | → | `~/.claude/bash_aliases.sh` |
-| `claude/CLAUDE.md` | → | `~/.claude/CLAUDE.md` |
-| `claude/settings.local.json` | → | `~/.claude/settings.local.json` |
-| `claude/agents/` | → | `~/.claude/agents/` |
-| `claude/statusline.sh` | → | `~/.claude/statusline.sh` |
-| `claude/skills/` | → | `~/.claude/skills/` |
+| Source | Link |
+|--------|------|
+| `git/.gitconfig` | `~/.gitconfig` |
+| `bash/aliases.sh` | `~/.claude/bash_aliases.sh` |
+| `claude/settings.local.json` | `~/.claude/settings.local.json` |
+| `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| `claude/skills/` | `~/.claude/skills` |
 
-## プラグイン管理
+## Claude Code plugins
 
-`install.sh` は起動時に2種類のプラグインを自動セットアップします：
+`install.sh` は Claude Code が利用可能な場合に、次を自動セットアップします。
 
-1. **マーケットプレイスの登録**（`claude/marketplaces.txt`）
-2. **マーケットプレイス経由プラグインのインストール**（`claude/plugins.txt`）
-3. **自作スキル**（`claude/skills/`）は symlink で `~/.claude/skills/` に展開
+1. `claude/marketplaces.txt` に定義された marketplace を登録または更新
+2. `claude/plugins.txt` に定義された plugin をインストール
+3. `claude/skills/` を `~/.claude/skills` に symlink
 
-## 3層管理モデル
+現在の主な plugin:
 
-| 層 | 管理場所 | 内容 |
-|----|---------|------|
-| 個人設定 | このリポジトリ（fork して使う） | 作業スタイル・個人プラグイン |
-| チーム共有 | `org/claude-plugins`（社内マーケットプレイス） | 共通スキル・チームルール |
-| プロジェクト固有 | 各リポジトリの `CLAUDE.md` | スタック固有ルール |
+- `superpowers`
+- `github`
+- `frontend-design`
+- `code-review`
+- `playwright`
+- `skill-creator`
+- `claude-md-management`
+- `microsoft-docs`
+- `oh-my-claudecode`
+
+## Custom skills
+
+`claude/skills/` には、個人運用向けの Claude Code skill を置いています。
+
+| Skill | Purpose |
+|-------|---------|
+| `portfolio-auth` | SBI証券セッションCookieの保存・検証 |
+| `portfolio-fetch` | SBI証券ポートフォリオ取得 |
+| `portfolio-update` | 売買記録・保有銘柄更新 |
+| `stock-advisor` | 朝のポートフォリオ確認と取引判断 |
+| `stock-analyze` | 日本株テクニカル分析 |
+| `stock-backtest` | シグナルのバックテスト |
+| `stock-scan` | 保有銘柄のシグナルスキャン |
+| `deep-analyze` | マルチエージェント深掘り分析 |
+| `download-photos` | 写真販売サイトのカート画像ダウンロード |
+| `omc-reference` | Oh My Claude Code 参照 |
+
+SBI証券連携の共通実装は `portfolio-core/` に集約し、skill側は wrapper として扱います。
+
+## Code workspace
+
+`code-workspace/` は `/Users/fujie/code` 向けの Codex / Claude Code 共通設定です。
+
+- `code-workspace/workspace.md`: 人間向けの構造・運用ルール
+- `code-workspace/workspace.toml`: ツール向けの manifest
+- `code-workspace/AGENTS.md`: Codex entrypoint
+- `code-workspace/CLAUDE.md`: Claude Code project entrypoint
+- `code-workspace/docs/plans/`: durable plans
+- `code-workspace/docs/lessons.md`: correction lessons
+
+`tasks/` は廃止済みです。作業計画や教訓は `code-workspace/docs/` に集約します。
+
+## セキュリティ方針
+
+- Cookie、token、`.env`、SBI証券のセッション情報、実ポートフォリオデータはコミットしません。
+- 生成物や一時状態は `runtime/`、`scratch/`、または ignore 済みディレクトリに置きます。
+- `portfolio.yaml` や分析結果は公開repoに含めず、必要な場合は redacted example のみ管理します。
 
 ## テスト
 
-stock-advisor のテストは専用 venv 経由で実行する:
+Cookie更新まわりの回帰テスト:
+
+```bash
+pytest -q tests/test_portfolio_auth_cookie_refresh.py
+```
+
+Python構文チェック:
+
+```bash
+python3 -m py_compile \
+  portfolio-core/cookie_store.py \
+  portfolio-core/sbi_auth.py \
+  portfolio-core/sbi_fetch.py \
+  claude/skills/portfolio-auth/auth_sbi.py \
+  claude/skills/portfolio-fetch/scripts/fetch_portfolio.py
+```
+
+stock-advisor のテストは専用 venv 経由で実行する（system Python には `numpy`, `pandas`, `yfinance` が入っていないため）:
 
 ```bash
 ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
   -m pytest -q ~/.claude/skills/stock-advisor/scripts/tests
 ```
 
-system Python には `numpy`, `pandas`, `yfinance` が入っていない場合があるため、stock-advisorの検証では使わない。
+## 運用メモ
 
-## チームへの展開
-
-1. このリポジトリを fork
-2. 自分の名前・言語設定などを `claude/CLAUDE.md` で編集
-3. devcontainer 起動 → 社内マーケットプレイスが自動登録され、チームスキルが使える状態で起動
+- READMEは公開repoの入口なので、個人情報や運用中の証券データを書かない。
+- `code-workspace/workspace.toml` を先に更新し、その後に `workspace.md` やREADMEを更新する。
+- 完了済みの一時計画は `tasks/` ではなく `code-workspace/docs/archive/` に残す。
