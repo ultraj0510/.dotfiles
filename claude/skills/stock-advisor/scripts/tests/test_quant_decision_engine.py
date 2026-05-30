@@ -146,9 +146,304 @@ class TestMakeDecision:
             total_assets=10_000_000,
         )
         decision = make_decision("1515.T", signal, None, pf, {})
-        assert "position_over_cap_watch" in decision.vetoes
-        assert "position_over_cap_reduce" not in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
         assert decision.action == "HOLD"
+
+
+    def test_mixed_buy_and_overbought_sell_keeps_single_lot_winner_hold(self):
+        signal = {
+            "action": "HOLD",
+            "current_price": 65850,
+            "atr": 4695.38,
+            "signals": [
+                {"type": "BUY", "rule": "trend_following", "strength": "strong"},
+                {"type": "BUY", "rule": "momentum", "strength": "moderate"},
+                {"type": "SELL", "rule": "overbought", "strength": "moderate"},
+            ],
+            "indicators": {
+                "close_10_ema": "58362.71",
+                "boll": "50724.0",
+                "boll_lb": "32223.25",
+                "boll_ub": "69224.75",
+                "rsi": "74.75",
+                "52w_position": "100.0",
+            },
+        }
+        bt = {
+            "total_trades": 9, "wins": 7, "losses": 2,
+            "avg_win_pct": 50.07, "avg_loss_pct": -10.37,
+            "walk_forward": {"verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, bt, pf, {})
+        # After impl: action=HOLD, order_shares=0, risk_posture=protect_profit
+        assert decision.action == "HOLD"
+        assert decision.order_shares == 0
+        assert decision.risk_posture == "protect_profit"
+        assert "single_lot_full_exit_guard" in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
+        assert decision.protective_stop_price == 58362.71
+        assert decision.downside_10pct_yen == 658500
+
+    def test_reduce_with_negative_walk_forward_reports_risk_flag_not_blocking_veto(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14,
+            "losses": 19,
+            "avg_win_pct": 25.25,
+            "avg_loss_pct": -6.94,
+            "walk_forward": {"sharpe_is": 0.8, "sharpe_oos": -0.3, "verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 200, "current_price": 4771, "cost_price": 4600, "position_type": "現物"},
+                {"ticker": "5803.T", "quantity": 100, "current_price": 4771, "cost_price": 5321, "position_type": "信用"},
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert decision.order_shares == 300
+        assert "negative_walk_forward" not in decision.vetoes
+        assert "negative_walk_forward" in decision.risk_flags
+
+    def test_buy_with_negative_walk_forward_remains_blocked_veto(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 20,
+            "wins": 8,
+            "losses": 12,
+            "avg_win_pct": 5.0,
+            "avg_loss_pct": -2.0,
+            "walk_forward": {"sharpe_is": 0.5, "sharpe_oos": -0.3, "verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(total_assets=10_000_000, available_cash=2_000_000)
+        decision = make_decision("7203.T", signal, bt, pf, {})
+        assert decision.action == "NO_TRADE"
+        assert "negative_walk_forward" in decision.vetoes
+        assert "negative_walk_forward" not in decision.risk_flags
+
+    def test_position_concentration_watch_is_risk_flag_not_veto(self):
+        signal = {"action": "HOLD", "current_price": 65850, "atr": 4695.38}
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, None, pf, {})
+        assert decision.action == "HOLD"
+        assert "position_over_cap_watch" not in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
+
+    def test_large_loss_concentration_gets_range_rebalance_plan(self):
+        signal = {
+            "action": "HOLD",
+            "current_price": 2397,
+            "atr": 173.98,
+            "trend_state": "downtrend",
+            "signals": [],
+            "indicators": {
+                "close_10_ema": "2408.45",
+                "close_50_sma": "2561.17",
+                "boll": "2440.4",
+                "boll_lb": "2162.25",
+                "boll_ub": "2718.55",
+                "10d_return": "-8.09",
+                "20d_return": "-1.03",
+            },
+        }
+        bt = {
+            "total_trades": 29, "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"verdict": "insufficient_data", "overfit_detected": True},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert decision.risk_posture == "rebalance_on_strength"
+        assert decision.advisory_plan == {
+            "mode": "trim_on_rebound_rebuy_on_pullback",
+            "trim_shares": 300,
+            "trim_trigger_price": 2440.4,
+            "reentry_watch_price": 2162.25,
+            "max_reentry_shares": 300,
+            "reentry_allowed_after_trim": True,
+            "reentry_requires": [
+                "trim_filled",
+                "price_near_lower_band",
+                "rsi_below_40_or_reversal_signal",
+            ],
+        }
+        assert "position_over_cap_loss_concentration" in decision.risk_flags
+
+    def test_non_blocking_negative_walk_forward_caps_confidence_at_moderate(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14,
+            "losses": 19,
+            "avg_win_pct": 25.25,
+            "avg_loss_pct": -6.94,
+            "walk_forward": {
+                "sharpe_oos": -0.3,
+                "verdict": "unstable",
+                "overfit_detected": False,
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 200, "current_price": 4771, "cost_price": 4600, "position_type": "現物"},
+                {"ticker": "5803.T", "quantity": 100, "current_price": 4771, "cost_price": 5321, "position_type": "信用"},
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert decision.order_shares == 300
+        assert "negative_walk_forward" in decision.risk_flags
+        assert decision.confidence == "moderate"
+
+    def test_position_concentration_risk_flag_caps_confidence_at_moderate(self):
+        signal = {"action": "HOLD", "current_price": 65850, "atr": 4695.38}
+        bt = {
+            "total_trades": 9,
+            "wins": 7,
+            "losses": 2,
+            "avg_win_pct": 50.07,
+            "avg_loss_pct": -10.37,
+            "walk_forward": {"verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert "position_over_cap_watch" in decision.risk_flags
+        assert decision.confidence == "moderate"
+
+    def test_rejected_strategy_blocks_technical_sell(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14, "losses": 19,
+            "avg_win_pct": 25.25, "avg_loss_pct": -6.94,
+            "walk_forward": {"consensus": {"verdict": "unstable"}},
+            "strategy_selection": {
+                "selected_strategy": "hold_baseline",
+                "tradeable": False,
+                "reason": "no_strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 300, "current_price": 4771, "cost_price": 4800, "position_type": "現物"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert "strategy_not_tradeable" in decision.risk_flags
+        assert decision.order_shares == 0
+
+    def test_tradeable_strategy_allows_technical_action(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14, "losses": 19,
+            "avg_win_pct": 25.25, "avg_loss_pct": -6.94,
+            "walk_forward": {"consensus": {"verdict": "robust"}},
+            "strategy_selection": {
+                "selected_strategy": "trend",
+                "tradeable": True,
+                "reason": "strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 300, "current_price": 4771, "cost_price": 4800, "position_type": "現物"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert "strategy_not_tradeable" not in decision.risk_flags
+        assert decision.order_shares == 300
+
+    def test_rejected_strategy_does_not_block_credit_expiry(self):
+        signal = {"action": "REDUCE", "current_price": 2397, "atr": 173.98, "reduce_shares": 300}
+        bt = {
+            "total_trades": 29,
+            "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"consensus": {"verdict": "unstable"}},
+            "strategy_selection": {
+                "selected_strategy": "hold_baseline",
+                "tradeable": False,
+                "reason": "no_strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "信用", "expiry_date": "2026-06-15"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert "strategy_not_tradeable" in decision.risk_flags
+        assert "margin_expiry_urgent" in decision.vetoes
+        # Margin urgency allows risk reduction despite rejected strategy
+        assert decision.action == "REDUCE", \
+            f"Expected REDUCE (margin urgency override), got {decision.action}"
+
+    def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
+        # Renamed: now exercises the range rebalance plan (same logic, broader advisory metadata)
+        signal = {
+            "action": "HOLD", "current_price": 2397, "atr": 173.98, "trend_state": "downtrend",
+            "signals": [],
+            "indicators": {
+                "close_10_ema": "2408.45", "close_50_sma": "2561.17",
+                "boll": "2440.4", "boll_lb": "2162.25", "boll_ub": "2718.55",
+                "10d_return": "-8.09", "20d_return": "-1.03",
+            },
+        }
+        bt = {
+            "total_trades": 29, "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"verdict": "insufficient_data", "overfit_detected": True},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert decision.order_shares == 0
+        assert decision.risk_posture == "rebalance_on_strength"
+        assert "position_over_cap_loss_concentration" in decision.risk_flags
+        assert decision.portfolio_weight_pct == 36.57
+        assert decision.cost_basis_weight_pct == 54.20
+        assert decision.unrealized_pnl_pct == -32.52
+        assert decision.advisory_plan["mode"] == "trim_on_rebound_rebuy_on_pullback"
+        assert decision.advisory_plan["trim_shares"] == 300
+        assert decision.advisory_plan["trim_trigger_price"] == 2440.4
+        assert decision.advisory_plan["reentry_watch_price"] == 2162.25
+        assert decision.advisory_plan["max_reentry_shares"] == 300
+        assert decision.advisory_plan["reentry_allowed_after_trim"] is True
 
 
 class TestCLIFixture:
@@ -189,6 +484,9 @@ class TestCLIFixture:
         assert d["ticker"] == "7203.T"
         assert "correlation_concentration" in d["vetoes"]
         assert d["order_shares"] == 900
+        assert "risk_posture" in d
+        assert "portfolio_weight_pct" in d
+        assert "advisory_plan" in d
 
 
 class TestLoadBacktest:

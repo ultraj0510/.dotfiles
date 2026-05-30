@@ -41,68 +41,33 @@ stock-advisor tests must run through `scripts/.venv/bin/python`; system Python m
 
 `portfolio.yaml` が最新化されていることを確認してから本スキルを実行する。
 
-### Step 1: 結果ディレクトリ準備 + 注目銘柄 読込
+### Step 1: 数値パイプライン実行
 
 ```bash
 RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
-mkdir -p "$RESULTS_DIR/backtest"
-ln -sfn "$RESULTS_DIR" ~/code/playground/stock-price-analyze/results/latest
-cat ~/.claude/skills/stock-advisor/watchlist.yaml 2>/dev/null || echo "No watchlist"
-```
+mkdir -p "$RESULTS_DIR"
 
-### Step 2: 数値シグナル検出
-
-```bash
-~/.claude/skills/stock-advisor/scripts/run_signal_engine --all --output "$RESULTS_DIR/signals.json"
-```
-
-### Step 2b: バックテスト
-
-```bash
-LATEST_TRADING_DAY=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/signals.json')); print(d.get('reference_date',''))")
-for t in $(python3 -c "import yaml,os; d=yaml.safe_load(open(os.path.expanduser('~/code/playground/stock-price-analyze/portfolio.yaml'))); print(' '.join(sorted(set(h['ticker'] for h in d.get('holdings',[])))))"); do
-  ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-    ~/.claude/skills/stock-advisor/scripts/backtest_engine.py --ticker "$t" \
-    --strategy default --execution-delay --end "$LATEST_TRADING_DAY" -o "$RESULTS_DIR/backtest/$t.json"
-done
-# 注目銘柄も同様 (watchlist.yaml)
-```
-
-### Step 2c: ポートフォリオ分析
-
-```bash
 ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-  ~/.claude/skills/stock-advisor/scripts/portfolio_analytics.py \
+  ~/.claude/skills/stock-advisor/scripts/run_stock_advisor_pipeline.py \
   --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
-  -o "$RESULTS_DIR/portfolio_analytics.json"
+  --watchlist ~/.claude/skills/stock-advisor/watchlist.yaml \
+  --results-dir "$RESULTS_DIR"
 ```
 
-### Step 2d: クオンツ意思決定
+出力された `run_manifest.json` の `artifacts` を確認し、`signals.json`、`backtest/*.json`、`portfolio_analytics.json`、`quant_decisions.json`、`report_context.json` が存在することを確認する。
+
+### Step 2: レポート骨子生成
 
 ```bash
+RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
+
 ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-  ~/.claude/skills/stock-advisor/scripts/quant_decision_engine.py \
-  --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
-  --signals "$RESULTS_DIR/signals.json" \
-  --backtest-dir "$RESULTS_DIR/backtest" \
-  --portfolio-analytics "$RESULTS_DIR/portfolio_analytics.json" \
-  -o "$RESULTS_DIR/quant_decisions.json"
+  ~/.claude/skills/stock-advisor/scripts/report_skeleton_builder.py \
+  --context "$RESULTS_DIR/report_context.json" \
+  -o "$RESULTS_DIR/report.md"
 ```
 
-### Step 2e: レポート用コンテキスト生成
-
-以下を実行し、レポート生成には `report_context.json` を唯一の入力コンテキストとして使う:
-
-```bash
-~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-  ~/.claude/skills/stock-advisor/scripts/report_context_builder.py \
-  --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
-  --signals "$RESULTS_DIR/signals.json" \
-  --backtest-dir "$RESULTS_DIR/backtest" \
-  --portfolio-analytics "$RESULTS_DIR/portfolio_analytics.json" \
-  --quant-decisions "$RESULTS_DIR/quant_decisions.json" \
-  -o "$RESULTS_DIR/report_context.json"
-```
+LLMはこの `report.md` を整える。アクション、数量、シグナル名、WF判定、口座ラベルは変更しない。
 
 レポート提出前に以下を実行する:
 
@@ -112,7 +77,8 @@ done
   --report "$RESULTS_DIR/report.md" \
   --signals "$RESULTS_DIR/signals.json" \
   --quant-decisions "$RESULTS_DIR/quant_decisions.json" \
-  --backtest-dir "$RESULTS_DIR/backtest"
+  --backtest-dir "$RESULTS_DIR/backtest" \
+  --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml
 ```
 
 ### Step 3: レポート生成
@@ -124,6 +90,8 @@ done
 3. `backtest/*.json` — VaR/CVaR・Sharpe CI・WF判定
 4. `portfolio_analytics.json` — 相関行列・ストレステスト損失率
 5. `quant_decisions.json` — クオンツ最終判断（期待値・veto・注文数量）
+
+`quant_decisions.json` の `vetoes` は注文を止めた理由、`risk_flags` は注文を止めない注意点として扱う。レポート作成時に `risk_flags` を売買停止理由として書き換えない。
 
 分析判断には **stock-signals** のシグナル・スコアリングルール、**stock-risk** の信用期限ルールを適用すること。
 

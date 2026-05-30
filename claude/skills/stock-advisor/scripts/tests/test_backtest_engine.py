@@ -1,11 +1,13 @@
 """Unit tests for backtest_engine.py"""
 import sys
 import os
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backtest_engine import (
     _build_trade, simulate_trades, generate_signals, _compute_metrics,
     _empty_metrics, DEFAULT_MARGIN_PARAMS,
+    _compare_strategy_to_benchmark, _select_tradeable_strategy,
 )
 
 
@@ -142,3 +144,247 @@ def test_execution_delay_adds_metadata():
     assert execution_model["execution_delay_days"] == 1
     assert execution_model["price_basis"] == "close"
     assert execution_model["cost_model"] == "commission_slippage_market_impact"
+
+
+def test_safe_spearmanr_returns_none_for_constant_input():
+    from backtest_engine import _safe_spearmanr
+    ic, pval = _safe_spearmanr([1, 1, 1], [0.01, 0.02, 0.03])
+    assert ic is None
+    assert pval is None
+
+
+def test_compute_signal_ic_does_not_emit_nan_for_constant_rule_signals():
+    import math
+    import pandas as pd
+    from backtest_engine import compute_signal_ic
+
+    signals_df = pd.DataFrame({
+        "close": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+        "signal": [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+        "signal_rule": ["momentum", "momentum", "momentum", "momentum", "momentum", "momentum", None, None, None, None],
+    })
+
+    result = compute_signal_ic(signals_df)
+
+    def walk(value):
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from walk(child)
+        else:
+            yield value
+
+    assert all(not (isinstance(value, float) and math.isnan(value)) for value in walk(result))
+
+
+def test_backtest_json_serialization_rejects_non_finite_values():
+    import json
+    import pytest
+
+    with pytest.raises(ValueError):
+        json.dumps({"ic": float("nan")}, allow_nan=False)
+
+
+def test_walk_forward_consensus_distinguishes_sparse_trades_from_instability():
+    from backtest_engine import _walk_forward_consensus
+
+    rolling_windows = [
+        {"test_metrics": {"trade_count": 4, "sharpe_ratio": -1.6, "max_drawdown": 20.0, "win_rate": 25.0}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 3, "sharpe_ratio": -0.8, "max_drawdown": 18.0, "win_rate": 33.3}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 2, "sharpe_ratio": -1.7, "max_drawdown": 22.0, "win_rate": 0.0}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 3, "sharpe_ratio": 0.3, "max_drawdown": 19.0, "win_rate": 33.3}, "overfit_detected": False},
+        {"test_metrics": {"trade_count": 1, "sharpe_ratio": -1.0, "max_drawdown": 17.0, "win_rate": 0.0}, "overfit_detected": True},
+    ]
+
+    consensus = _walk_forward_consensus(rolling_windows)
+
+    assert consensus["total_test_trades"] == 13
+    assert consensus["data_quality"] == "thin_oos_trades"
+    assert consensus["verdict"] == "unstable"
+    assert consensus["stability_flag"] == "overfit_majority"
+
+
+def test_walk_forward_consensus_reports_no_trades_only_when_no_test_trades():
+    from backtest_engine import _walk_forward_consensus
+
+    rolling_windows = [
+        {"test_metrics": {"trade_count": 0, "sharpe_ratio": 0.0, "max_drawdown": 0.0, "win_rate": 0.0}, "overfit_detected": False},
+        {"test_metrics": {"trade_count": 0, "sharpe_ratio": 0.0, "max_drawdown": 0.0, "win_rate": 0.0}, "overfit_detected": False},
+    ]
+
+    consensus = _walk_forward_consensus(rolling_windows)
+
+    assert consensus["total_test_trades"] == 0
+    assert consensus["data_quality"] == "no_oos_trades"
+    assert consensus["verdict"] == "no_trades"
+
+
+def test_ic_filter_constant_inputs_do_not_warn():
+    import warnings
+    from backtest_engine import _safe_corrcoef
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        value = _safe_corrcoef([1, 1, 1, 1, 1], [0.01, 0.02, 0.03, 0.04, 0.05])
+    assert value == 0.0
+    assert not [w for w in caught if "invalid value encountered" in str(w.message)]
+
+
+def test_strategy_vs_benchmark_rejects_underperformer():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 264.10,
+            "sharpe_ratio": 0.8564,
+            "max_drawdown": -35.0,
+            "num_trades": 13,
+        },
+        benchmark_metrics={
+            "total_return": 7097.78,
+            "sharpe_ratio": 1.8095,
+            "max_drawdown": -42.0,
+        },
+    )
+
+    assert comparison["excess_total_return"] == pytest.approx(-6833.68)
+    assert comparison["excess_sharpe"] == pytest.approx(-0.9531)
+    assert comparison["beats_benchmark_return"] is False
+    assert comparison["beats_benchmark_sharpe"] is False
+    assert comparison["tradeable"] is False
+    assert comparison["reason"] == "strategy_underperforms_benchmark"
+
+
+def test_strategy_vs_benchmark_accepts_superior_risk_adjusted_strategy():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 180.0,
+            "sharpe_ratio": 1.45,
+            "max_drawdown": -18.0,
+            "num_trades": 9,
+        },
+        benchmark_metrics={
+            "total_return": 120.0,
+            "sharpe_ratio": 0.90,
+            "max_drawdown": -33.0,
+        },
+    )
+
+    assert comparison["excess_total_return"] == pytest.approx(60.0)
+    assert comparison["excess_sharpe"] == pytest.approx(0.55)
+    assert comparison["beats_benchmark_return"] is True
+    assert comparison["beats_benchmark_sharpe"] is True
+    assert comparison["tradeable"] is True
+    assert comparison["reason"] == "strategy_beats_benchmark"
+
+
+def test_select_strategy_returns_hold_baseline_when_no_strategy_is_tradeable():
+    comparison = {
+        "default": {
+            "baseline": {"total_return": 16.98, "sharpe_ratio": 0.2553, "num_trades": 13},
+            "benchmark": {"total_return": 353.05, "sharpe_ratio": 0.9476, "max_drawdown": -40.0},
+            "walk_forward": {"consensus": {"verdict": "unstable"}, "data_quality": "thin_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+        "trend": {
+            "baseline": {"total_return": 20.00, "sharpe_ratio": 0.30, "num_trades": 5},
+            "benchmark": {"total_return": 353.05, "sharpe_ratio": 0.9476, "max_drawdown": -40.0},
+            "walk_forward": {"consensus": {"verdict": "limited"}, "data_quality": "thin_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+    }
+
+    selected = _select_tradeable_strategy(comparison)
+
+    assert selected["selected_strategy"] == "hold_baseline"
+    assert selected["tradeable"] is False
+    assert selected["reason"] == "no_strategy_passed_tradeability_gate"
+
+
+def test_select_strategy_prefers_tradeable_robust_strategy():
+    comparison = {
+        "default": {
+            "baseline": {"total_return": 50.0, "sharpe_ratio": 0.60, "num_trades": 7},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "unstable"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+        "trend": {
+            "baseline": {"total_return": 130.0, "sharpe_ratio": 1.20, "num_trades": 8},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "robust"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": True, "reason": "strategy_beats_benchmark"},
+        },
+        "contrarian": {
+            "baseline": {"total_return": 125.0, "sharpe_ratio": 1.10, "num_trades": 8},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "stable"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": True, "reason": "strategy_beats_benchmark"},
+        },
+    }
+
+    selected = _select_tradeable_strategy(comparison)
+
+    assert selected["selected_strategy"] == "trend"
+    assert selected["tradeable"] is True
+    assert selected["reason"] == "strategy_passed_tradeability_gate"
+
+
+def test_strategy_vs_benchmark_uses_trade_count_field_from_real_baseline():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 21.25,
+            "sharpe_ratio": 0.3184,
+            "max_drawdown": 29.4,
+            "trade_count": 18,
+        },
+        benchmark_metrics={
+            "total_return": 17.40,
+            "sharpe_ratio": 0.2644,
+            "max_drawdown": 52.09,
+        },
+    )
+    assert comparison["trade_count"] == 18
+    assert comparison["reason"] == "strategy_beats_benchmark"
+    assert comparison["tradeable"] is True
+
+
+def test_strategy_vs_benchmark_treats_smaller_positive_drawdown_as_better():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 115.0,
+            "sharpe_ratio": 1.15,
+            "max_drawdown": 18.0,
+            "trade_count": 8,
+        },
+        benchmark_metrics={
+            "total_return": 118.0,
+            "sharpe_ratio": 0.80,
+            "max_drawdown": 35.0,
+        },
+    )
+    assert comparison["drawdown_not_worse"] is True
+    assert comparison["reason"] == "strategy_improves_risk_adjusted_return"
+    assert comparison["tradeable"] is True
+
+
+def test_select_strategy_reads_data_quality_from_consensus():
+    comparison = {
+        "trend": {
+            "baseline": {"total_return": 130.0, "sharpe_ratio": 1.20, "trade_count": 8},
+            "walk_forward": {
+                "consensus": {
+                    "verdict": "robust",
+                    "data_quality": "sufficient_oos_trades",
+                },
+            },
+            "benchmark_comparison": {
+                "tradeable": True,
+                "excess_sharpe": 0.40,
+                "excess_total_return": 55.0,
+                "reason": "strategy_beats_benchmark",
+            },
+        },
+    }
+    selected = _select_tradeable_strategy(comparison)
+    assert selected["selected_strategy"] == "trend"
+    assert selected["tradeable"] is True

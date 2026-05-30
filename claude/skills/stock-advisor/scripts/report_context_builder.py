@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml
+from strategy_review import summarize_strategy_review
 
 
 class DateAwareEncoder(json.JSONEncoder):
@@ -27,6 +28,16 @@ class DateAwareEncoder(json.JSONEncoder):
         if isinstance(o, datetime.date):
             return o.isoformat()
         return super().default(o)
+
+
+def build_macro_context(signals_data: dict) -> dict:
+    if signals_data.get("macro_context"):
+        return signals_data["macro_context"]
+    for entry in signals_data.get("results", []):
+        macro = entry.get("macro")
+        if isinstance(macro, dict) and macro:
+            return macro
+    return {}
 
 
 def load_portfolio(path: str) -> dict:
@@ -92,7 +103,14 @@ def build_backtest_results(backtest_dir: str) -> dict[str, dict]:
         entry["walk_forward"] = {
             "overfit_detected": wf.get("overfit_detected", False),
             "verdict": wf.get("consensus", {}).get("verdict", "unknown"),
+            "consensus": wf.get("consensus", {}),
+            "data_quality": wf.get("data_quality") or wf.get("consensus", {}).get("data_quality", ""),
         }
+        # Preserve strategy gate metadata when present
+        if "strategy_selection" in data:
+            entry["strategy_selection"] = data["strategy_selection"]
+        if "benchmark_comparison" in data:
+            entry["benchmark_comparison"] = data["benchmark_comparison"]
         results[ticker] = entry
     return results
 
@@ -116,7 +134,15 @@ def build_quant_decisions(decisions_data: dict) -> dict[str, dict]:
             "order_type": d["order_type"],
             "limit_price": d["limit_price"],
             "vetoes": d.get("vetoes", []),
+            "risk_flags": d.get("risk_flags", []),
             "explanations": d.get("explanations", []),
+            "risk_posture": d.get("risk_posture", "neutral"),
+            "protective_stop_price": d.get("protective_stop_price"),
+            "portfolio_weight_pct": d.get("portfolio_weight_pct"),
+            "cost_basis_weight_pct": d.get("cost_basis_weight_pct"),
+            "unrealized_pnl_pct": d.get("unrealized_pnl_pct"),
+            "downside_10pct_yen": d.get("downside_10pct_yen"),
+            "advisory_plan": d.get("advisory_plan", {}),
         }
     return result
 
@@ -127,6 +153,7 @@ def build_context(
     backtest_dir: str,
     analytics_path: str,
     decisions_path: str,
+    strategy_risk_mode: str = "balanced",
 ) -> dict:
     portfolio = load_portfolio(portfolio_path)
     signals_data = load_json(signals_path)
@@ -148,9 +175,11 @@ def build_context(
         "watchlist": watchlist,
         "signals": signals,
         "backtest": backtest,
+        "strategy_review": summarize_strategy_review(backtest, risk_mode=strategy_risk_mode),
+        "strategy_risk_mode": strategy_risk_mode,
         "correlations": correlations,
         "quant_decisions": quant,
-        "macro_context": signals_data.get("macro_context", {}),
+        "macro_context": build_macro_context(signals_data),
     }
 
 
@@ -164,6 +193,8 @@ def main():
     parser.add_argument("--portfolio-analytics", required=True)
     parser.add_argument("--quant-decisions", required=True)
     parser.add_argument("-o", "--output", required=True)
+    parser.add_argument("--strategy-risk-mode", choices=["defensive", "balanced", "aggressive"],
+                        default="balanced", help="Risk mode for strategy review")
     args = parser.parse_args()
 
     context = build_context(
@@ -171,6 +202,7 @@ def main():
         signals_path=args.signals,
         backtest_dir=args.backtest_dir,
         analytics_path=args.portfolio_analytics,
+        strategy_risk_mode=args.strategy_risk_mode,
         decisions_path=args.quant_decisions,
     )
 

@@ -174,6 +174,10 @@ STRATEGY_ALLOWED_RULES = {
         "buy": {"oversold_reversal"},
         "sell": {"overbought", "momentum_breakdown", "drawdown_stop"},
     },
+    "balanced_frequency": {
+        "buy": {"oversold_reversal", "ma_support_bounce", "pullback_reentry"},
+        "sell": {"overbought", "range_trim", "momentum_breakdown"},
+    },
 }
 
 
@@ -265,6 +269,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if low_val is None:
             low_val = 0
         boll_lb = safe_float(indicator_data["boll_lb"].get(d))
+        boll_ub = safe_float(indicator_data["boll_ub"].get(d))
 
         # Compute trend state for filter and adaptive logic
         trend_state = compute_trend_state({
@@ -306,7 +311,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                                 rule_sigs[r]["f"].append(fwd[i])
                         for rn, rd in rule_sigs.items():
                             if len(rd["s"]) >= 5:
-                                ic_val = np.corrcoef(rd["s"], rd["f"])[0, 1]
+                                ic_val = _safe_corrcoef(rd["s"], rd["f"])
                                 ic_filter[rn] = abs(ic_val) >= 0.05
         except Exception:
             pass  # IC filter unavailable — use all rules
@@ -354,6 +359,16 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             if _is_rule_allowed("ma_support_bounce", 1, strategy_mode) and ic_filter.get("ma_support_bounce", True):
                 contributions.append(("ma_support_bounce", 1, st, STRENGTH_WEIGHT[st]))
 
+        # Pullback reentry BUY (balanced_frequency)
+        if (
+            sma_50 and close_val and sma_50 * 0.96 <= close_val <= sma_50 * 1.01
+            and rsi is not None and 35 <= rsi <= 50
+            and ret_5d is not None and ret_5d > -3
+        ):
+            st = "moderate" if rsi < 42 else "weak"
+            if _is_rule_allowed("pullback_reentry", 1, strategy_mode) and ic_filter.get("pullback_reentry", True):
+                contributions.append(("pullback_reentry", 1, st, STRENGTH_WEIGHT[st]))
+
         # --- SELL rules ---
         # Overbought SELL
         if (rsi is not None and rsi > thresholds["rsi_upper"]
@@ -361,6 +376,16 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             st = "strong" if (rsi and rsi > 80 and vol_ratio and safe_float(vol_ratio) > 1.2) else "moderate"
             if _is_rule_allowed("overbought", -1, strategy_mode) and ic_filter.get("overbought", True):
                 contributions.append(("overbought", -1, st, -STRENGTH_WEIGHT[st]))
+
+        # Range trim SELL (balanced_frequency)
+        if (
+            boll_ub and close_val and close_val >= boll_ub * 0.98
+            and rsi is not None and rsi >= 60
+            and ret_5d is not None and ret_5d > 3
+        ):
+            st = "moderate" if (rsi and rsi >= 68) else "weak"
+            if _is_rule_allowed("range_trim", -1, strategy_mode) and ic_filter.get("range_trim", True):
+                contributions.append(("range_trim", -1, st, -STRENGTH_WEIGHT[st]))
 
         # Momentum breakdown SELL
         if (ret_5d is not None and ret_5d < thresholds["breakdown_5d"]
@@ -931,6 +956,85 @@ def compute_signal_census(signals_df, trades):
     return census
 
 
+def _safe_corrcoef(left, right) -> float:
+    left_arr = np.array(left, dtype=float)
+    right_arr = np.array(right, dtype=float)
+    if len(left_arr) < 2 or len(right_arr) < 2:
+        return 0.0
+    if np.std(left_arr) == 0 or np.std(right_arr) == 0:
+        return 0.0
+    value = np.corrcoef(left_arr, right_arr)[0, 1]
+    if np.isnan(value):
+        return 0.0
+    return float(value)
+
+
+def _safe_spearmanr(signal_values, forward_returns) -> tuple:
+    """Safe spearmanr that returns None,None for degenerate inputs or NaN output."""
+    if len(signal_values) < 2 or len(forward_returns) < 2:
+        return None, None
+    if len(set(signal_values)) <= 1 or len(set(forward_returns)) <= 1:
+        return None, None
+    from scipy.stats import spearmanr
+    ic, pval = spearmanr(signal_values, forward_returns)
+    if np.isnan(ic):
+        return None, None
+    if pval is not None and np.isnan(pval):
+        pval = None
+    return float(ic), float(pval) if pval is not None else None
+
+
+def _walk_forward_consensus(rolling_windows: list[dict]) -> dict:
+    test_sharpes = [rw["test_metrics"]["sharpe_ratio"] for rw in rolling_windows]
+    mean_sharpe = float(np.mean(test_sharpes)) if test_sharpes else 0.0
+    std_sharpe = float(np.std(test_sharpes)) if test_sharpes else 0.0
+    mean_maxdd = float(np.mean([rw["test_metrics"]["max_drawdown"] for rw in rolling_windows])) if rolling_windows else 0.0
+    mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows])) if rolling_windows else 0.0
+    overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
+    total_test_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
+    valid_test_windows = sum(1 for rw in rolling_windows if rw["test_metrics"]["trade_count"] > 0)
+
+    if total_test_trades == 0:
+        data_quality = "no_oos_trades"
+        verdict = "no_trades"
+        stability_flag = "not_evaluable"
+    elif total_test_trades < 15 or valid_test_windows < 3:
+        data_quality = "thin_oos_trades"
+        if overfit_count > len(rolling_windows) / 2:
+            verdict = "unstable"
+            stability_flag = "overfit_majority"
+        else:
+            verdict = "limited"
+            stability_flag = "thin_sample"
+    else:
+        data_quality = "sufficient_oos_trades"
+        if overfit_count > len(rolling_windows) / 2:
+            verdict = "unstable"
+            stability_flag = "overfit_majority"
+        elif overfit_count > 0:
+            verdict = "unstable"
+            stability_flag = "some_overfit"
+        elif std_sharpe < 0.5:
+            verdict = "robust"
+            stability_flag = "low_dispersion"
+        else:
+            verdict = "stable"
+            stability_flag = "moderate_dispersion"
+
+    return {
+        "mean_sharpe": round(mean_sharpe, 4),
+        "std_sharpe": round(std_sharpe, 4),
+        "mean_maxdd": round(mean_maxdd, 2),
+        "mean_win_rate": round(mean_win_rate, 2),
+        "overfit_count": overfit_count,
+        "total_test_trades": total_test_trades,
+        "valid_test_windows": valid_test_windows,
+        "data_quality": data_quality,
+        "stability_flag": stability_flag,
+        "verdict": verdict,
+    }
+
+
 def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
     """Compute Information Coefficient (Spearman correlation) per signal rule.
 
@@ -962,10 +1066,11 @@ def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
             if len(s) < 5:
                 continue
             try:
-                from scipy.stats import spearmanr
-                ic, pval = spearmanr(s, fw)
+                ic, pval = _safe_spearmanr(s, fw)
+                if ic is None:
+                    continue
             except ImportError:
-                ic = np.corrcoef(s, fw)[0, 1] if len(s) > 1 else 0
+                ic = _safe_corrcoef(s, fw)
                 pval = None
             n = len(s)
             denom = max(1 - ic * ic, 0.0001)
@@ -1348,12 +1453,17 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                                    embargo_days=embargo_days,
                                    execution_delay=execution_delay))
         result["rolling_windows"] = []
+        n_test_trades = result["test_metrics"]["trade_count"]
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
             "std_sharpe": 0.0,
             "mean_maxdd": result["test_metrics"]["max_drawdown"],
             "mean_win_rate": result["test_metrics"]["win_rate"],
             "overfit_count": 1 if result["overfit_detected"] else 0,
+            "total_test_trades": n_test_trades,
+            "valid_test_windows": 1 if n_test_trades > 0 else 0,
+            "data_quality": "insufficient_price_history",
+            "stability_flag": "not_evaluable",
             "verdict": "data_insufficient",
         }
         return result
@@ -1364,6 +1474,7 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                                    strategy_mode=strategy_mode,
                                    embargo_days=embargo_days,
                                    execution_delay=execution_delay))
+        n_test_trades = result["test_metrics"]["trade_count"]
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -1371,6 +1482,10 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
             "mean_maxdd": result["test_metrics"]["max_drawdown"],
             "mean_win_rate": result["test_metrics"]["win_rate"],
             "overfit_count": 1 if result["overfit_detected"] else 0,
+            "total_test_trades": n_test_trades,
+            "valid_test_windows": 1 if n_test_trades > 0 else 0,
+            "data_quality": "insufficient_price_history",
+            "stability_flag": "not_evaluable",
             "verdict": "data_insufficient",
         }
         return result
@@ -1403,38 +1518,13 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
         })
 
     # Consensus
-    test_sharpes = [rw["test_metrics"]["sharpe_ratio"] for rw in rolling_windows]
-    mean_sharpe = float(np.mean(test_sharpes))
-    std_sharpe = float(np.std(test_sharpes))
-    mean_maxdd = float(np.mean([rw["test_metrics"]["max_drawdown"] for rw in rolling_windows]))
-    mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows]))
-    overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
-
-    total_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
-    if total_trades == 0:
-        verdict = "no_trades"
-    else:
-        if overfit_count > 2:
-            verdict = "insufficient_data"
-        elif overfit_count > 0:
-            verdict = "unstable"
-        elif std_sharpe < 0.5:
-            verdict = "robust"
-        else:
-            verdict = "stable"
+    consensus = _walk_forward_consensus(rolling_windows)
 
     # Backward compatibility shim: legacy keys from window 0
     w0 = rolling_windows[0]
     result = {
         "rolling_windows": rolling_windows,
-        "consensus": {
-            "mean_sharpe": round(mean_sharpe, 4),
-            "std_sharpe": round(std_sharpe, 4),
-            "mean_maxdd": round(mean_maxdd, 2),
-            "mean_win_rate": round(mean_win_rate, 2),
-            "overfit_count": overfit_count,
-            "verdict": verdict,
-        },
+        "consensus": consensus,
         "train_metrics": w0["train_metrics"],
         "test_metrics": w0["test_metrics"],
         "sharpe_diff_pct": w0["sharpe_diff_pct"],
@@ -1489,6 +1579,165 @@ def _compute_benchmark(ohlcv: pd.DataFrame, start_date: str, end_date: str) -> d
         "max_drawdown": round(max_dd * 100, 2),
         "sharpe_ratio": round(sharpe, 4),
         "total_return": round(total_return * 100, 2),
+    }
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _strategy_trade_count(strategy_metrics):
+    if "trade_count" in strategy_metrics:
+        return int(_safe_float(strategy_metrics.get("trade_count"), 0.0))
+    if "num_trades" in strategy_metrics:
+        return int(_safe_float(strategy_metrics.get("num_trades"), 0.0))
+    trades = strategy_metrics.get("trades")
+    if isinstance(trades, list):
+        return len(trades)
+    return 0
+
+
+def _drawdown_not_worse(strategy_drawdown, benchmark_drawdown):
+    strategy_abs = abs(_safe_float(strategy_drawdown))
+    benchmark_abs = abs(_safe_float(benchmark_drawdown))
+    if benchmark_abs == 0:
+        return strategy_abs == 0
+    return strategy_abs <= benchmark_abs
+
+
+def _walk_forward_data_quality(walk_forward):
+    if walk_forward.get("data_quality"):
+        return walk_forward.get("data_quality")
+    consensus = walk_forward.get("consensus", {})
+    return consensus.get("data_quality", "unknown")
+
+
+def _compare_strategy_to_benchmark(strategy_metrics, benchmark_metrics):
+    strategy_return = _safe_float(strategy_metrics.get("total_return"))
+    benchmark_return = _safe_float(benchmark_metrics.get("total_return"))
+    strategy_sharpe = _safe_float(strategy_metrics.get("sharpe_ratio"))
+    benchmark_sharpe = _safe_float(benchmark_metrics.get("sharpe_ratio"))
+    strategy_drawdown = _safe_float(strategy_metrics.get("max_drawdown"))
+    benchmark_drawdown = _safe_float(benchmark_metrics.get("max_drawdown"))
+    trade_count = _strategy_trade_count(strategy_metrics)
+
+    excess_return = round(strategy_return - benchmark_return, 4)
+    excess_sharpe = round(strategy_sharpe - benchmark_sharpe, 4)
+    beats_return = excess_return > 0
+    beats_sharpe = excess_sharpe > 0
+    drawdown_not_worse = _drawdown_not_worse(strategy_drawdown, benchmark_drawdown)
+
+    if trade_count < 3:
+        tradeable = False
+        reason = "too_few_strategy_trades"
+    elif beats_return and beats_sharpe:
+        tradeable = True
+        reason = "strategy_beats_benchmark"
+    elif beats_sharpe and drawdown_not_worse and excess_return > -5.0:
+        tradeable = True
+        reason = "strategy_improves_risk_adjusted_return"
+    else:
+        tradeable = False
+        reason = "strategy_underperforms_benchmark"
+
+    return {
+        "strategy_total_return": strategy_return,
+        "benchmark_total_return": benchmark_return,
+        "excess_total_return": excess_return,
+        "strategy_sharpe": strategy_sharpe,
+        "benchmark_sharpe": benchmark_sharpe,
+        "excess_sharpe": excess_sharpe,
+        "strategy_max_drawdown": strategy_drawdown,
+        "benchmark_max_drawdown": benchmark_drawdown,
+        "drawdown_not_worse": drawdown_not_worse,
+        "trade_count": trade_count,
+        "beats_benchmark_return": beats_return,
+        "beats_benchmark_sharpe": beats_sharpe,
+        "tradeable": tradeable,
+        "reason": reason,
+    }
+
+
+WF_VERDICT_RANK = {
+    "robust": 3,
+    "stable": 2,
+    "limited": 1,
+    "unstable": 0,
+    "insufficient_data": 0,
+}
+
+
+def _strategy_selection_score(strategy_result):
+    baseline = strategy_result.get("baseline", {})
+    comparison = strategy_result.get("benchmark_comparison", {})
+    walk_forward = strategy_result.get("walk_forward", {})
+    consensus = walk_forward.get("consensus", {})
+    verdict = consensus.get("verdict", "insufficient_data")
+
+    return (
+        WF_VERDICT_RANK.get(verdict, 0),
+        _safe_float(comparison.get("excess_sharpe")),
+        _safe_float(comparison.get("excess_total_return")),
+        _safe_float(baseline.get("total_return")),
+    )
+
+
+def _trial_penalty_min_excess_sharpe(trial_count):
+    trials = max(int(trial_count or 1), 1)
+    if trials <= 3:
+        return 0.0
+    return min(0.05 + 0.01 * (trials - 3), 0.15)
+
+
+def _select_tradeable_strategy(strategy_comparison, trial_count=None):
+    candidates = []
+    penalty_rejected = False
+
+    for strategy_name, strategy_result in strategy_comparison.items():
+        comparison = strategy_result.get("benchmark_comparison", {})
+        walk_forward = strategy_result.get("walk_forward", {})
+        consensus = walk_forward.get("consensus", {})
+        verdict = consensus.get("verdict", "insufficient_data")
+        data_quality = _walk_forward_data_quality(walk_forward)
+
+        if not comparison.get("tradeable"):
+            continue
+        if verdict not in {"stable", "robust"}:
+            continue
+        if data_quality != "sufficient_oos_trades":
+            continue
+
+        # Trial penalty: more strategy variants → higher bar for edge
+        min_excess_sharpe = _trial_penalty_min_excess_sharpe(trial_count or len(strategy_comparison))
+        if _safe_float(comparison.get("excess_sharpe")) < min_excess_sharpe:
+            penalty_rejected = True
+            continue
+
+        candidates.append((strategy_name, strategy_result))
+
+    if not candidates:
+        reason = "strategy_edge_too_small_after_trial_penalty" if penalty_rejected else "no_strategy_passed_tradeability_gate"
+        return {
+            "selected_strategy": "hold_baseline",
+            "tradeable": False,
+            "reason": reason,
+        }
+
+    selected_name, selected_result = max(
+        candidates,
+        key=lambda item: _strategy_selection_score(item[1]),
+    )
+    return {
+        "selected_strategy": selected_name,
+        "tradeable": True,
+        "reason": "strategy_passed_tradeability_gate",
+        "benchmark_comparison": selected_result.get("benchmark_comparison", {}),
+        "walk_forward": selected_result.get("walk_forward", {}),
     }
 
 
@@ -1746,7 +1995,7 @@ def main():
     parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--output", "-o", help="Output JSON file path")
-    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all"],
+    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "balanced_frequency", "all", "auto"],
                         default="default", help="Strategy mode for signal generation")
     parser.add_argument("--no-cache", action="store_true",
                         help="Bypass backtest result cache")
@@ -1767,7 +2016,7 @@ def main():
         start_date = start_dt.strftime("%Y-%m-%d")
 
     # Check backtest result cache (must be after start_date is resolved)
-    if not args.no_cache and not args.tune and args.strategy != "all":
+    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
         cached = load_cached_result(args.ticker, args.strategy,
                                     start_date, end_date,
                                     max_age=args.cache_ttl)
@@ -1808,10 +2057,10 @@ def main():
             "cost_model": "commission_slippage_market_impact",
         }
 
-    if args.strategy == "all":
+    if args.strategy in ("all", "auto"):
         strategy_comparison = {}
-        strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り"}
-        for sm in ["default", "trend", "contrarian"]:
+        strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り", "balanced_frequency": "頻度改善(押し目+レンジ)"}
+        for sm in ["default", "trend", "contrarian", "balanced_frequency"]:
             sig_df = generate_signals(args.ticker, start_date, end_date,
                                       strategy_mode=sm)
             baseline = simulate_trades(sig_df, margin_mode=margin_mode,
@@ -1820,21 +2069,57 @@ def main():
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
                                       margin_mode=margin_mode, strategy_mode=sm,
                                       execution_delay=execution_delay)
-            strategy_comparison[sm] = {
+            sc_result = {
                 "label": strategy_labels[sm],
                 "baseline": baseline,
                 "walk_forward": wf,
             }
-        # Use "default" as the primary result
+            sc_result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                baseline, result["benchmark"])
+            strategy_comparison[sm] = sc_result
+
         result["strategy_comparison"] = strategy_comparison
-        sig_df = generate_signals(args.ticker, start_date, end_date)
-        baseline = simulate_trades(sig_df, margin_mode=margin_mode,
-                                   execution_delay=execution_delay)
-        baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
-        result["baseline"] = baseline
-        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
-                                  execution_delay=execution_delay)
-        result["walk_forward"] = wf
+
+        if args.strategy == "auto":
+            result["strategy_selection"] = _select_tradeable_strategy(strategy_comparison)
+            selected_strategy = result["strategy_selection"]["selected_strategy"]
+
+            if selected_strategy in strategy_comparison:
+                selected_result = strategy_comparison[selected_strategy]
+                result["baseline"] = selected_result.get("baseline", {})
+                result["walk_forward"] = selected_result.get("walk_forward", {})
+                result["benchmark_comparison"] = selected_result.get("benchmark_comparison", {})
+                # Use the selected strategy's signals for IC computation
+                sig_df = generate_signals(args.ticker, start_date, end_date,
+                                          strategy_mode=selected_strategy)
+            else:
+                # hold_baseline: keep default data but mark as untradeable
+                sig_df = generate_signals(args.ticker, start_date, end_date)
+                baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                           execution_delay=execution_delay)
+                baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
+                result["baseline"] = baseline
+                wf = walk_forward_rolling(args.ticker, start_date, end_date,
+                                          margin_mode=margin_mode,
+                                          execution_delay=execution_delay)
+                result["walk_forward"] = wf
+                result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                    baseline, result["benchmark"])
+        else:
+            # all mode: Use "default" as the primary result
+            sig_df = generate_signals(args.ticker, start_date, end_date)
+            baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                       execution_delay=execution_delay)
+            baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
+            result["baseline"] = baseline
+            wf = walk_forward_rolling(args.ticker, start_date, end_date,
+                                      margin_mode=margin_mode,
+                                      execution_delay=execution_delay)
+            result["walk_forward"] = wf
+            result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                result.get("baseline", {}),
+                result.get("benchmark", {}),
+            )
     else:
         sig_df = generate_signals(args.ticker, start_date, end_date,
                                   strategy_mode=args.strategy)
@@ -1846,6 +2131,11 @@ def main():
         wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
                                   strategy_mode=args.strategy)
         result["walk_forward"] = wf
+
+        result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+            result.get("baseline", {}),
+            result.get("benchmark", {}),
+        )
 
     # Signal IC (Information Coefficient)
     ic_result = compute_signal_ic(sig_df)
@@ -1866,7 +2156,7 @@ def main():
     output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
-    if not args.no_cache and not args.tune and args.strategy != "all":
+    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
         save_cached_result(args.ticker, args.strategy, start_date, end_date, result)
 
     if args.output:
