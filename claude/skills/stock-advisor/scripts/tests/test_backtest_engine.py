@@ -327,3 +327,64 @@ def test_select_strategy_prefers_tradeable_robust_strategy():
     assert selected["selected_strategy"] == "trend"
     assert selected["tradeable"] is True
     assert selected["reason"] == "strategy_passed_tradeability_gate"
+
+
+def test_strategy_vs_benchmark_uses_trade_count_field_from_real_baseline():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 21.25,
+            "sharpe_ratio": 0.3184,
+            "max_drawdown": 29.4,
+            "trade_count": 18,
+        },
+        benchmark_metrics={
+            "total_return": 17.40,
+            "sharpe_ratio": 0.2644,
+            "max_drawdown": 52.09,
+        },
+    )
+    assert comparison["trade_count"] == 18
+    assert comparison["reason"] == "strategy_beats_benchmark"
+    assert comparison["tradeable"] is True
+
+
+def test_strategy_vs_benchmark_treats_smaller_positive_drawdown_as_better():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 115.0,
+            "sharpe_ratio": 1.15,
+            "max_drawdown": 18.0,
+            "trade_count": 8,
+        },
+        benchmark_metrics={
+            "total_return": 118.0,
+            "sharpe_ratio": 0.80,
+            "max_drawdown": 35.0,
+        },
+    )
+    assert comparison["drawdown_not_worse"] is True
+    assert comparison["reason"] == "strategy_improves_risk_adjusted_return"
+    assert comparison["tradeable"] is True
+
+
+def test_select_strategy_reads_data_quality_from_consensus():
+    comparison = {
+        "trend": {
+            "baseline": {"total_return": 130.0, "sharpe_ratio": 1.20, "trade_count": 8},
+            "walk_forward": {
+                "consensus": {
+                    "verdict": "robust",
+                    "data_quality": "sufficient_oos_trades",
+                },
+            },
+            "benchmark_comparison": {
+                "tradeable": True,
+                "excess_sharpe": 0.40,
+                "excess_total_return": 55.0,
+                "reason": "strategy_beats_benchmark",
+            },
+        },
+    }
+    selected = _select_tradeable_strategy(comparison)
+    assert selected["selected_strategy"] == "trend"
+    assert selected["tradeable"] is True

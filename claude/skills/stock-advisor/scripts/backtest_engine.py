@@ -1566,6 +1566,32 @@ def _safe_float(value, default=0.0):
         return default
 
 
+def _strategy_trade_count(strategy_metrics):
+    if "trade_count" in strategy_metrics:
+        return int(_safe_float(strategy_metrics.get("trade_count"), 0.0))
+    if "num_trades" in strategy_metrics:
+        return int(_safe_float(strategy_metrics.get("num_trades"), 0.0))
+    trades = strategy_metrics.get("trades")
+    if isinstance(trades, list):
+        return len(trades)
+    return 0
+
+
+def _drawdown_not_worse(strategy_drawdown, benchmark_drawdown):
+    strategy_abs = abs(_safe_float(strategy_drawdown))
+    benchmark_abs = abs(_safe_float(benchmark_drawdown))
+    if benchmark_abs == 0:
+        return strategy_abs == 0
+    return strategy_abs <= benchmark_abs
+
+
+def _walk_forward_data_quality(walk_forward):
+    if walk_forward.get("data_quality"):
+        return walk_forward.get("data_quality")
+    consensus = walk_forward.get("consensus", {})
+    return consensus.get("data_quality", "unknown")
+
+
 def _compare_strategy_to_benchmark(strategy_metrics, benchmark_metrics):
     strategy_return = _safe_float(strategy_metrics.get("total_return"))
     benchmark_return = _safe_float(benchmark_metrics.get("total_return"))
@@ -1573,13 +1599,13 @@ def _compare_strategy_to_benchmark(strategy_metrics, benchmark_metrics):
     benchmark_sharpe = _safe_float(benchmark_metrics.get("sharpe_ratio"))
     strategy_drawdown = _safe_float(strategy_metrics.get("max_drawdown"))
     benchmark_drawdown = _safe_float(benchmark_metrics.get("max_drawdown"))
-    trade_count = int(_safe_float(strategy_metrics.get("num_trades"), 0.0))
+    trade_count = _strategy_trade_count(strategy_metrics)
 
     excess_return = round(strategy_return - benchmark_return, 4)
     excess_sharpe = round(strategy_sharpe - benchmark_sharpe, 4)
     beats_return = excess_return > 0
     beats_sharpe = excess_sharpe > 0
-    drawdown_not_worse = strategy_drawdown >= benchmark_drawdown
+    drawdown_not_worse = _drawdown_not_worse(strategy_drawdown, benchmark_drawdown)
 
     if trade_count < 3:
         tradeable = False
@@ -1644,7 +1670,7 @@ def _select_tradeable_strategy(strategy_comparison):
         walk_forward = strategy_result.get("walk_forward", {})
         consensus = walk_forward.get("consensus", {})
         verdict = consensus.get("verdict", "insufficient_data")
-        data_quality = walk_forward.get("data_quality", "unknown")
+        data_quality = _walk_forward_data_quality(walk_forward)
 
         if not comparison.get("tradeable"):
             continue

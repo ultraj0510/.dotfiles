@@ -103,7 +103,7 @@ def build_backtest_results(backtest_dir: str) -> dict[str, dict]:
             "overfit_detected": wf.get("overfit_detected", False),
             "verdict": wf.get("consensus", {}).get("verdict", "unknown"),
             "consensus": wf.get("consensus", {}),
-            "data_quality": wf.get("data_quality", ""),
+            "data_quality": wf.get("data_quality") or wf.get("consensus", {}).get("data_quality", ""),
         }
         # Preserve strategy gate metadata when present
         if "strategy_selection" in data:

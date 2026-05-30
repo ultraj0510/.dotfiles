@@ -222,3 +222,25 @@ def test_backtest_builder_preserves_strategy_gate(tmp_path):
     assert r["strategy_selection"]["tradeable"] is False
     assert r["benchmark_comparison"]["excess_total_return"] == -2899.75
     assert r["benchmark_comparison"]["reason"] == "strategy_underperforms_benchmark"
+
+
+def test_report_context_uses_consensus_data_quality(tmp_path):
+    import json
+    from report_context_builder import build_backtest_results
+
+    data = {
+        "baseline": {"trade_count": 18},
+        "walk_forward": {
+            "consensus": {
+                "verdict": "unstable",
+                "data_quality": "thin_oos_trades",
+            },
+            "overfit_detected": True,
+        },
+    }
+    bt_dir = tmp_path / "backtest"
+    bt_dir.mkdir()
+    (bt_dir / "7974.T.json").write_text(json.dumps(data))
+
+    result = build_backtest_results(str(bt_dir))
+    assert result["7974.T"]["walk_forward"]["data_quality"] == "thin_oos_trades"
