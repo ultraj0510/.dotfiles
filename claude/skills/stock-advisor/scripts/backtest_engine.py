@@ -1801,6 +1801,13 @@ def main():
     margin_mode = args.margin
     execution_delay = 1 if args.execution_delay else 0
 
+    if args.execution_delay:
+        result["execution_model"] = {
+            "execution_delay_days": execution_delay,
+            "price_basis": "close",
+            "cost_model": "commission_slippage_market_impact",
+        }
+
     if args.strategy == "all":
         strategy_comparison = {}
         strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り"}

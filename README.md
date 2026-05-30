@@ -71,6 +71,17 @@ bash ~/.dotfiles/install.sh
 | チーム共有 | `org/claude-plugins`（社内マーケットプレイス） | 共通スキル・チームルール |
 | プロジェクト固有 | 各リポジトリの `CLAUDE.md` | スタック固有ルール |
 
+## テスト
+
+stock-advisor のテストは専用 venv 経由で実行する:
+
+```bash
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  -m pytest -q ~/.claude/skills/stock-advisor/scripts/tests
+```
+
+system Python には `numpy`, `pandas`, `yfinance` が入っていない場合があるため、stock-advisorの検証では使わない。
+
 ## チームへの展開
 
 1. このリポジトリを fork
