@@ -242,7 +242,52 @@ class TestMakeDecision:
         assert "position_over_cap_watch" not in decision.vetoes
         assert "position_over_cap_watch" in decision.risk_flags
 
+    def test_large_loss_concentration_gets_range_rebalance_plan(self):
+        signal = {
+            "action": "HOLD",
+            "current_price": 2397,
+            "atr": 173.98,
+            "trend_state": "downtrend",
+            "signals": [],
+            "indicators": {
+                "close_10_ema": "2408.45",
+                "close_50_sma": "2561.17",
+                "boll": "2440.4",
+                "boll_lb": "2162.25",
+                "boll_ub": "2718.55",
+                "10d_return": "-8.09",
+                "20d_return": "-1.03",
+            },
+        }
+        bt = {
+            "total_trades": 29, "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"verdict": "insufficient_data", "overfit_detected": True},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert decision.risk_posture == "rebalance_on_strength"
+        assert decision.advisory_plan == {
+            "mode": "trim_on_rebound_rebuy_on_pullback",
+            "trim_shares": 300,
+            "trim_trigger_price": 2440.4,
+            "reentry_watch_price": 2162.25,
+            "max_reentry_shares": 300,
+            "reentry_allowed_after_trim": True,
+            "reentry_requires": [
+                "trim_filled",
+                "price_near_lower_band",
+                "rsi_below_40_or_reversal_signal",
+            ],
+        }
+        assert "position_over_cap_loss_concentration" in decision.risk_flags
+
     def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
+        # Renamed: now exercises the range rebalance plan (same logic, broader advisory metadata)
         signal = {
             "action": "HOLD", "current_price": 2397, "atr": 173.98, "trend_state": "downtrend",
             "signals": [],
@@ -269,13 +314,12 @@ class TestMakeDecision:
         assert decision.portfolio_weight_pct == 36.57
         assert decision.cost_basis_weight_pct == 54.20
         assert decision.unrealized_pnl_pct == -32.52
-        assert decision.advisory_plan == {
-            "mode": "trim_on_rebound",
-            "trim_shares": 300,
-            "trim_trigger_price": 2440.4,
-            "buyback_allowed": False,
-            "buyback_block_reason": "downtrend_and_position_over_30pct",
-        }
+        assert decision.advisory_plan["mode"] == "trim_on_rebound_rebuy_on_pullback"
+        assert decision.advisory_plan["trim_shares"] == 300
+        assert decision.advisory_plan["trim_trigger_price"] == 2440.4
+        assert decision.advisory_plan["reentry_watch_price"] == 2162.25
+        assert decision.advisory_plan["max_reentry_shares"] == 300
+        assert decision.advisory_plan["reentry_allowed_after_trim"] is True
 
 
 class TestCLIFixture:

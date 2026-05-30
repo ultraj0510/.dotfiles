@@ -271,20 +271,34 @@ def _protective_stop_price(signal_info: dict, entry_price: float, atr: float) ->
     return None
 
 
-def _rebound_trim_plan(signal_info: dict, current_qty: int, portfolio_weight_pct: float | None) -> dict:
+def _range_rebalance_plan(signal_info: dict, current_qty: int, portfolio_weight_pct: float | None) -> dict:
+    indicators = signal_info.get("indicators", {})
+    current_price = _indicator_float(signal_info, "close") or float(signal_info.get("current_price", 0))
     boll_mid = _indicator_float(signal_info, "boll")
-    ema10 = _indicator_float(signal_info, "close_10_ema")
-    vals = [v for v in [boll_mid, ema10] if v is not None]
-    trigger = max(vals) if vals else 0
-    trim_shares = min(600, max(300, (current_qty // 10 // 100) * 100))
+    boll_lb = _indicator_float(signal_info, "boll_lb")
+    atr = float(signal_info.get("atr", 0) or 0)
+
+    trim_shares = max(100, (current_qty // 10 // 100) * 100)
     if portfolio_weight_pct is not None and portfolio_weight_pct < 30:
         trim_shares = min(trim_shares, 300)
+    else:
+        trim_shares = min(trim_shares, 300)
+
+    trim_trigger = boll_mid or current_price
+    reentry_watch = boll_lb or (current_price - atr if atr else current_price * 0.95)
+
     return {
-        "mode": "trim_on_rebound",
+        "mode": "trim_on_rebound_rebuy_on_pullback",
         "trim_shares": trim_shares,
-        "trim_trigger_price": round(trigger, 2),
-        "buyback_allowed": False,
-        "buyback_block_reason": "downtrend_and_position_over_30pct",
+        "trim_trigger_price": round(trim_trigger, 2),
+        "reentry_watch_price": round(reentry_watch, 2),
+        "max_reentry_shares": trim_shares,
+        "reentry_allowed_after_trim": True,
+        "reentry_requires": [
+            "trim_filled",
+            "price_near_lower_band",
+            "rsi_below_40_or_reversal_signal",
+        ],
     }
 
 
@@ -376,7 +390,7 @@ def make_decision(
             risk_flags.append("position_over_cap_watch")
         elif unrealized_pnl_pct is not None and unrealized_pnl_pct < 0:
             risk_posture = "rebalance_on_strength"
-            advisory_plan = _rebound_trim_plan(signal_info, current_qty, portfolio_weight_pct)
+            advisory_plan = _range_rebalance_plan(signal_info, current_qty, portfolio_weight_pct)
             risk_flags.append("position_over_cap_loss_concentration")
         else:
             risk_flags.append("position_over_cap_watch")
