@@ -113,7 +113,7 @@ def _normalize_backtest(raw: dict | None) -> dict | None:
 
     wf = raw.get("walk_forward", {})
 
-    return {
+    normalized = {
         "total_trades": trade_count,
         "wins": wins,
         "losses": max(0, losses),
@@ -129,6 +129,14 @@ def _normalize_backtest(raw: dict | None) -> dict | None:
             "std_sharpe": wf.get("consensus", {}).get("std_sharpe"),
         },
     }
+
+    # Preserve strategy gate metadata when present
+    if "strategy_selection" in raw:
+        normalized["strategy_selection"] = raw["strategy_selection"]
+    if "benchmark_comparison" in raw:
+        normalized["benchmark_comparison"] = raw["benchmark_comparison"]
+
+    return normalized
 
 
 # --- Argument parsing ---

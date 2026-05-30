@@ -2087,7 +2087,7 @@ def main():
             wf_tuned = walk_forward(args.ticker, start_date, end_date, best["thresholds"], margin_mode=margin_mode)
             result["walk_forward_tuned"] = wf_tuned
 
-    output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False)
+    output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
     if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):

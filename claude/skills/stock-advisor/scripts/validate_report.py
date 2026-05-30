@@ -33,6 +33,18 @@ KNOWN_METADATA_TOKENS = {
     "thin_sample", "not_evaluable", "low_dispersion", "moderate_dispersion",
     "limited", "total_test_trades", "valid_test_windows", "data_quality",
     "stability_flag", "data_insufficient",
+    # Strategy gate tokens
+    "hold_baseline", "too_few_strategy_trades", "no_strategy_passed_tradeability_gate",
+    "strategy_underperforms_benchmark", "strategy_not_tradeable",
+    "strategy_beats_benchmark", "strategy_improves_risk_adjusted_return",
+    "strategy_selection", "benchmark_comparison", "selected_strategy",
+    "strategy_total_return", "benchmark_total_return", "excess_total_return",
+    "strategy_sharpe", "benchmark_sharpe", "excess_sharpe",
+    "strategy_max_drawdown", "benchmark_max_drawdown", "drawdown_not_worse",
+    "beats_benchmark_return", "beats_benchmark_sharpe",
+    "strategy_comparison",
+    # Default strategy names
+    "trend", "contrarian", "default",
 }
 
 
