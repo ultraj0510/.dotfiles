@@ -1804,13 +1804,13 @@ def main():
         if cached is not None:
             cached.pop("_config_hash", None)
             if args.output:
-                output_json = json.dumps(cached, ensure_ascii=False, indent=2, default=str, allow_nan=False)
+                output_json = json.dumps(cached, ensure_ascii=False, indent=2, default=str)
                 os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
                 with open(args.output, "w") as f:
                     f.write(output_json)
                 print(f"Output written to {args.output} (from cache)")
             else:
-                print(json.dumps(cached, ensure_ascii=False, indent=2, default=str, allow_nan=False))
+                print(json.dumps(cached, ensure_ascii=False, indent=2, default=str))
             if args.summary:
                 _print_summary(cached)
             return
