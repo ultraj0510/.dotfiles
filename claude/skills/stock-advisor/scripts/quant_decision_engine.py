@@ -29,6 +29,7 @@ from portfolio_optimizer import (
     MAX_POSITION_PCT,
 )
 from data_utils import safe_float
+from strategy_review import classify_strategy_posture
 
 # --- Normalization helpers ---
 
@@ -148,6 +149,8 @@ def parse_args():
     p.add_argument("--backtest-dir", required=True, help="Directory of backtest/*.json files")
     p.add_argument("--portfolio-analytics", required=True, help="Path to portfolio_analytics.json")
     p.add_argument("-o", "--output", required=True, help="Output path for quant_decisions.json")
+    p.add_argument("--strategy-risk-mode", choices=["defensive", "balanced", "aggressive"],
+                   default="balanced", help="Risk mode for candidate strategy execution")
     return p.parse_args()
 
 
@@ -329,6 +332,7 @@ def make_decision(
     backtest: dict | None,
     portfolio: dict,
     pa: dict,
+    strategy_risk_mode: str = "balanced",
 ) -> QuantDecision:
     """Produce a single QuantDecision for one ticker."""
     vetoes = []
@@ -517,16 +521,36 @@ def make_decision(
 
     max_pos_val = total_assets * MAX_POSITION_PCT if total_assets > 0 else 0
 
-    # Strategy tradeability guard: block technical actions when strategy is rejected
-    if bt:
-        selection = bt.get("strategy_selection", {})
-        if not selection.get("tradeable", True):
-            if "strategy_not_tradeable" not in risk_flags:
+    # Strategy policy: validated strategies trade normally; candidate strategies trade smaller.
+    # Only apply when backtest has strategy gate data (strategy_selection or benchmark_comparison).
+    if bt and (bt.get("strategy_selection") or bt.get("benchmark_comparison")):
+        bt_for_policy = dict(bt)
+        bt_for_policy["risk_posture"] = risk_posture
+        bt_for_policy["expected_value_after_cost_pct"] = ev
+        posture = classify_strategy_posture(bt_for_policy, risk_mode=strategy_risk_mode)
+        posture_name = posture["posture"]
+        size_multiplier = posture["size_multiplier"]
+
+        if posture_name == "candidate_strategy" and size_multiplier > 0:
+            if "candidate_strategy_reduced_size" not in risk_flags:
+                risk_flags.append("candidate_strategy_reduced_size")
+            if action in ("BUY", "SELL", "REDUCE") and order_shares > 0:
+                reduced_shares = int(order_shares * size_multiplier)
+                reduced_shares = (reduced_shares // 100) * 100
+                if reduced_shares <= 0 and order_shares >= 100:
+                    reduced_shares = 100
+                order_shares = min(order_shares, reduced_shares)
+                target_shares = min(target_shares, order_shares) if target_shares else target_shares
+                explanations.append(f"candidate strategy reduced size: {size_multiplier:.2f}x")
+
+        elif posture_name in ("hold_baseline", "profit_protection"):
+            if posture_name == "hold_baseline" and "strategy_not_tradeable" not in risk_flags:
                 risk_flags.append("strategy_not_tradeable")
             has_margin_urgency = any(v.startswith("margin_expiry_") for v in vetoes)
             if action in ("BUY", "SELL", "REDUCE") and not has_margin_urgency:
                 action = "HOLD"
                 order_shares = 0
+                target_shares = 0
                 order_type = "none"
                 explanations.append("technical signal blocked: strategy not tradeable")
 
@@ -600,7 +624,8 @@ def main():
     for ticker in tickers:
         signal_info = signal_map.get(ticker, {})
         bt = load_backtest(args.backtest_dir, ticker)
-        decision = make_decision(ticker, signal_info, bt, portfolio, pa)
+        decision = make_decision(ticker, signal_info, bt, portfolio, pa,
+                                 strategy_risk_mode=args.strategy_risk_mode)
         decisions.append(decision)
 
     # Serialize

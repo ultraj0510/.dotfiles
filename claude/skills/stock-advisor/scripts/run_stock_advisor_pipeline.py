@@ -70,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--watchlist", required=True, help="Path to watchlist.yaml")
     parser.add_argument("--results-dir", required=True, help="Output directory for artifacts")
     parser.add_argument("--date", default="", help="Reference date (YYYY-MM-DD), auto-detected from signals if empty")
+    parser.add_argument("--strategy-risk-mode", choices=["defensive", "balanced", "aggressive"],
+                        default="balanced", help="Risk mode for candidate strategy execution")
     return parser
 
 
@@ -130,6 +132,7 @@ def main() -> None:
         "--signals", str(signals_path),
         "--backtest-dir", str(backtest_dir),
         "--portfolio-analytics", str(analytics_path),
+        "--strategy-risk-mode", args.strategy_risk_mode,
         "-o", str(decisions_path),
     ])
 

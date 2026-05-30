@@ -224,7 +224,19 @@ def validate(
     if err:
         errors.append(err)
 
+    err = _check_forbidden_strategy_wording(report_text)
+    if err:
+        errors.append(err)
+
     return errors
+
+
+def _check_forbidden_strategy_wording(report_text: str) -> str | None:
+    forbidden = ["手動レンジ", "手動判断で売買", "裁量で売買"]
+    for token in forbidden:
+        if token in report_text:
+            return f"Forbidden discretionary wording found: {token}"
+    return None
 
 
 def _check_strategy_gate_table(report_text: str) -> str | None:

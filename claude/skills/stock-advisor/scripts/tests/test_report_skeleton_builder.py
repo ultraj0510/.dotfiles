@@ -280,15 +280,18 @@ def test_strategy_gate_summary_distinguishes_underperformance_from_quality_rejec
     assert "全銘柄でテクニカル戦略が買い持ち" not in markdown
 
 
-def test_report_strategy_summary_mentions_manual_range_plan():
+def test_report_strategy_summary_mentions_candidate_strategy():
     from report_skeleton_builder import render_strategy_review_summary
 
     markdown = render_strategy_review_summary({
-        "validated_trade_strategy": 0,
-        "manual_range_plan": 1,
-        "hold_baseline": 1,
+        "risk_mode": "balanced",
+        "validated_strategy": 0,
+        "candidate_strategy": 2,
+        "hold_baseline": 5,
+        "profit_protection": 1,
+        "automation_allowed": 2,
     })
 
-    assert "自動売買可: 0銘柄" in markdown
-    assert "手動レンジ計画: 1銘柄" in markdown
-    assert "買い持ち優先: 1銘柄" in markdown
+    assert "リスクモード: balanced" in markdown
+    assert "候補戦略（縮小執行）: 2銘柄" in markdown
+    assert "手動レンジ" not in markdown

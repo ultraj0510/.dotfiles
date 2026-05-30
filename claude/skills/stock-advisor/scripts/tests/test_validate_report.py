@@ -120,3 +120,11 @@ def test_rejects_wrong_position_count(tmp_path):
     )
     assert result.returncode == 1
     assert "position count mismatch" in result.stderr
+
+
+def test_validate_rejects_manual_range_wording():
+    from validate_report import _check_forbidden_strategy_wording
+
+    err = _check_forbidden_strategy_wording("戦略レビュー: 手動レンジ計画: 1銘柄")
+    assert err is not None
+    assert "手動レンジ" in err
