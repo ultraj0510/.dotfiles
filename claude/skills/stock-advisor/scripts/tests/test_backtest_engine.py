@@ -1,11 +1,13 @@
 """Unit tests for backtest_engine.py"""
 import sys
 import os
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backtest_engine import (
     _build_trade, simulate_trades, generate_signals, _compute_metrics,
     _empty_metrics, DEFAULT_MARGIN_PARAMS,
+    _compare_strategy_to_benchmark, _select_tradeable_strategy,
 )
 
 
@@ -227,3 +229,101 @@ def test_ic_filter_constant_inputs_do_not_warn():
         value = _safe_corrcoef([1, 1, 1, 1, 1], [0.01, 0.02, 0.03, 0.04, 0.05])
     assert value == 0.0
     assert not [w for w in caught if "invalid value encountered" in str(w.message)]
+
+
+def test_strategy_vs_benchmark_rejects_underperformer():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 264.10,
+            "sharpe_ratio": 0.8564,
+            "max_drawdown": -35.0,
+            "num_trades": 13,
+        },
+        benchmark_metrics={
+            "total_return": 7097.78,
+            "sharpe_ratio": 1.8095,
+            "max_drawdown": -42.0,
+        },
+    )
+
+    assert comparison["excess_total_return"] == pytest.approx(-6833.68)
+    assert comparison["excess_sharpe"] == pytest.approx(-0.9531)
+    assert comparison["beats_benchmark_return"] is False
+    assert comparison["beats_benchmark_sharpe"] is False
+    assert comparison["tradeable"] is False
+    assert comparison["reason"] == "strategy_underperforms_benchmark"
+
+
+def test_strategy_vs_benchmark_accepts_superior_risk_adjusted_strategy():
+    comparison = _compare_strategy_to_benchmark(
+        strategy_metrics={
+            "total_return": 180.0,
+            "sharpe_ratio": 1.45,
+            "max_drawdown": -18.0,
+            "num_trades": 9,
+        },
+        benchmark_metrics={
+            "total_return": 120.0,
+            "sharpe_ratio": 0.90,
+            "max_drawdown": -33.0,
+        },
+    )
+
+    assert comparison["excess_total_return"] == pytest.approx(60.0)
+    assert comparison["excess_sharpe"] == pytest.approx(0.55)
+    assert comparison["beats_benchmark_return"] is True
+    assert comparison["beats_benchmark_sharpe"] is True
+    assert comparison["tradeable"] is True
+    assert comparison["reason"] == "strategy_beats_benchmark"
+
+
+def test_select_strategy_returns_hold_baseline_when_no_strategy_is_tradeable():
+    comparison = {
+        "default": {
+            "baseline": {"total_return": 16.98, "sharpe_ratio": 0.2553, "num_trades": 13},
+            "benchmark": {"total_return": 353.05, "sharpe_ratio": 0.9476, "max_drawdown": -40.0},
+            "walk_forward": {"consensus": {"verdict": "unstable"}, "data_quality": "thin_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+        "trend": {
+            "baseline": {"total_return": 20.00, "sharpe_ratio": 0.30, "num_trades": 5},
+            "benchmark": {"total_return": 353.05, "sharpe_ratio": 0.9476, "max_drawdown": -40.0},
+            "walk_forward": {"consensus": {"verdict": "limited"}, "data_quality": "thin_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+    }
+
+    selected = _select_tradeable_strategy(comparison)
+
+    assert selected["selected_strategy"] == "hold_baseline"
+    assert selected["tradeable"] is False
+    assert selected["reason"] == "no_strategy_passed_tradeability_gate"
+
+
+def test_select_strategy_prefers_tradeable_robust_strategy():
+    comparison = {
+        "default": {
+            "baseline": {"total_return": 50.0, "sharpe_ratio": 0.60, "num_trades": 7},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "unstable"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": False, "reason": "strategy_underperforms_benchmark"},
+        },
+        "trend": {
+            "baseline": {"total_return": 130.0, "sharpe_ratio": 1.20, "num_trades": 8},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "robust"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": True, "reason": "strategy_beats_benchmark"},
+        },
+        "contrarian": {
+            "baseline": {"total_return": 125.0, "sharpe_ratio": 1.10, "num_trades": 8},
+            "benchmark": {"total_return": 75.0, "sharpe_ratio": 0.80, "max_drawdown": -25.0},
+            "walk_forward": {"consensus": {"verdict": "stable"}, "data_quality": "sufficient_oos_trades"},
+            "benchmark_comparison": {"tradeable": True, "reason": "strategy_beats_benchmark"},
+        },
+    }
+
+    selected = _select_tradeable_strategy(comparison)
+
+    assert selected["selected_strategy"] == "trend"
+    assert selected["tradeable"] is True
+    assert selected["reason"] == "strategy_passed_tradeability_gate"

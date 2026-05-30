@@ -1557,6 +1557,124 @@ def _compute_benchmark(ohlcv: pd.DataFrame, start_date: str, end_date: str) -> d
     }
 
 
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _compare_strategy_to_benchmark(strategy_metrics, benchmark_metrics):
+    strategy_return = _safe_float(strategy_metrics.get("total_return"))
+    benchmark_return = _safe_float(benchmark_metrics.get("total_return"))
+    strategy_sharpe = _safe_float(strategy_metrics.get("sharpe_ratio"))
+    benchmark_sharpe = _safe_float(benchmark_metrics.get("sharpe_ratio"))
+    strategy_drawdown = _safe_float(strategy_metrics.get("max_drawdown"))
+    benchmark_drawdown = _safe_float(benchmark_metrics.get("max_drawdown"))
+    trade_count = int(_safe_float(strategy_metrics.get("num_trades"), 0.0))
+
+    excess_return = round(strategy_return - benchmark_return, 4)
+    excess_sharpe = round(strategy_sharpe - benchmark_sharpe, 4)
+    beats_return = excess_return > 0
+    beats_sharpe = excess_sharpe > 0
+    drawdown_not_worse = strategy_drawdown >= benchmark_drawdown
+
+    if trade_count < 3:
+        tradeable = False
+        reason = "too_few_strategy_trades"
+    elif beats_return and beats_sharpe:
+        tradeable = True
+        reason = "strategy_beats_benchmark"
+    elif beats_sharpe and drawdown_not_worse and excess_return > -5.0:
+        tradeable = True
+        reason = "strategy_improves_risk_adjusted_return"
+    else:
+        tradeable = False
+        reason = "strategy_underperforms_benchmark"
+
+    return {
+        "strategy_total_return": strategy_return,
+        "benchmark_total_return": benchmark_return,
+        "excess_total_return": excess_return,
+        "strategy_sharpe": strategy_sharpe,
+        "benchmark_sharpe": benchmark_sharpe,
+        "excess_sharpe": excess_sharpe,
+        "strategy_max_drawdown": strategy_drawdown,
+        "benchmark_max_drawdown": benchmark_drawdown,
+        "drawdown_not_worse": drawdown_not_worse,
+        "trade_count": trade_count,
+        "beats_benchmark_return": beats_return,
+        "beats_benchmark_sharpe": beats_sharpe,
+        "tradeable": tradeable,
+        "reason": reason,
+    }
+
+
+WF_VERDICT_RANK = {
+    "robust": 3,
+    "stable": 2,
+    "limited": 1,
+    "unstable": 0,
+    "insufficient_data": 0,
+}
+
+
+def _strategy_selection_score(strategy_result):
+    baseline = strategy_result.get("baseline", {})
+    comparison = strategy_result.get("benchmark_comparison", {})
+    walk_forward = strategy_result.get("walk_forward", {})
+    consensus = walk_forward.get("consensus", {})
+    verdict = consensus.get("verdict", "insufficient_data")
+
+    return (
+        WF_VERDICT_RANK.get(verdict, 0),
+        _safe_float(comparison.get("excess_sharpe")),
+        _safe_float(comparison.get("excess_total_return")),
+        _safe_float(baseline.get("total_return")),
+    )
+
+
+def _select_tradeable_strategy(strategy_comparison):
+    candidates = []
+
+    for strategy_name, strategy_result in strategy_comparison.items():
+        comparison = strategy_result.get("benchmark_comparison", {})
+        walk_forward = strategy_result.get("walk_forward", {})
+        consensus = walk_forward.get("consensus", {})
+        verdict = consensus.get("verdict", "insufficient_data")
+        data_quality = walk_forward.get("data_quality", "unknown")
+
+        if not comparison.get("tradeable"):
+            continue
+        if verdict not in {"stable", "robust"}:
+            continue
+        if data_quality != "sufficient_oos_trades":
+            continue
+
+        candidates.append((strategy_name, strategy_result))
+
+    if not candidates:
+        return {
+            "selected_strategy": "hold_baseline",
+            "tradeable": False,
+            "reason": "no_strategy_passed_tradeability_gate",
+        }
+
+    selected_name, selected_result = max(
+        candidates,
+        key=lambda item: _strategy_selection_score(item[1]),
+    )
+    return {
+        "selected_strategy": selected_name,
+        "tradeable": True,
+        "reason": "strategy_passed_tradeability_gate",
+        "benchmark_comparison": selected_result.get("benchmark_comparison", {}),
+        "walk_forward": selected_result.get("walk_forward", {}),
+    }
+
+
 def _print_summary(result):
     """Print human-readable backtest summary (ASCII tables, 80-char width)."""
     b = result["baseline"]
@@ -1811,7 +1929,7 @@ def main():
     parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--output", "-o", help="Output JSON file path")
-    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all"],
+    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all", "auto"],
                         default="default", help="Strategy mode for signal generation")
     parser.add_argument("--no-cache", action="store_true",
                         help="Bypass backtest result cache")
@@ -1832,7 +1950,7 @@ def main():
         start_date = start_dt.strftime("%Y-%m-%d")
 
     # Check backtest result cache (must be after start_date is resolved)
-    if not args.no_cache and not args.tune and args.strategy != "all":
+    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
         cached = load_cached_result(args.ticker, args.strategy,
                                     start_date, end_date,
                                     max_age=args.cache_ttl)
@@ -1873,7 +1991,7 @@ def main():
             "cost_model": "commission_slippage_market_impact",
         }
 
-    if args.strategy == "all":
+    if args.strategy in ("all", "auto"):
         strategy_comparison = {}
         strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り"}
         for sm in ["default", "trend", "contrarian"]:
@@ -1885,21 +2003,57 @@ def main():
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
                                       margin_mode=margin_mode, strategy_mode=sm,
                                       execution_delay=execution_delay)
-            strategy_comparison[sm] = {
+            sc_result = {
                 "label": strategy_labels[sm],
                 "baseline": baseline,
                 "walk_forward": wf,
             }
-        # Use "default" as the primary result
+            sc_result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                baseline, result["benchmark"])
+            strategy_comparison[sm] = sc_result
+
         result["strategy_comparison"] = strategy_comparison
-        sig_df = generate_signals(args.ticker, start_date, end_date)
-        baseline = simulate_trades(sig_df, margin_mode=margin_mode,
-                                   execution_delay=execution_delay)
-        baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
-        result["baseline"] = baseline
-        wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
-                                  execution_delay=execution_delay)
-        result["walk_forward"] = wf
+
+        if args.strategy == "auto":
+            result["strategy_selection"] = _select_tradeable_strategy(strategy_comparison)
+            selected_strategy = result["strategy_selection"]["selected_strategy"]
+
+            if selected_strategy in strategy_comparison:
+                selected_result = strategy_comparison[selected_strategy]
+                result["baseline"] = selected_result.get("baseline", {})
+                result["walk_forward"] = selected_result.get("walk_forward", {})
+                result["benchmark_comparison"] = selected_result.get("benchmark_comparison", {})
+                # Use the selected strategy's signals for IC computation
+                sig_df = generate_signals(args.ticker, start_date, end_date,
+                                          strategy_mode=selected_strategy)
+            else:
+                # hold_baseline: keep default data but mark as untradeable
+                sig_df = generate_signals(args.ticker, start_date, end_date)
+                baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                           execution_delay=execution_delay)
+                baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
+                result["baseline"] = baseline
+                wf = walk_forward_rolling(args.ticker, start_date, end_date,
+                                          margin_mode=margin_mode,
+                                          execution_delay=execution_delay)
+                result["walk_forward"] = wf
+                result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                    baseline, result["benchmark"])
+        else:
+            # all mode: Use "default" as the primary result
+            sig_df = generate_signals(args.ticker, start_date, end_date)
+            baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                       execution_delay=execution_delay)
+            baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
+            result["baseline"] = baseline
+            wf = walk_forward_rolling(args.ticker, start_date, end_date,
+                                      margin_mode=margin_mode,
+                                      execution_delay=execution_delay)
+            result["walk_forward"] = wf
+            result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+                result.get("baseline", {}),
+                result.get("benchmark", {}),
+            )
     else:
         sig_df = generate_signals(args.ticker, start_date, end_date,
                                   strategy_mode=args.strategy)
@@ -1911,6 +2065,11 @@ def main():
         wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
                                   strategy_mode=args.strategy)
         result["walk_forward"] = wf
+
+        result["benchmark_comparison"] = _compare_strategy_to_benchmark(
+            result.get("baseline", {}),
+            result.get("benchmark", {}),
+        )
 
     # Signal IC (Information Coefficient)
     ic_result = compute_signal_ic(sig_df)
@@ -1931,7 +2090,7 @@ def main():
     output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False)
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
-    if not args.no_cache and not args.tune and args.strategy != "all":
+    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
         save_cached_result(args.ticker, args.strategy, start_date, end_date, result)
 
     if args.output:
