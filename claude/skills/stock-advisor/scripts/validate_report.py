@@ -220,7 +220,28 @@ def validate(
     if err:
         errors.append(err)
 
+    err = _check_strategy_gate_table(report_text)
+    if err:
+        errors.append(err)
+
     return errors
+
+
+def _check_strategy_gate_table(report_text: str) -> str | None:
+    lines = report_text.splitlines()
+    for idx, line in enumerate(lines):
+        if line.strip() == "## Strategy Gate":
+            table_lines = [l for l in lines[idx + 1: idx + 10] if l.startswith("|")]
+            if len(table_lines) >= 2:
+                expected = table_lines[0].count("|")
+                for table_line in table_lines[1:]:
+                    if table_line.count("|") != expected:
+                        return (
+                            f"Strategy Gate table column mismatch: "
+                            f"expected {expected} pipes, got {table_line.count('|')}"
+                        )
+            break
+    return None
 
 
 def main() -> None:

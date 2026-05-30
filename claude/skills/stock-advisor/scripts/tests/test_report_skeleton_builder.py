@@ -239,3 +239,56 @@ def test_report_shows_strategy_gate_for_untradeable_strategy():
     assert "hold_baseline" in markdown
     assert "strategy_underperforms_benchmark" in markdown
     assert "-2899.75" in markdown
+
+
+def test_strategy_gate_table_has_matching_column_counts():
+    from report_skeleton_builder import render_strategy_gate_section
+
+    markdown = render_strategy_gate_section([{
+        "ticker": "7974.T",
+        "strategy_selection": {"selected_strategy": "hold_baseline", "tradeable": False},
+        "benchmark_comparison": {
+            "strategy_total_return": 21.25,
+            "benchmark_total_return": 17.40,
+            "excess_total_return": 3.85,
+            "reason": "thin_oos_trades",
+        },
+    }])
+
+    header, delimiter, row = [line for line in markdown.splitlines() if line.startswith("|")]
+    assert header.count("|") == delimiter.count("|") == row.count("|")
+
+
+def test_strategy_gate_summary_distinguishes_underperformance_from_quality_rejection():
+    from report_skeleton_builder import render_strategy_gate_summary
+
+    markdown = render_strategy_gate_summary([
+        {
+            "ticker": "7974.T",
+            "strategy_selection": {"selected_strategy": "hold_baseline", "tradeable": False},
+            "benchmark_comparison": {"beats_benchmark_return": True, "beats_benchmark_sharpe": True, "reason": "too_few_strategy_trades"},
+        },
+        {
+            "ticker": "1515.T",
+            "strategy_selection": {"selected_strategy": "hold_baseline", "tradeable": False},
+            "benchmark_comparison": {"beats_benchmark_return": False, "beats_benchmark_sharpe": False, "reason": "strategy_underperforms_benchmark"},
+        },
+    ])
+
+    assert "B&Hに劣後: 1銘柄" in markdown
+    assert "検証品質不足: 1銘柄" in markdown
+    assert "全銘柄でテクニカル戦略が買い持ち" not in markdown
+
+
+def test_report_strategy_summary_mentions_manual_range_plan():
+    from report_skeleton_builder import render_strategy_review_summary
+
+    markdown = render_strategy_review_summary({
+        "validated_trade_strategy": 0,
+        "manual_range_plan": 1,
+        "hold_baseline": 1,
+    })
+
+    assert "自動売買可: 0銘柄" in markdown
+    assert "手動レンジ計画: 1銘柄" in markdown
+    assert "買い持ち優先: 1銘柄" in markdown

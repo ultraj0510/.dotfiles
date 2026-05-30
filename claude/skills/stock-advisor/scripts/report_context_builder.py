@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml
+from strategy_review import summarize_strategy_review
 
 
 class DateAwareEncoder(json.JSONEncoder):
@@ -173,6 +174,7 @@ def build_context(
         "watchlist": watchlist,
         "signals": signals,
         "backtest": backtest,
+        "strategy_review": summarize_strategy_review(backtest),
         "correlations": correlations,
         "quant_decisions": quant,
         "macro_context": build_macro_context(signals_data),

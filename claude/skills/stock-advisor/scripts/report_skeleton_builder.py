@@ -76,6 +76,38 @@ def render_strategy_gate_section(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_strategy_gate_summary(items: list[dict]) -> str:
+    underperform_count = 0
+    quality_count = 0
+    tradeable_count = 0
+
+    for item in items:
+        selection = item.get("strategy_selection", {})
+        comparison = item.get("benchmark_comparison", {})
+        if selection.get("tradeable"):
+            tradeable_count += 1
+        elif comparison.get("reason") in {"too_few_strategy_trades", "thin_oos_trades", "no_oos_trades"}:
+            quality_count += 1
+        elif not comparison.get("beats_benchmark_return") or not comparison.get("beats_benchmark_sharpe"):
+            underperform_count += 1
+        else:
+            quality_count += 1
+
+    return (
+        f"戦略ゲート: 採用可能 {tradeable_count}銘柄、"
+        f"B&Hに劣後: {underperform_count}銘柄、"
+        f"検証品質不足: {quality_count}銘柄。"
+    )
+
+
+def render_strategy_review_summary(summary: dict) -> str:
+    return (
+        f"戦略レビュー: 自動売買可: {summary.get('validated_trade_strategy', 0)}銘柄、"
+        f"手動レンジ計画: {summary.get('manual_range_plan', 0)}銘柄、"
+        f"買い持ち優先: {summary.get('hold_baseline', 0)}銘柄。"
+    )
+
+
 def build_report(context: dict) -> str:
     account = context.get("account", {})
     holdings = context.get("holdings", [])
@@ -111,6 +143,11 @@ def build_report(context: dict) -> str:
             pair = max_corr.get("pair", [])
             val = max_corr.get("value", "")
             lines.append(f"| 最大相関 | {'/'.join(pair)} ({val}) |")
+
+    strategy_review = context.get("strategy_review", {})
+    if strategy_review:
+        lines.append("")
+        lines.append(f"- **{render_strategy_review_summary(strategy_review)}**")
 
     lines.append("")
 
@@ -175,6 +212,7 @@ def build_report(context: dict) -> str:
 
     if strategy_items:
         lines.append(render_strategy_gate_section(strategy_items))
+        lines.append(f"- **{render_strategy_gate_summary(strategy_items)}**")
         lines.append("")
 
     # Section 3
