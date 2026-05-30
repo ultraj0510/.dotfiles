@@ -102,7 +102,14 @@ def build_backtest_results(backtest_dir: str) -> dict[str, dict]:
         entry["walk_forward"] = {
             "overfit_detected": wf.get("overfit_detected", False),
             "verdict": wf.get("consensus", {}).get("verdict", "unknown"),
+            "consensus": wf.get("consensus", {}),
+            "data_quality": wf.get("data_quality", ""),
         }
+        # Preserve strategy gate metadata when present
+        if "strategy_selection" in data:
+            entry["strategy_selection"] = data["strategy_selection"]
+        if "benchmark_comparison" in data:
+            entry["benchmark_comparison"] = data["benchmark_comparison"]
         results[ticker] = entry
     return results
 

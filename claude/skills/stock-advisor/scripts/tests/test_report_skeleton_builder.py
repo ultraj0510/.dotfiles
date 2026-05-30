@@ -208,3 +208,34 @@ def test_skeleton_generated_from_context_passes_validator():
         )
 
         assert errors == [], f"Validation failed: {errors}"
+
+
+def test_report_shows_strategy_gate_for_untradeable_strategy():
+    from report_skeleton_builder import render_strategy_gate_section
+
+    items = [{
+        "ticker": "285A.T",
+        "strategy_selection": {
+            "selected_strategy": "hold_baseline",
+            "tradeable": False,
+            "reason": "no_strategy_passed_tradeability_gate",
+        },
+        "benchmark_comparison": {
+            "strategy_total_return": 827.86,
+            "benchmark_total_return": 3727.61,
+            "excess_total_return": -2899.75,
+            "strategy_sharpe": 2.6337,
+            "benchmark_sharpe": 3.2424,
+            "excess_sharpe": -0.6087,
+            "tradeable": False,
+            "reason": "strategy_underperforms_benchmark",
+        },
+    }]
+
+    markdown = render_strategy_gate_section(items)
+
+    assert "## Strategy Gate" in markdown
+    assert "285A.T" in markdown
+    assert "hold_baseline" in markdown
+    assert "strategy_underperforms_benchmark" in markdown
+    assert "-2899.75" in markdown

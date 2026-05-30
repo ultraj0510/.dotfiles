@@ -47,6 +47,35 @@ def format_verdict(verdict: str) -> str:
     return mapping.get(verdict, verdict)
 
 
+def render_strategy_gate_section(items: list[dict]) -> str:
+    """Render strategy-vs-benchmark comparison table."""
+    lines = [
+        "## Strategy Gate",
+        "",
+        "| Ticker | Selected | Tradeable | Strategy Return | B&H Return | Excess Return | Reason |",
+        "|---|---:|---:|---:|---:|---:|---|",
+    ]
+
+    for item in items:
+        selection = item.get("strategy_selection", {})
+        comparison = item.get("benchmark_comparison", {})
+        ticker = item.get("ticker", "-")
+        selected = selection.get("selected_strategy", "unknown")
+        tradeable = "yes" if selection.get("tradeable") else "no"
+        strategy_return = comparison.get("strategy_total_return", 0.0)
+        benchmark_return = comparison.get("benchmark_total_return", 0.0)
+        excess_return = comparison.get("excess_total_return", 0.0)
+        reason = comparison.get("reason", selection.get("reason", "unknown"))
+
+        lines.append(
+            f"| {ticker} | {selected} | {tradeable} | {strategy_return:.2f}% | "
+            f"{benchmark_return:.2f}% | {excess_return:.2f}% | {reason} |"
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_report(context: dict) -> str:
     account = context.get("account", {})
     holdings = context.get("holdings", [])
@@ -124,6 +153,29 @@ def build_report(context: dict) -> str:
         lines.append("現在注文のある指示はありません。")
 
     lines.append("")
+
+    # Strategy Gate section
+    strategy_items = []
+    seen_gate_tickers = set()
+    for h in holdings:
+        ticker = h["ticker"]
+        if ticker in seen_gate_tickers:
+            continue
+        seen_gate_tickers.add(ticker)
+        dec = quant_decisions.get(ticker, {})
+        # Strategy gate data is in the backtest section of the context
+        bt = backtest.get(ticker, {})
+        item = {
+            "ticker": ticker,
+            "strategy_selection": bt.get("strategy_selection", {}),
+            "benchmark_comparison": bt.get("benchmark_comparison", {}),
+        }
+        if item["strategy_selection"] or item["benchmark_comparison"]:
+            strategy_items.append(item)
+
+    if strategy_items:
+        lines.append(render_strategy_gate_section(strategy_items))
+        lines.append("")
 
     # Section 3
     lines.append("## 銘柄別詳細")

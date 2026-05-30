@@ -183,3 +183,42 @@ def test_context_fixture_preserves_any_risk_flags_when_present(tmp_path):
         "negative_walk_forward",
         "position_over_cap_loss_concentration",
     ]
+
+
+def test_backtest_builder_preserves_strategy_gate(tmp_path):
+    import json
+    from report_context_builder import build_backtest_results
+
+    data = {
+        "ticker": "285A.T",
+        "baseline": {"sharpe_ratio": 2.63, "total_return": 827.86},
+        "walk_forward": {
+            "consensus": {"verdict": "limited"},
+            "data_quality": "thin_oos_trades",
+        },
+        "strategy_selection": {
+            "selected_strategy": "hold_baseline",
+            "tradeable": False,
+            "reason": "no_strategy_passed_tradeability_gate",
+        },
+        "benchmark_comparison": {
+            "strategy_total_return": 827.86,
+            "benchmark_total_return": 3727.61,
+            "excess_total_return": -2899.75,
+            "tradeable": False,
+            "reason": "strategy_underperforms_benchmark",
+        },
+    }
+
+    bt_dir = tmp_path / "backtest"
+    bt_dir.mkdir()
+    (bt_dir / "285A.T.json").write_text(json.dumps(data))
+
+    results = build_backtest_results(str(bt_dir))
+
+    assert "285A.T" in results
+    r = results["285A.T"]
+    assert r["strategy_selection"]["selected_strategy"] == "hold_baseline"
+    assert r["strategy_selection"]["tradeable"] is False
+    assert r["benchmark_comparison"]["excess_total_return"] == -2899.75
+    assert r["benchmark_comparison"]["reason"] == "strategy_underperforms_benchmark"
