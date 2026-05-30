@@ -151,6 +151,40 @@ def test_safe_spearmanr_returns_none_for_constant_input():
     assert pval is None
 
 
+def test_compute_signal_ic_does_not_emit_nan_for_constant_rule_signals():
+    import math
+    import pandas as pd
+    from backtest_engine import compute_signal_ic
+
+    signals_df = pd.DataFrame({
+        "close": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+        "signal": [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+        "signal_rule": ["momentum", "momentum", "momentum", "momentum", "momentum", "momentum", None, None, None, None],
+    })
+
+    result = compute_signal_ic(signals_df)
+
+    def walk(value):
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from walk(child)
+        else:
+            yield value
+
+    assert all(not (isinstance(value, float) and math.isnan(value)) for value in walk(result))
+
+
+def test_backtest_json_serialization_rejects_non_finite_values():
+    import json
+    import pytest
+
+    with pytest.raises(ValueError):
+        json.dumps({"ic": float("nan")}, allow_nan=False)
+
+
 def test_ic_filter_constant_inputs_do_not_warn():
     import warnings
     from backtest_engine import _safe_corrcoef

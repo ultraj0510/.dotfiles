@@ -945,14 +945,19 @@ def _safe_corrcoef(left, right) -> float:
 
 
 def _safe_spearmanr(signal_values, forward_returns) -> tuple:
-    """Safe spearmanr that returns None,None for degenerate inputs."""
+    """Safe spearmanr that returns None,None for degenerate inputs or NaN output."""
     if len(signal_values) < 2 or len(forward_returns) < 2:
         return None, None
     if len(set(signal_values)) <= 1 or len(set(forward_returns)) <= 1:
         return None, None
     from scipy.stats import spearmanr
     ic, pval = spearmanr(signal_values, forward_returns)
-    return float(ic), float(pval)
+    import numpy as np
+    if np.isnan(ic):
+        return None, None
+    if pval is not None and np.isnan(pval):
+        pval = None
+    return float(ic), float(pval) if pval is not None else None
 
 
 def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
@@ -1799,13 +1804,13 @@ def main():
         if cached is not None:
             cached.pop("_config_hash", None)
             if args.output:
-                output_json = json.dumps(cached, ensure_ascii=False, indent=2, default=str)
+                output_json = json.dumps(cached, ensure_ascii=False, indent=2, default=str, allow_nan=False)
                 os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
                 with open(args.output, "w") as f:
                     f.write(output_json)
                 print(f"Output written to {args.output} (from cache)")
             else:
-                print(json.dumps(cached, ensure_ascii=False, indent=2, default=str))
+                print(json.dumps(cached, ensure_ascii=False, indent=2, default=str, allow_nan=False))
             if args.summary:
                 _print_summary(cached)
             return
@@ -1888,7 +1893,7 @@ def main():
             wf_tuned = walk_forward(args.ticker, start_date, end_date, best["thresholds"], margin_mode=margin_mode)
             result["walk_forward_tuned"] = wf_tuned
 
-    output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False)
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
     if not args.no_cache and not args.tune and args.strategy != "all":
