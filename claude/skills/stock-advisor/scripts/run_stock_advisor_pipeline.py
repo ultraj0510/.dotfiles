@@ -106,7 +106,7 @@ def main() -> None:
         run([
             str(VENV_PYTHON), str(SCRIPTS_DIR / "backtest_engine.py"),
             "--ticker", ticker,
-            "--strategy", "default",
+            "--strategy", "auto",
             "--execution-delay",
             "--end", reference_date,
             "-o", str(out_path),
