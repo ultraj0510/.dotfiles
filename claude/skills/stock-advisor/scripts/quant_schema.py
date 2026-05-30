@@ -6,6 +6,31 @@ ORDER_TYPES = {"market", "limit", "none"}
 
 
 @dataclass
+class PositionDecision:
+    position_id: str
+    ticker: str
+    position_type: str
+    action: str
+    quantity: int
+    order_shares: int = 0
+    reason: str = ""
+    expiry_date: str | None = None
+    unrealized_pnl_pct: float | None = None
+
+    def __post_init__(self):
+        if self.action not in ACTIONS:
+            raise ValueError(f"action must be one of {ACTIONS}, got {self.action!r}")
+        if self.quantity < 0:
+            raise ValueError("quantity must be >= 0")
+        if self.order_shares < 0:
+            raise ValueError("order_shares must be >= 0")
+        if self.order_shares % 100 != 0:
+            raise ValueError("order_shares must be a 100-share lot")
+        if self.order_shares > self.quantity:
+            raise ValueError("order_shares must not exceed quantity")
+
+
+@dataclass
 class QuantDecision:
     ticker: str
     action: str
@@ -19,6 +44,7 @@ class QuantDecision:
     order_shares: int = 0
     order_type: str = "none"
     limit_price: float | None = None
+    position_decisions: list = field(default_factory=list)
     vetoes: list[str] = field(default_factory=list)
     explanations: list[str] = field(default_factory=list)
 

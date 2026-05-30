@@ -1,0 +1,1 @@
+{"baseline": {"trade_count": 18, "win_rate": 44.4, "avg_win_pct": 2.0, "avg_loss_pct": -2.5, "sharpe_ratio": -0.72, "kurtosis": 4.1}, "walk_forward": {"overfit_detected": true, "consensus": {"verdict": "insufficient_data", "n_passed": 0, "n_total": 4}}}

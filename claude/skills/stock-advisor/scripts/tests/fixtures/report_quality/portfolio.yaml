@@ -1,0 +1,27 @@
+account:
+  total_assets: 19661379
+  available_cash: 624634
+  margin_ratio: 1124.46
+holdings:
+  - ticker: 285A.T
+    name: キオクシア
+    position_type: 現物
+    quantity: 300
+    cost_price: 2900
+    current_price: 2195
+  - ticker: 5803.T
+    name: フジクラ
+    position_type: 現物
+    quantity: 200
+    cost_price: 4200
+    current_price: 4820
+  - ticker: 5803.T
+    name: フジクラ
+    position_type: 信用
+    quantity: 100
+    cost_price: 5200
+    current_price: 4820
+    expiry_date: 2026-07-15
+watchlist:
+  - ticker: 8411.T
+    name: みずほFG

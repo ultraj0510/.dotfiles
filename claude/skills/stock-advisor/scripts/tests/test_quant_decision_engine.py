@@ -115,6 +115,41 @@ class TestMakeDecision:
         assert "correlation_concentration" in d.vetoes
         assert d.order_shares == 900
 
+    def test_reduce_prefers_margin_lot_when_ticker_has_mixed_positions(self):
+        signal = {"action": "REDUCE", "current_price": 4820, "atr": 150, "reduce_shares": 100}
+        bt = {
+            "total_trades": 18, "wins": 8, "losses": 10,
+            "avg_win_pct": 2.0, "avg_loss_pct": -2.5,
+            "walk_forward": {
+                "sharpe_is": None, "sharpe_oos": None,
+                "verdict": "insufficient_data", "overfit_detected": True,
+            },
+        }
+        pf = make_portfolio(holdings=[
+            {"ticker": "5803.T", "quantity": 200, "current_price": 4820, "cost_price": 4200, "position_type": "現物"},
+            {"ticker": "5803.T", "quantity": 100, "current_price": 4820, "cost_price": 5200, "position_type": "信用", "expiry_date": "2026-07-15"},
+        ])
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.order_shares == 100
+        # Should have allocated to the margin position first
+        assert len(decision.position_decisions) >= 1
+        margin_allocs = [pd for pd in decision.position_decisions if pd.position_type == "信用"]
+        assert len(margin_allocs) >= 1
+        assert margin_allocs[0].order_shares == 100
+
+    def test_appreciation_driven_position_over_cap_becomes_watch_veto(self):
+        signal = {"action": "HOLD", "current_price": 2000, "atr": 50}
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "1515.T", "quantity": 1500, "current_price": 2000, "cost_price": 900, "position_type": "現物"}
+            ],
+            total_assets=10_000_000,
+        )
+        decision = make_decision("1515.T", signal, None, pf, {})
+        assert "position_over_cap_watch" in decision.vetoes
+        assert "position_over_cap_reduce" not in decision.vetoes
+        assert decision.action == "HOLD"
+
 
 class TestCLIFixture:
     """Run quant_decision_engine.py with test fixtures and verify output."""

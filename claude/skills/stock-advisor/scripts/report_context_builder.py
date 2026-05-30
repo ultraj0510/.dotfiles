@@ -1,0 +1,184 @@
+"""Build a deterministic report_context.json from all pipeline artifacts.
+
+Usage:
+    python report_context_builder.py \
+        --portfolio path/to/portfolio.yaml \
+        --signals path/to/signals.json \
+        --backtest-dir path/to/backtest/ \
+        --portfolio-analytics path/to/portfolio_analytics.json \
+        --quant-decisions path/to/quant_decisions.json \
+        -o output/report_context.json
+"""
+
+import argparse
+import datetime
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import yaml
+
+
+class DateAwareEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime.date objects by converting to ISO strings."""
+    def default(self, o):
+        if isinstance(o, datetime.date):
+            return o.isoformat()
+        return super().default(o)
+
+
+def load_portfolio(path: str) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def load_json(path: str) -> dict:
+    with open(path) as f:
+        return json.load(f)
+
+
+def build_account(portfolio: dict) -> dict:
+    acct = portfolio.get("account", {})
+    margin_ratio = acct.get("margin_ratio", 0)
+    return {
+        "total_assets": acct.get("total_assets", 0),
+        "available_cash": acct.get("available_cash", 0),
+        "margin_ratio": margin_ratio,
+        "margin_ratio_label": "委託保証金率",
+        "margin_ratio_text": f"{margin_ratio:.2f}%",
+    }
+
+
+def build_holdings(portfolio: dict) -> list[dict]:
+    return portfolio.get("holdings", [])
+
+
+def build_watchlist(portfolio: dict) -> list[dict]:
+    return portfolio.get("watchlist", [])
+
+
+def build_signals(signals_data: dict) -> dict[str, dict]:
+    """Build per-ticker signal info, preserving exact rule names."""
+    result = {}
+    for entry in signals_data.get("results", []):
+        ticker = entry["ticker"]
+        result[ticker] = {
+            "score": entry.get("score", {}),
+            "signals": [
+                {"type": s["type"], "rule": s["rule"], "strength": s["strength"]}
+                for s in entry.get("signals", [])
+            ],
+            "indicators": entry.get("indicators", {}),
+        }
+    return result
+
+
+def build_backtest_results(backtest_dir: str) -> dict[str, dict]:
+    """Load backtest JSON files, preserving walk_forward verdict as-is."""
+    results = {}
+    if not os.path.isdir(backtest_dir):
+        return results
+    for fname in os.listdir(backtest_dir):
+        if not fname.endswith(".json"):
+            continue
+        ticker = fname[: -len(".json")]
+        path = os.path.join(backtest_dir, fname)
+        with open(path) as f:
+            data = json.load(f)
+        entry = {"baseline": data.get("baseline", {})}
+        wf = data.get("walk_forward", {})
+        entry["walk_forward"] = {
+            "overfit_detected": wf.get("overfit_detected", False),
+            "verdict": wf.get("consensus", {}).get("verdict", "unknown"),
+        }
+        results[ticker] = entry
+    return results
+
+
+def build_portfolio_analytics(analytics_data: dict) -> dict:
+    return analytics_data.get("correlation", {})
+
+
+def build_quant_decisions(decisions_data: dict) -> dict[str, dict]:
+    """Build per-ticker decisions, mapping action directly as report_action."""
+    result = {
+        "generated_at": decisions_data.get("generated_at"),
+        "decisions": {},
+    }
+    for d in decisions_data.get("decisions", []):
+        ticker = d["ticker"]
+        result["decisions"][ticker] = {
+            "report_action": d["action"],
+            "confidence": d["confidence"],
+            "order_shares": d["order_shares"],
+            "order_type": d["order_type"],
+            "limit_price": d["limit_price"],
+            "vetoes": d.get("vetoes", []),
+            "explanations": d.get("explanations", []),
+        }
+    return result
+
+
+def build_context(
+    portfolio_path: str,
+    signals_path: str,
+    backtest_dir: str,
+    analytics_path: str,
+    decisions_path: str,
+) -> dict:
+    portfolio = load_portfolio(portfolio_path)
+    signals_data = load_json(signals_path)
+    analytics_data = load_json(analytics_path)
+    decisions_data = load_json(decisions_path)
+
+    account = build_account(portfolio)
+    holdings = build_holdings(portfolio)
+    watchlist = build_watchlist(portfolio)
+    signals = build_signals(signals_data)
+    backtest = build_backtest_results(backtest_dir)
+    correlations = build_portfolio_analytics(analytics_data)
+    quant = build_quant_decisions(decisions_data)
+
+    return {
+        "reference_date": signals_data.get("reference_date", ""),
+        "account": account,
+        "holdings": holdings,
+        "watchlist": watchlist,
+        "signals": signals,
+        "backtest": backtest,
+        "correlations": correlations,
+        "quant_decisions": quant,
+        "macro_context": signals_data.get("macro_context", {}),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Build report_context.json from pipeline artifacts"
+    )
+    parser.add_argument("--portfolio", required=True)
+    parser.add_argument("--signals", required=True)
+    parser.add_argument("--backtest-dir", required=True)
+    parser.add_argument("--portfolio-analytics", required=True)
+    parser.add_argument("--quant-decisions", required=True)
+    parser.add_argument("-o", "--output", required=True)
+    args = parser.parse_args()
+
+    context = build_context(
+        portfolio_path=args.portfolio,
+        signals_path=args.signals,
+        backtest_dir=args.backtest_dir,
+        analytics_path=args.portfolio_analytics,
+        decisions_path=args.quant_decisions,
+    )
+
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(context, f, ensure_ascii=False, indent=2, cls=DateAwareEncoder)
+    print(f"Report context written to {args.output}")
+
+
+if __name__ == "__main__":
+    main()

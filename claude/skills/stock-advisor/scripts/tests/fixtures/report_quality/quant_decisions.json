@@ -1,0 +1,35 @@
+{
+  "generated_at": null,
+  "decisions": [
+    {
+      "ticker": "285A.T",
+      "action": "REDUCE",
+      "confidence": "moderate",
+      "order_shares": 100,
+      "order_type": "limit",
+      "limit_price": 2195,
+      "vetoes": ["position_over_cap"],
+      "explanations": ["limit sell 100sh"]
+    },
+    {
+      "ticker": "5803.T",
+      "action": "REDUCE",
+      "confidence": "moderate",
+      "order_shares": 300,
+      "order_type": "limit",
+      "limit_price": 4820,
+      "vetoes": ["negative_walk_forward"],
+      "explanations": ["limit sell 300sh"]
+    },
+    {
+      "ticker": "8411.T",
+      "action": "HOLD",
+      "confidence": "low",
+      "order_shares": 0,
+      "order_type": "none",
+      "limit_price": null,
+      "vetoes": ["low_sample"],
+      "explanations": ["watchlist only"]
+    }
+  ]
+}
