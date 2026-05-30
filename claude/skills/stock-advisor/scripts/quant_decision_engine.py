@@ -509,6 +509,19 @@ def make_decision(
 
     max_pos_val = total_assets * MAX_POSITION_PCT if total_assets > 0 else 0
 
+    # Strategy tradeability guard: block technical actions when strategy is rejected
+    if bt:
+        selection = bt.get("strategy_selection", {})
+        if not selection.get("tradeable", True):
+            if "strategy_not_tradeable" not in risk_flags:
+                risk_flags.append("strategy_not_tradeable")
+            has_margin_urgency = any(v.startswith("margin_expiry_") for v in vetoes)
+            if action in ("BUY", "SELL", "REDUCE") and not has_margin_urgency:
+                action = "HOLD"
+                order_shares = 0
+                order_type = "none"
+                explanations.append("technical signal blocked: strategy not tradeable")
+
     return QuantDecision(
         ticker=ticker,
         action=action,

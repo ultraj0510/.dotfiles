@@ -336,6 +336,80 @@ class TestMakeDecision:
         assert "position_over_cap_watch" in decision.risk_flags
         assert decision.confidence == "moderate"
 
+    def test_rejected_strategy_blocks_technical_sell(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14, "losses": 19,
+            "avg_win_pct": 25.25, "avg_loss_pct": -6.94,
+            "walk_forward": {"consensus": {"verdict": "unstable"}},
+            "strategy_selection": {
+                "selected_strategy": "hold_baseline",
+                "tradeable": False,
+                "reason": "no_strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 300, "current_price": 4771, "cost_price": 4800, "position_type": "現物"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert "strategy_not_tradeable" in decision.risk_flags
+        assert decision.order_shares == 0
+
+    def test_tradeable_strategy_allows_technical_action(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14, "losses": 19,
+            "avg_win_pct": 25.25, "avg_loss_pct": -6.94,
+            "walk_forward": {"consensus": {"verdict": "robust"}},
+            "strategy_selection": {
+                "selected_strategy": "trend",
+                "tradeable": True,
+                "reason": "strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 300, "current_price": 4771, "cost_price": 4800, "position_type": "現物"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert "strategy_not_tradeable" not in decision.risk_flags
+        assert decision.order_shares == 300
+
+    def test_rejected_strategy_does_not_block_credit_expiry(self):
+        signal = {"action": "REDUCE", "current_price": 2397, "atr": 173.98, "reduce_shares": 300}
+        bt = {
+            "total_trades": 29,
+            "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"consensus": {"verdict": "unstable"}},
+            "strategy_selection": {
+                "selected_strategy": "hold_baseline",
+                "tradeable": False,
+                "reason": "no_strategy_passed_tradeability_gate",
+            },
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "信用", "expiry_date": "2026-06-15"},
+            ],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert "strategy_not_tradeable" in decision.risk_flags
+        assert "margin_expiry_urgent" in decision.vetoes
+        # Margin urgency allows risk reduction despite rejected strategy
+        assert decision.action == "REDUCE", \
+            f"Expected REDUCE (margin urgency override), got {decision.action}"
+
     def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
         # Renamed: now exercises the range rebalance plan (same logic, broader advisory metadata)
         signal = {
