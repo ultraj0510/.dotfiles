@@ -232,7 +232,7 @@ def validate(
 
 
 def _check_forbidden_strategy_wording(report_text: str) -> str | None:
-    forbidden = ["手動レンジ", "手動判断で売買", "裁量で売買"]
+    forbidden = ["手動レンジ", "手動判断", "裁量で売買"]
     for token in forbidden:
         if token in report_text:
             return f"Forbidden discretionary wording found: {token}"
@@ -243,7 +243,7 @@ def _check_strategy_gate_table(report_text: str) -> str | None:
     lines = report_text.splitlines()
     for idx, line in enumerate(lines):
         if line.strip() == "## Strategy Gate":
-            table_lines = [l for l in lines[idx + 1: idx + 10] if l.startswith("|")]
+            table_lines = [l for l in lines[idx + 1: idx + 12] if l.startswith("|")]
             if len(table_lines) >= 2:
                 expected = table_lines[0].count("|")
                 for table_line in table_lines[1:]:

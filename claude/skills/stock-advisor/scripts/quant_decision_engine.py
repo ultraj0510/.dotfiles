@@ -113,6 +113,7 @@ def _normalize_backtest(raw: dict | None) -> dict | None:
     losses = trade_count - wins
 
     wf = raw.get("walk_forward", {})
+    consensus = wf.get("consensus", {})
 
     normalized = {
         "total_trades": trade_count,
@@ -123,11 +124,14 @@ def _normalize_backtest(raw: dict | None) -> dict | None:
         "walk_forward": {
             "sharpe_is": wf.get("train_metrics", {}).get("sharpe_ratio"),
             "sharpe_oos": wf.get("test_metrics", {}).get("sharpe_ratio"),
-            "verdict": wf.get("consensus", {}).get("verdict"),
+            "verdict": consensus.get("verdict"),
+            "data_quality": consensus.get("data_quality"),
+            "total_test_trades": consensus.get("total_test_trades"),
             "sharpe_diff_pct": wf.get("sharpe_diff_pct"),
             "overfit_detected": wf.get("overfit_detected"),
-            "mean_sharpe": wf.get("consensus", {}).get("mean_sharpe"),
-            "std_sharpe": wf.get("consensus", {}).get("std_sharpe"),
+            "mean_sharpe": consensus.get("mean_sharpe"),
+            "std_sharpe": consensus.get("std_sharpe"),
+            "consensus": consensus,
         },
     }
 
@@ -523,6 +527,8 @@ def make_decision(
 
     # Strategy policy: validated strategies trade normally; candidate strategies trade smaller.
     # Only apply when backtest has strategy gate data (strategy_selection or benchmark_comparison).
+    strategy_posture = {}
+    strategy_size_multiplier = 0.0
     if bt and (bt.get("strategy_selection") or bt.get("benchmark_comparison")):
         bt_for_policy = dict(bt)
         bt_for_policy["risk_posture"] = risk_posture
@@ -530,6 +536,8 @@ def make_decision(
         posture = classify_strategy_posture(bt_for_policy, risk_mode=strategy_risk_mode)
         posture_name = posture["posture"]
         size_multiplier = posture["size_multiplier"]
+        strategy_posture = posture
+        strategy_size_multiplier = size_multiplier
 
         if posture_name == "candidate_strategy" and size_multiplier > 0:
             if "candidate_strategy_reduced_size" not in risk_flags:
@@ -578,6 +586,9 @@ def make_decision(
         vetoes=vetoes,
         risk_flags=risk_flags,
         explanations=explanations,
+        strategy_risk_mode=strategy_risk_mode,
+        strategy_posture=strategy_posture,
+        strategy_size_multiplier=strategy_size_multiplier,
     )
 
 
@@ -668,6 +679,9 @@ def main():
                 "vetoes": d.vetoes,
                 "risk_flags": d.risk_flags,
                 "explanations": d.explanations,
+                "strategy_risk_mode": d.strategy_risk_mode,
+                "strategy_posture": d.strategy_posture,
+                "strategy_size_multiplier": d.strategy_size_multiplier,
             }
             for d in decisions
         ],

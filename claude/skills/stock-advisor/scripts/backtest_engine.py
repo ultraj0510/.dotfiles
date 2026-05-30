@@ -174,6 +174,10 @@ STRATEGY_ALLOWED_RULES = {
         "buy": {"oversold_reversal"},
         "sell": {"overbought", "momentum_breakdown", "drawdown_stop"},
     },
+    "balanced_frequency": {
+        "buy": {"oversold_reversal", "ma_support_bounce", "pullback_reentry"},
+        "sell": {"overbought", "range_trim", "momentum_breakdown"},
+    },
 }
 
 
@@ -265,6 +269,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
         if low_val is None:
             low_val = 0
         boll_lb = safe_float(indicator_data["boll_lb"].get(d))
+        boll_ub = safe_float(indicator_data["boll_ub"].get(d))
 
         # Compute trend state for filter and adaptive logic
         trend_state = compute_trend_state({
@@ -354,6 +359,16 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             if _is_rule_allowed("ma_support_bounce", 1, strategy_mode) and ic_filter.get("ma_support_bounce", True):
                 contributions.append(("ma_support_bounce", 1, st, STRENGTH_WEIGHT[st]))
 
+        # Pullback reentry BUY (balanced_frequency)
+        if (
+            sma_50 and close_val and sma_50 * 0.96 <= close_val <= sma_50 * 1.01
+            and rsi is not None and 35 <= rsi <= 50
+            and ret_5d is not None and ret_5d > -3
+        ):
+            st = "moderate" if rsi < 42 else "weak"
+            if _is_rule_allowed("pullback_reentry", 1, strategy_mode) and ic_filter.get("pullback_reentry", True):
+                contributions.append(("pullback_reentry", 1, st, STRENGTH_WEIGHT[st]))
+
         # --- SELL rules ---
         # Overbought SELL
         if (rsi is not None and rsi > thresholds["rsi_upper"]
@@ -361,6 +376,16 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
             st = "strong" if (rsi and rsi > 80 and vol_ratio and safe_float(vol_ratio) > 1.2) else "moderate"
             if _is_rule_allowed("overbought", -1, strategy_mode) and ic_filter.get("overbought", True):
                 contributions.append(("overbought", -1, st, -STRENGTH_WEIGHT[st]))
+
+        # Range trim SELL (balanced_frequency)
+        if (
+            boll_ub and close_val and close_val >= boll_ub * 0.98
+            and rsi is not None and rsi >= 60
+            and ret_5d is not None and ret_5d > 3
+        ):
+            st = "moderate" if (rsi and rsi >= 68) else "weak"
+            if _is_rule_allowed("range_trim", -1, strategy_mode) and ic_filter.get("range_trim", True):
+                contributions.append(("range_trim", -1, st, -STRENGTH_WEIGHT[st]))
 
         # Momentum breakdown SELL
         if (ret_5d is not None and ret_5d < thresholds["breakdown_5d"]
@@ -1662,8 +1687,16 @@ def _strategy_selection_score(strategy_result):
     )
 
 
-def _select_tradeable_strategy(strategy_comparison):
+def _trial_penalty_min_excess_sharpe(trial_count):
+    trials = max(int(trial_count or 1), 1)
+    if trials <= 3:
+        return 0.0
+    return min(0.05 + 0.01 * (trials - 3), 0.15)
+
+
+def _select_tradeable_strategy(strategy_comparison, trial_count=None):
     candidates = []
+    penalty_rejected = False
 
     for strategy_name, strategy_result in strategy_comparison.items():
         comparison = strategy_result.get("benchmark_comparison", {})
@@ -1679,13 +1712,20 @@ def _select_tradeable_strategy(strategy_comparison):
         if data_quality != "sufficient_oos_trades":
             continue
 
+        # Trial penalty: more strategy variants → higher bar for edge
+        min_excess_sharpe = _trial_penalty_min_excess_sharpe(trial_count or len(strategy_comparison))
+        if _safe_float(comparison.get("excess_sharpe")) < min_excess_sharpe:
+            penalty_rejected = True
+            continue
+
         candidates.append((strategy_name, strategy_result))
 
     if not candidates:
+        reason = "strategy_edge_too_small_after_trial_penalty" if penalty_rejected else "no_strategy_passed_tradeability_gate"
         return {
             "selected_strategy": "hold_baseline",
             "tradeable": False,
-            "reason": "no_strategy_passed_tradeability_gate",
+            "reason": reason,
         }
 
     selected_name, selected_result = max(
@@ -1955,7 +1995,7 @@ def main():
     parser.add_argument("--margin", action="store_true", help="Enable margin trading (short + costs)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--output", "-o", help="Output JSON file path")
-    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "all", "auto"],
+    parser.add_argument("--strategy", choices=["default", "trend", "contrarian", "balanced_frequency", "all", "auto"],
                         default="default", help="Strategy mode for signal generation")
     parser.add_argument("--no-cache", action="store_true",
                         help="Bypass backtest result cache")
@@ -2019,8 +2059,8 @@ def main():
 
     if args.strategy in ("all", "auto"):
         strategy_comparison = {}
-        strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り"}
-        for sm in ["default", "trend", "contrarian"]:
+        strategy_labels = {"default": "デフォルト(複合)", "trend": "トレンドフォロー", "contrarian": "逆張り", "balanced_frequency": "頻度改善(押し目+レンジ)"}
+        for sm in ["default", "trend", "contrarian", "balanced_frequency"]:
             sig_df = generate_signals(args.ticker, start_date, end_date,
                                       strategy_mode=sm)
             baseline = simulate_trades(sig_df, margin_mode=margin_mode,

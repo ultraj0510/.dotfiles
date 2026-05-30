@@ -55,6 +55,9 @@ class QuantDecision:
     vetoes: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
     explanations: list[str] = field(default_factory=list)
+    strategy_risk_mode: str = "balanced"
+    strategy_posture: dict = field(default_factory=dict)
+    strategy_size_multiplier: float = 0.0
 
     def __post_init__(self):
         if self.action not in ACTIONS:

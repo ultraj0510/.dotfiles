@@ -146,6 +146,7 @@ def main() -> None:
         "--backtest-dir", str(backtest_dir),
         "--portfolio-analytics", str(analytics_path),
         "--quant-decisions", str(decisions_path),
+        "--strategy-risk-mode", args.strategy_risk_mode,
         "-o", str(context_path),
     ])
 
@@ -153,6 +154,7 @@ def main() -> None:
     manifest = {
         "results_dir": str(results_dir),
         "reference_date": reference_date,
+        "strategy_risk_mode": args.strategy_risk_mode,
         "tickers": tickers,
         "artifacts": {
             "signals": str(signals_path),

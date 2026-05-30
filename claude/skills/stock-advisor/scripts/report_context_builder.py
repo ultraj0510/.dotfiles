@@ -153,6 +153,7 @@ def build_context(
     backtest_dir: str,
     analytics_path: str,
     decisions_path: str,
+    strategy_risk_mode: str = "balanced",
 ) -> dict:
     portfolio = load_portfolio(portfolio_path)
     signals_data = load_json(signals_path)
@@ -174,7 +175,8 @@ def build_context(
         "watchlist": watchlist,
         "signals": signals,
         "backtest": backtest,
-        "strategy_review": summarize_strategy_review(backtest),
+        "strategy_review": summarize_strategy_review(backtest, risk_mode=strategy_risk_mode),
+        "strategy_risk_mode": strategy_risk_mode,
         "correlations": correlations,
         "quant_decisions": quant,
         "macro_context": build_macro_context(signals_data),
@@ -191,6 +193,8 @@ def main():
     parser.add_argument("--portfolio-analytics", required=True)
     parser.add_argument("--quant-decisions", required=True)
     parser.add_argument("-o", "--output", required=True)
+    parser.add_argument("--strategy-risk-mode", choices=["defensive", "balanced", "aggressive"],
+                        default="balanced", help="Risk mode for strategy review")
     args = parser.parse_args()
 
     context = build_context(
@@ -198,6 +202,7 @@ def main():
         signals_path=args.signals,
         backtest_dir=args.backtest_dir,
         analytics_path=args.portfolio_analytics,
+        strategy_risk_mode=args.strategy_risk_mode,
         decisions_path=args.quant_decisions,
     )
 
