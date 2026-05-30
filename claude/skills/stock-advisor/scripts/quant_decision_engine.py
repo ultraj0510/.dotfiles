@@ -299,6 +299,7 @@ def make_decision(
 ) -> QuantDecision:
     """Produce a single QuantDecision for one ticker."""
     vetoes = []
+    risk_flags = []
     explanations = []
     account = portfolio.get("account", {})
     holdings = portfolio.get("holdings", [])
@@ -345,8 +346,18 @@ def make_decision(
         round_trip_cost_pct=0.5,
     )
 
-    vetoes += reliability_vetoes(trade_count, p_win_shrunk, ev, wf)
-    vetoes += margin_expiry_vetoes(expiry_date)
+    raw_reliability_flags = reliability_vetoes(trade_count, p_win_shrunk, ev, wf)
+    margin_flags = margin_expiry_vetoes(expiry_date)
+
+    # Classify: BUY-blocking flags go to vetoes; others are risk_flags
+    buy_blocking_flags = {"negative_ev", "negative_walk_forward", "low_sample", "overfit_walk_forward"}
+    if signal_action == "BUY":
+        vetoes += [flag for flag in raw_reliability_flags if flag in buy_blocking_flags]
+        risk_flags += [flag for flag in raw_reliability_flags if flag not in buy_blocking_flags]
+    else:
+        risk_flags += raw_reliability_flags
+
+    vetoes += margin_flags
     risk_posture = "neutral"
     protective_stop = None
     advisory_plan = {}
@@ -362,13 +373,13 @@ def make_decision(
                 "stop_source": "close_10_ema_or_2atr",
                 "sell_only_if_stop_breaks": True,
             }
-            vetoes.append("position_over_cap_watch")
+            risk_flags.append("position_over_cap_watch")
         elif unrealized_pnl_pct is not None and unrealized_pnl_pct < 0:
             risk_posture = "rebalance_on_strength"
             advisory_plan = _rebound_trim_plan(signal_info, current_qty, portfolio_weight_pct)
-            vetoes.append("position_over_cap_loss_concentration")
+            risk_flags.append("position_over_cap_loss_concentration")
         else:
-            vetoes.append("position_over_cap_watch")
+            risk_flags.append("position_over_cap_watch")
 
     # --- Correlation check ---
     corr_concentration = False
@@ -493,6 +504,7 @@ def make_decision(
         downside_10pct_yen=metrics["downside_10pct_yen"],
         advisory_plan=advisory_plan,
         vetoes=vetoes,
+        risk_flags=risk_flags,
         explanations=explanations,
     )
 
@@ -581,6 +593,7 @@ def main():
                     for pd in d.position_decisions
                 ],
                 "vetoes": d.vetoes,
+                "risk_flags": d.risk_flags,
                 "explanations": d.explanations,
             }
             for d in decisions

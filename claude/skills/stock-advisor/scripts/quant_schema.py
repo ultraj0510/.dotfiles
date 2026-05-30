@@ -53,6 +53,7 @@ class QuantDecision:
     advisory_plan: dict = field(default_factory=dict)
     position_decisions: list = field(default_factory=list)
     vetoes: list[str] = field(default_factory=list)
+    risk_flags: list[str] = field(default_factory=list)
     explanations: list[str] = field(default_factory=list)
 
     def __post_init__(self):

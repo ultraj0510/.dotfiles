@@ -146,8 +146,7 @@ class TestMakeDecision:
             total_assets=10_000_000,
         )
         decision = make_decision("1515.T", signal, None, pf, {})
-        assert "position_over_cap_watch" in decision.vetoes
-        assert "position_over_cap_reduce" not in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
         assert decision.action == "HOLD"
 
 
@@ -185,9 +184,63 @@ class TestMakeDecision:
         assert decision.order_shares == 0
         assert decision.risk_posture == "protect_profit"
         assert "single_lot_full_exit_guard" in decision.vetoes
-        assert "position_over_cap_watch" in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
         assert decision.protective_stop_price == 58362.71
         assert decision.downside_10pct_yen == 658500
+
+    def test_reduce_with_negative_walk_forward_reports_risk_flag_not_blocking_veto(self):
+        signal = {"action": "REDUCE", "current_price": 4771, "atr": 538.65, "reduce_shares": 300}
+        bt = {
+            "total_trades": 33,
+            "wins": 14,
+            "losses": 19,
+            "avg_win_pct": 25.25,
+            "avg_loss_pct": -6.94,
+            "walk_forward": {"sharpe_is": 0.8, "sharpe_oos": -0.3, "verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "5803.T", "quantity": 200, "current_price": 4771, "cost_price": 4600, "position_type": "現物"},
+                {"ticker": "5803.T", "quantity": 100, "current_price": 4771, "cost_price": 5321, "position_type": "信用"},
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("5803.T", signal, bt, pf, {})
+        assert decision.action == "REDUCE"
+        assert decision.order_shares == 300
+        assert "negative_walk_forward" not in decision.vetoes
+        assert "negative_walk_forward" in decision.risk_flags
+
+    def test_buy_with_negative_walk_forward_remains_blocked_veto(self):
+        signal = {"action": "BUY", "current_price": 1000, "atr": 20}
+        bt = {
+            "total_trades": 20,
+            "wins": 8,
+            "losses": 12,
+            "avg_win_pct": 5.0,
+            "avg_loss_pct": -2.0,
+            "walk_forward": {"sharpe_is": 0.5, "sharpe_oos": -0.3, "verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(total_assets=10_000_000, available_cash=2_000_000)
+        decision = make_decision("7203.T", signal, bt, pf, {})
+        assert decision.action == "NO_TRADE"
+        assert "negative_walk_forward" in decision.vetoes
+        assert "negative_walk_forward" not in decision.risk_flags
+
+    def test_position_concentration_watch_is_risk_flag_not_veto(self):
+        signal = {"action": "HOLD", "current_price": 65850, "atr": 4695.38}
+        pf = make_portfolio(
+            holdings=[
+                {"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}
+            ],
+            total_assets=19661379,
+            available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, None, pf, {})
+        assert decision.action == "HOLD"
+        assert "position_over_cap_watch" not in decision.vetoes
+        assert "position_over_cap_watch" in decision.risk_flags
 
     def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
         signal = {
@@ -212,7 +265,7 @@ class TestMakeDecision:
         assert decision.action == "HOLD"
         assert decision.order_shares == 0
         assert decision.risk_posture == "rebalance_on_strength"
-        assert "position_over_cap_loss_concentration" in decision.vetoes
+        assert "position_over_cap_loss_concentration" in decision.risk_flags
         assert decision.portfolio_weight_pct == 36.57
         assert decision.cost_basis_weight_pct == 54.20
         assert decision.unrealized_pnl_pct == -32.52

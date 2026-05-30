@@ -59,6 +59,20 @@ class TestPositionDecision:
             )
 
 
+def test_quant_decision_accepts_risk_flags():
+    decision = QuantDecision(
+        ticker="5803.T",
+        action="REDUCE",
+        order_shares=100,
+        order_type="limit",
+        limit_price=4771.0,
+        risk_flags=["negative_walk_forward"],
+        vetoes=[],
+    )
+    assert decision.risk_flags == ["negative_walk_forward"]
+    assert decision.vetoes == []
+
+
 def test_quant_decision_allows_risk_posture_metadata():
     decision = QuantDecision(
         ticker="285A.T", action="HOLD",
