@@ -27,6 +27,12 @@ KNOWN_METADATA_TOKENS = {
     # Trend states (from signal_engine trend_state field)
     "strong_uptrend", "strong_downtrend", "downtrend", "ranging",
     "uptrend",
+    # Walk-forward data quality / stability fields
+    "thin_oos_trades", "no_oos_trades", "sufficient_oos_trades",
+    "insufficient_price_history", "overfit_majority", "some_overfit",
+    "thin_sample", "not_evaluable", "low_dispersion", "moderate_dispersion",
+    "limited", "total_test_trades", "valid_test_windows", "data_quality",
+    "stability_flag", "data_insufficient",
 }
 
 

@@ -40,7 +40,9 @@ def advisory_mode_ja(mode: str) -> str:
 
 def format_verdict(verdict: str) -> str:
     mapping = {"robust": "頑健", "stable": "安定",
-               "unstable": "不安定", "insufficient_data": "データ不足",
+               "unstable": "不安定", "limited": "限定的",
+               "data_insufficient": "価格履歴不足",
+               "insufficient_data": "データ不足",
                "no_trades": "取引なし", "unknown": "不明"}
     return mapping.get(verdict, verdict)
 
@@ -199,8 +201,13 @@ def build_report(context: dict) -> str:
                 lines.append(f"| 尖度 (kurtosis) | {kurt} |")
             if bt_wf:
                 wf_verdict = bt_wf.get("verdict", "")
+                consensus = bt_wf.get("consensus", {})
                 if wf_verdict:
                     lines.append(f"| WF判定 | {format_verdict(wf_verdict)} |")
+                if consensus.get("data_quality"):
+                    lines.append(f"| WFデータ品質 | {consensus['data_quality']} |")
+                if consensus.get("total_test_trades") is not None:
+                    lines.append(f"| WFテスト取引数 | {consensus['total_test_trades']} |")
                 if bt_wf.get("overfit_detected"):
                     lines.append(f"| 過学習 | 検出 |")
 

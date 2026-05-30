@@ -959,6 +959,57 @@ def _safe_spearmanr(signal_values, forward_returns) -> tuple:
     return float(ic), float(pval) if pval is not None else None
 
 
+def _walk_forward_consensus(rolling_windows: list[dict]) -> dict:
+    test_sharpes = [rw["test_metrics"]["sharpe_ratio"] for rw in rolling_windows]
+    mean_sharpe = float(np.mean(test_sharpes)) if test_sharpes else 0.0
+    std_sharpe = float(np.std(test_sharpes)) if test_sharpes else 0.0
+    mean_maxdd = float(np.mean([rw["test_metrics"]["max_drawdown"] for rw in rolling_windows])) if rolling_windows else 0.0
+    mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows])) if rolling_windows else 0.0
+    overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
+    total_test_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
+    valid_test_windows = sum(1 for rw in rolling_windows if rw["test_metrics"]["trade_count"] > 0)
+
+    if total_test_trades == 0:
+        data_quality = "no_oos_trades"
+        verdict = "no_trades"
+        stability_flag = "not_evaluable"
+    elif total_test_trades < 15 or valid_test_windows < 3:
+        data_quality = "thin_oos_trades"
+        if overfit_count > len(rolling_windows) / 2:
+            verdict = "unstable"
+            stability_flag = "overfit_majority"
+        else:
+            verdict = "limited"
+            stability_flag = "thin_sample"
+    else:
+        data_quality = "sufficient_oos_trades"
+        if overfit_count > len(rolling_windows) / 2:
+            verdict = "unstable"
+            stability_flag = "overfit_majority"
+        elif overfit_count > 0:
+            verdict = "unstable"
+            stability_flag = "some_overfit"
+        elif std_sharpe < 0.5:
+            verdict = "robust"
+            stability_flag = "low_dispersion"
+        else:
+            verdict = "stable"
+            stability_flag = "moderate_dispersion"
+
+    return {
+        "mean_sharpe": round(mean_sharpe, 4),
+        "std_sharpe": round(std_sharpe, 4),
+        "mean_maxdd": round(mean_maxdd, 2),
+        "mean_win_rate": round(mean_win_rate, 2),
+        "overfit_count": overfit_count,
+        "total_test_trades": total_test_trades,
+        "valid_test_windows": valid_test_windows,
+        "data_quality": data_quality,
+        "stability_flag": stability_flag,
+        "verdict": verdict,
+    }
+
+
 def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
     """Compute Information Coefficient (Spearman correlation) per signal rule.
 
@@ -1377,12 +1428,17 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                                    embargo_days=embargo_days,
                                    execution_delay=execution_delay))
         result["rolling_windows"] = []
+        n_test_trades = result["test_metrics"]["trade_count"]
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
             "std_sharpe": 0.0,
             "mean_maxdd": result["test_metrics"]["max_drawdown"],
             "mean_win_rate": result["test_metrics"]["win_rate"],
             "overfit_count": 1 if result["overfit_detected"] else 0,
+            "total_test_trades": n_test_trades,
+            "valid_test_windows": 1 if n_test_trades > 0 else 0,
+            "data_quality": "insufficient_price_history",
+            "stability_flag": "not_evaluable",
             "verdict": "data_insufficient",
         }
         return result
@@ -1393,6 +1449,7 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
                                    strategy_mode=strategy_mode,
                                    embargo_days=embargo_days,
                                    execution_delay=execution_delay))
+        n_test_trades = result["test_metrics"]["trade_count"]
         result["rolling_windows"] = []
         result["consensus"] = {
             "mean_sharpe": result["test_metrics"]["sharpe_ratio"],
@@ -1400,6 +1457,10 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
             "mean_maxdd": result["test_metrics"]["max_drawdown"],
             "mean_win_rate": result["test_metrics"]["win_rate"],
             "overfit_count": 1 if result["overfit_detected"] else 0,
+            "total_test_trades": n_test_trades,
+            "valid_test_windows": 1 if n_test_trades > 0 else 0,
+            "data_quality": "insufficient_price_history",
+            "stability_flag": "not_evaluable",
             "verdict": "data_insufficient",
         }
         return result
@@ -1432,38 +1493,13 @@ def walk_forward_rolling(ticker: str, start_date: str, end_date: str,
         })
 
     # Consensus
-    test_sharpes = [rw["test_metrics"]["sharpe_ratio"] for rw in rolling_windows]
-    mean_sharpe = float(np.mean(test_sharpes))
-    std_sharpe = float(np.std(test_sharpes))
-    mean_maxdd = float(np.mean([rw["test_metrics"]["max_drawdown"] for rw in rolling_windows]))
-    mean_win_rate = float(np.mean([rw["test_metrics"]["win_rate"] for rw in rolling_windows]))
-    overfit_count = sum(1 for rw in rolling_windows if rw["overfit_detected"])
-
-    total_trades = sum(rw["test_metrics"]["trade_count"] for rw in rolling_windows)
-    if total_trades == 0:
-        verdict = "no_trades"
-    else:
-        if overfit_count > 2:
-            verdict = "insufficient_data"
-        elif overfit_count > 0:
-            verdict = "unstable"
-        elif std_sharpe < 0.5:
-            verdict = "robust"
-        else:
-            verdict = "stable"
+    consensus = _walk_forward_consensus(rolling_windows)
 
     # Backward compatibility shim: legacy keys from window 0
     w0 = rolling_windows[0]
     result = {
         "rolling_windows": rolling_windows,
-        "consensus": {
-            "mean_sharpe": round(mean_sharpe, 4),
-            "std_sharpe": round(std_sharpe, 4),
-            "mean_maxdd": round(mean_maxdd, 2),
-            "mean_win_rate": round(mean_win_rate, 2),
-            "overfit_count": overfit_count,
-            "verdict": verdict,
-        },
+        "consensus": consensus,
         "train_metrics": w0["train_metrics"],
         "test_metrics": w0["test_metrics"],
         "sharpe_diff_pct": w0["sharpe_diff_pct"],

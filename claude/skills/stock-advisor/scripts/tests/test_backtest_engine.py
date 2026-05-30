@@ -185,6 +185,40 @@ def test_backtest_json_serialization_rejects_non_finite_values():
         json.dumps({"ic": float("nan")}, allow_nan=False)
 
 
+def test_walk_forward_consensus_distinguishes_sparse_trades_from_instability():
+    from backtest_engine import _walk_forward_consensus
+
+    rolling_windows = [
+        {"test_metrics": {"trade_count": 4, "sharpe_ratio": -1.6, "max_drawdown": 20.0, "win_rate": 25.0}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 3, "sharpe_ratio": -0.8, "max_drawdown": 18.0, "win_rate": 33.3}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 2, "sharpe_ratio": -1.7, "max_drawdown": 22.0, "win_rate": 0.0}, "overfit_detected": True},
+        {"test_metrics": {"trade_count": 3, "sharpe_ratio": 0.3, "max_drawdown": 19.0, "win_rate": 33.3}, "overfit_detected": False},
+        {"test_metrics": {"trade_count": 1, "sharpe_ratio": -1.0, "max_drawdown": 17.0, "win_rate": 0.0}, "overfit_detected": True},
+    ]
+
+    consensus = _walk_forward_consensus(rolling_windows)
+
+    assert consensus["total_test_trades"] == 13
+    assert consensus["data_quality"] == "thin_oos_trades"
+    assert consensus["verdict"] == "unstable"
+    assert consensus["stability_flag"] == "overfit_majority"
+
+
+def test_walk_forward_consensus_reports_no_trades_only_when_no_test_trades():
+    from backtest_engine import _walk_forward_consensus
+
+    rolling_windows = [
+        {"test_metrics": {"trade_count": 0, "sharpe_ratio": 0.0, "max_drawdown": 0.0, "win_rate": 0.0}, "overfit_detected": False},
+        {"test_metrics": {"trade_count": 0, "sharpe_ratio": 0.0, "max_drawdown": 0.0, "win_rate": 0.0}, "overfit_detected": False},
+    ]
+
+    consensus = _walk_forward_consensus(rolling_windows)
+
+    assert consensus["total_test_trades"] == 0
+    assert consensus["data_quality"] == "no_oos_trades"
+    assert consensus["verdict"] == "no_trades"
+
+
 def test_ic_filter_constant_inputs_do_not_warn():
     import warnings
     from backtest_engine import _safe_corrcoef
