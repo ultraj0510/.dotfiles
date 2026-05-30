@@ -126,6 +126,7 @@ def build_quant_decisions(decisions_data: dict) -> dict[str, dict]:
             "order_type": d["order_type"],
             "limit_price": d["limit_price"],
             "vetoes": d.get("vetoes", []),
+            "risk_flags": d.get("risk_flags", []),
             "explanations": d.get("explanations", []),
             "risk_posture": d.get("risk_posture", "neutral"),
             "protective_stop_price": d.get("protective_stop_price"),

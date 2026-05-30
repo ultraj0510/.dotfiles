@@ -103,3 +103,83 @@ def test_quant_risk_posture_fields_are_exported():
         "downside_10pct_yen", "advisory_plan",
     ]:
         assert key in sample, f"missing key: {key}"
+
+
+def test_build_quant_decisions_preserves_risk_flags():
+    from report_context_builder import build_quant_decisions
+
+    context = build_quant_decisions({
+        "generated_at": "2026-05-30T00:00:00",
+        "decisions": [
+            {
+                "ticker": "5803.T",
+                "action": "REDUCE",
+                "confidence": "moderate",
+                "order_shares": 300,
+                "order_type": "limit",
+                "limit_price": 4771.0,
+                "vetoes": [],
+                "risk_flags": ["negative_walk_forward"],
+                "explanations": ["limit sell 300sh across 2 positions"],
+                "risk_posture": "neutral",
+                "protective_stop_price": None,
+                "portfolio_weight_pct": 7.28,
+                "cost_basis_weight_pct": 7.39,
+                "unrealized_pnl_pct": -1.43,
+                "downside_10pct_yen": 143130,
+                "advisory_plan": {},
+            }
+        ],
+    })
+
+    decision = context["decisions"]["5803.T"]
+    assert decision["report_action"] == "REDUCE"
+    assert decision["vetoes"] == []
+    assert decision["risk_flags"] == ["negative_walk_forward"]
+
+
+def test_context_fixture_preserves_any_risk_flags_when_present(tmp_path):
+    from report_context_builder import build_quant_decisions
+
+    decisions = {
+        "generated_at": None,
+        "decisions": [
+            {
+                "ticker": "1515.T",
+                "action": "HOLD",
+                "confidence": "moderate",
+                "order_shares": 0,
+                "order_type": "none",
+                "limit_price": None,
+                "vetoes": [],
+                "risk_flags": ["negative_walk_forward", "position_over_cap_loss_concentration"],
+                "explanations": ["no actionable signal"],
+                "risk_posture": "rebalance_on_strength",
+                "protective_stop_price": None,
+                "portfolio_weight_pct": 36.57,
+                "cost_basis_weight_pct": 54.2,
+                "unrealized_pnl_pct": -32.52,
+                "downside_10pct_yen": 719100,
+                "advisory_plan": {
+                    "mode": "trim_on_rebound_rebuy_on_pullback",
+                    "trim_shares": 300,
+                    "trim_trigger_price": 2440.4,
+                    "reentry_watch_price": 2162.25,
+                    "max_reentry_shares": 300,
+                    "reentry_allowed_after_trim": True,
+                    "reentry_requires": [
+                        "trim_filled",
+                        "price_near_lower_band",
+                        "rsi_below_40_or_reversal_signal",
+                    ],
+                },
+            }
+        ],
+    }
+
+    context = build_quant_decisions(decisions)
+
+    assert context["decisions"]["1515.T"]["risk_flags"] == [
+        "negative_walk_forward",
+        "position_over_cap_loss_concentration",
+    ]
