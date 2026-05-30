@@ -306,7 +306,7 @@ def generate_signals(ticker: str, start_date: str, end_date: str,
                                 rule_sigs[r]["f"].append(fwd[i])
                         for rn, rd in rule_sigs.items():
                             if len(rd["s"]) >= 5:
-                                ic_val = np.corrcoef(rd["s"], rd["f"])[0, 1]
+                                ic_val = _safe_corrcoef(rd["s"], rd["f"])
                                 ic_filter[rn] = abs(ic_val) >= 0.05
         except Exception:
             pass  # IC filter unavailable — use all rules
@@ -931,6 +931,19 @@ def compute_signal_census(signals_df, trades):
     return census
 
 
+def _safe_corrcoef(left, right) -> float:
+    left_arr = np.array(left, dtype=float)
+    right_arr = np.array(right, dtype=float)
+    if len(left_arr) < 2 or len(right_arr) < 2:
+        return 0.0
+    if np.std(left_arr) == 0 or np.std(right_arr) == 0:
+        return 0.0
+    value = np.corrcoef(left_arr, right_arr)[0, 1]
+    if np.isnan(value):
+        return 0.0
+    return float(value)
+
+
 def _safe_spearmanr(signal_values, forward_returns) -> tuple:
     """Safe spearmanr that returns None,None for degenerate inputs."""
     if len(signal_values) < 2 or len(forward_returns) < 2:
@@ -977,7 +990,7 @@ def compute_signal_ic(signals_df: pd.DataFrame) -> dict:
                 if ic is None:
                     continue
             except ImportError:
-                ic = np.corrcoef(s, fw)[0, 1] if len(s) > 1 else 0
+                ic = _safe_corrcoef(s, fw)
                 pval = None
             n = len(s)
             denom = max(1 - ic * ic, 0.0001)

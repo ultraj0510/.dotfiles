@@ -149,3 +149,13 @@ def test_safe_spearmanr_returns_none_for_constant_input():
     ic, pval = _safe_spearmanr([1, 1, 1], [0.01, 0.02, 0.03])
     assert ic is None
     assert pval is None
+
+
+def test_ic_filter_constant_inputs_do_not_warn():
+    import warnings
+    from backtest_engine import _safe_corrcoef
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        value = _safe_corrcoef([1, 1, 1, 1, 1], [0.01, 0.02, 0.03, 0.04, 0.05])
+    assert value == 0.0
+    assert not [w for w in caught if "invalid value encountered" in str(w.message)]

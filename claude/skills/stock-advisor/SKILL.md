@@ -44,7 +44,14 @@ stock-advisor tests must run through `scripts/.venv/bin/python`; system Python m
 ### Step 1: 数値パイプライン実行
 
 ```bash
-~/.claude/skills/stock-advisor/scripts/.venv/bin/python   ~/.claude/skills/stock-advisor/scripts/run_stock_advisor_pipeline.py   --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml   --watchlist ~/.claude/skills/stock-advisor/watchlist.yaml
+RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
+mkdir -p "$RESULTS_DIR"
+
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  ~/.claude/skills/stock-advisor/scripts/run_stock_advisor_pipeline.py \
+  --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
+  --watchlist ~/.claude/skills/stock-advisor/watchlist.yaml \
+  --results-dir "$RESULTS_DIR"
 ```
 
 出力された `run_manifest.json` の `artifacts` を確認し、`signals.json`、`backtest/*.json`、`portfolio_analytics.json`、`quant_decisions.json`、`report_context.json` が存在することを確認する。

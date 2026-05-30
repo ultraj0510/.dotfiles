@@ -117,7 +117,7 @@ def main() -> None:
     analytics_path = results_dir / "portfolio_analytics.json"
     run([
         str(VENV_PYTHON), str(SCRIPTS_DIR / "portfolio_analytics.py"),
-        "--signals", str(signals_path),
+        "--portfolio", str(portfolio_path),
         "-o", str(analytics_path),
     ])
 
@@ -128,7 +128,8 @@ def main() -> None:
         str(VENV_PYTHON), str(SCRIPTS_DIR / "quant_decision_engine.py"),
         "--portfolio", str(portfolio_path),
         "--signals", str(signals_path),
-        "--analytics", str(analytics_path),
+        "--backtest-dir", str(backtest_dir),
+        "--portfolio-analytics", str(analytics_path),
         "-o", str(decisions_path),
     ])
 

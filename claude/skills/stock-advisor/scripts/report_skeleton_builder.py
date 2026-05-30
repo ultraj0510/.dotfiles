@@ -23,6 +23,10 @@ def action_ja(action: str) -> str:
             "NO_TRADE": "取引なし"}.get(action, action)
 
 
+def risk_posture_ja(value: str) -> str:
+    return {"protect_profit": "利益保護", "rebalance_on_strength": "上昇時リバランス", "hold_core": "中核保有", "reduce_risk": "リスク削減", "watch": "監視"}.get(value, value)
+
+
 def format_verdict(verdict: str) -> str:
     mapping = {"robust": "頑健", "stable": "安定",
                "unstable": "不安定", "insufficient_data": "データ不足",
@@ -72,12 +76,16 @@ def build_report(context: dict) -> str:
     lines.append("## 取引指示一覧")
     lines.append("")
     active_orders = []
+    seen_order_tickers = set()
     for h in holdings:
         ticker = h["ticker"]
+        if ticker in seen_order_tickers:
+            continue
         dec = quant_decisions.get(ticker, {})
         action = dec.get("report_action", "HOLD")
         order_shares = dec.get("order_shares", 0)
         if action in ("REDUCE", "SELL", "BUY") and order_shares > 0:
+            seen_order_tickers.add(ticker)
             active_orders.append({
                 "ticker": ticker,
                 "name": h["name"],
@@ -116,12 +124,12 @@ def build_report(context: dict) -> str:
         expiry_date = h.get("expiry_date")
         dec = quant_decisions.get(ticker, {})
         action = dec.get("report_action", "HOLD")
-        pnl_pct = dec.get("unrealized_pnl_pct")
+        pnl_pct = ((float(current_price) - float(cost_price)) / float(cost_price) * 100) if cost_price and float(cost_price) > 0 else 0
         sig_info = signals.get(ticker, {})
         bt = backtest.get(ticker, {})
 
-        pnl_str = f"（{pnl_pct:+.2f}%）" if pnl_pct is not None else ""
-        lines.append(f"### {ticker} {name}（{position_type}）— {action_ja(action)}{pnl_str}")
+        pnl_str = f"（{pnl_pct:+.2f}%）"
+        lines.append(f"### {ticker} {name}（{position_type}） — {action_ja(action)}{pnl_str}")
         lines.append("")
 
         lines.append("| 項目 | 値 |")
@@ -129,14 +137,11 @@ def build_report(context: dict) -> str:
         lines.append(f"| 保有株数 | {quantity} |")
         lines.append(f"| 平均購入価格 | {yen(cost_price)} |")
         lines.append(f"| 現価 | {yen(current_price)} |")
-        if pnl_pct is not None:
-            lines.append(f"| 含み损得率 | {pnl_pct:+.2f}% |")
+        lines.append(f"| 含み損益率 | {pnl_pct:+.2f}% |")
         if expiry_date:
             lines.append(f"| 信用期限 | {expiry_date} |")
-        if dec.get("risk_posture"):
-            lines.append(f"| リスクポスチャー | {dec['risk_posture']} |")
-        if dec.get("protective_stop_price"):
-            lines.append(f"| ストップ標準価格 | {yen(dec['protective_stop_price'])} |")
+        lines.append(f"| リスク姿勢 | {risk_posture_ja(dec.get('risk_posture', 'neutral'))} |")
+        lines.append(f"| ストップ目安価格 | {yen(dec.get('protective_stop_price'))} |")
 
         # Signal section
         score_obj = sig_info.get("score", {})

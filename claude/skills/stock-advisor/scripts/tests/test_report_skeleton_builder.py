@@ -1,4 +1,5 @@
 """Tests for report_skeleton_builder.py"""
+import json
 import os
 import subprocess
 import tempfile
@@ -28,3 +29,130 @@ def test_skeleton_builder_outputs_required_sections():
     assert "## 取引指示一覧" in text
     assert "## 銘柄別詳細" in text
     assert "## 本日の優先アクション" in text
+
+
+def test_skeleton_uses_validator_compatible_position_headings_and_labels():
+    from report_skeleton_builder import build_report, risk_posture_ja
+
+    context = {
+        "reference_date": "2026-05-30",
+        "account": {"total_assets": 1000000, "available_cash": 50000},
+        "holdings": [
+            {"ticker": "5803.T", "name": "フジクラ", "position_type": "現物",
+             "quantity": 200, "cost_price": 4200, "current_price": 4820},
+        ],
+        "watchlist": [],
+        "signals": {},
+        "backtest": {},
+        "correlations": {},
+        "quant_decisions": {
+            "decisions": {
+                "5803.T": {
+                    "report_action": "REDUCE",
+                    "order_shares": 100,
+                    "unrealized_pnl_pct": 14.76,
+                    "risk_posture": "protect_profit",
+                    "protective_stop_price": 4500,
+                }
+            }
+        },
+    }
+
+    report = build_report(context)
+
+    # Heading uses en-dash with spaces and action_ja
+    assert "（現物） — 一部売却（+14.76%）" in report, \
+        "Expected heading format: （position_type） — action_ja（pnl%）"
+
+    # Labels use validator-compatible names
+    assert "含み損益率" in report, "Expected 含み損益率"
+    assert "リスク姿勢" in report, "Expected リスク姿勢"
+    assert "ストップ目安価格" in report, "Expected ストップ目安価格"
+    assert "利益保護" in report, "Expected risk_posture_ja output for protect_profit"
+    assert "リスクポスチャー" not in report, "Old label リスクポスチャー should not appear"
+    assert "ストップ標準価格" not in report, "Old label ストップ標準価格 should not appear"
+
+
+def test_skeleton_deduplicates_ticker_level_active_orders():
+    from report_skeleton_builder import build_report
+
+    context = {
+        "reference_date": "2026-05-30",
+        "account": {"total_assets": 1000000, "available_cash": 50000},
+        "holdings": [
+            {"ticker": "5803.T", "name": "フジクラ", "position_type": "現物",
+             "quantity": 200, "cost_price": 4200, "current_price": 4820},
+            {"ticker": "5803.T", "name": "フジクラ", "position_type": "信用",
+             "quantity": 100, "cost_price": 5200, "current_price": 4820},
+        ],
+        "watchlist": [],
+        "signals": {},
+        "backtest": {},
+        "correlations": {},
+        "quant_decisions": {
+            "decisions": {
+                "5803.T": {
+                    "report_action": "SELL",
+                    "order_shares": 300,
+                    "unrealized_pnl_pct": 5.0,
+                    "risk_posture": "reduce_risk",
+                    "protective_stop_price": None,
+                }
+            }
+        },
+    }
+
+    report = build_report(context)
+
+    # Count occurrences of 5803.T in active orders table area
+    lines = report.splitlines()
+    in_orders = False
+    ticker_count = 0
+    for line in lines:
+        if "取引指示一覧" in line:
+            in_orders = True
+            continue
+        if "銘柄別詳細" in line:
+            in_orders = False
+            continue
+        if in_orders and "5803.T" in line:
+            ticker_count += 1
+
+    assert ticker_count == 1, \
+        f"Expected 5803.T to appear once in active orders, got {ticker_count}"
+
+
+def test_skeleton_generated_from_context_passes_validator():
+    """Integration test: generate skeleton from fixtures and validate it."""
+    from validate_report import validate
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ctx = os.path.join(tmpdir, "report_context.json")
+        report = os.path.join(tmpdir, "report.md")
+
+        # Step 1: Build report context from fixtures
+        subprocess.run([
+            PYTHON, os.path.join(SCRIPTS_DIR, "report_context_builder.py"),
+            "--portfolio", os.path.join(FIXTURE_DIR, "portfolio.yaml"),
+            "--signals", os.path.join(FIXTURE_DIR, "signals.json"),
+            "--backtest-dir", os.path.join(FIXTURE_DIR, "backtest"),
+            "--portfolio-analytics", os.path.join(FIXTURE_DIR, "portfolio_analytics.json"),
+            "--quant-decisions", os.path.join(FIXTURE_DIR, "quant_decisions.json"),
+            "-o", ctx,
+        ], check=True)
+
+        # Step 2: Generate report skeleton
+        subprocess.run([
+            PYTHON, BUILDER, "--context", ctx, "-o", report,
+        ], check=True)
+
+        # Step 3: Validate the generated report
+        errors = validate(
+            report_path=report,
+            signals_path=os.path.join(FIXTURE_DIR, "signals.json"),
+            quant_decisions_path=os.path.join(FIXTURE_DIR, "quant_decisions.json"),
+            backtest_dir=os.path.join(FIXTURE_DIR, "backtest"),
+            portfolio_path=os.path.join(FIXTURE_DIR, "portfolio.yaml"),
+        )
+
+        assert errors == [], f"Validation failed: {errors}"
