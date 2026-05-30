@@ -29,3 +29,31 @@ class TestQuantSchema:
         d = QuantDecision(ticker="7203.T", action="SELL", order_type="limit",
                           limit_price=1500, target_shares=100, order_shares=100)
         assert d.limit_price == 1500
+
+from quant_schema import PositionDecision
+
+
+class TestPositionDecision:
+    def test_position_decision_requires_lot_sized_order(self):
+        d = PositionDecision(
+            position_id="5803.T:信用:2", ticker="5803.T",
+            position_type="信用", action="REDUCE",
+            quantity=100, order_shares=100, reason="negative_walk_forward",
+        )
+        assert d.order_shares == 100
+
+    def test_position_decision_rejects_non_lot_order(self):
+        with pytest.raises(ValueError, match="lot"):
+            PositionDecision(
+                position_id="5803.T:信用:2", ticker="5803.T",
+                position_type="信用", action="REDUCE",
+                quantity=100, order_shares=50, reason="negative_walk_forward",
+            )
+
+    def test_position_decision_rejects_excess_order(self):
+        with pytest.raises(ValueError, match="exceed"):
+            PositionDecision(
+                position_id="5803.T:信用:2", ticker="5803.T",
+                position_type="信用", action="REDUCE",
+                quantity=100, order_shares=200, reason="negative_walk_forward",
+            )

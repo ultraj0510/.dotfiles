@@ -15,7 +15,7 @@ if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
 import yaml
-from quant_schema import QuantDecision, ACTIONS, ORDER_TYPES
+from quant_schema import QuantDecision, PositionDecision, ACTIONS, ORDER_TYPES
 from signal_reliability import (
     shrink_win_probability,
     expected_value_after_cost_pct,
@@ -178,6 +178,52 @@ def _extract_correlation_context(portfolio_analytics: dict) -> tuple[str, list[s
     return risk, pair
 
 
+def _held_positions(portfolio: dict, ticker: str) -> list[dict]:
+    """Return normalized position dicts for all lots of a ticker."""
+    positions = []
+    for index, holding in enumerate(portfolio.get("holdings", []), start=1):
+        if holding.get("ticker") != ticker:
+            continue
+        current = float(holding.get("current_price", 0))
+        cost = float(holding.get("cost_price", 0))
+        pnl_pct = ((current - cost) / cost * 100) if cost > 0 else None
+        positions.append({
+            **holding,
+            "position_id": f'{ticker}:{holding.get("position_type", "現物")}:{index}',
+            "unrealized_pnl_pct": pnl_pct,
+        })
+    return positions
+
+
+def _rank_reduce_positions(positions: list[dict]) -> list[dict]:
+    """Sort positions for reduction: margin first, then earliest expiry, then worst P&L."""
+    return sorted(
+        positions,
+        key=lambda p: (
+            0 if p.get("position_type") == "信用" else 1,
+            p.get("expiry_date") or "9999-12-31",
+            p.get("unrealized_pnl_pct") if p.get("unrealized_pnl_pct") is not None else 0,
+        ),
+    )
+
+
+def _allocate_reduce_to_positions(
+    total_shares: int, positions: list[dict],
+) -> list[dict]:
+    """Allocate reduce shares across ranked positions."""
+    allocations = []
+    remaining = total_shares
+    for pos in _rank_reduce_positions(positions):
+        take = min(remaining, pos.get("quantity", 0))
+        take = (take // 100) * 100  # lot-aligned
+        if take > 0:
+            allocations.append({**pos, "allocated": take})
+            remaining -= take
+        if remaining < 100:
+            break
+    return allocations
+
+
 # --- Core decision logic ---
 
 def make_decision(
@@ -235,7 +281,12 @@ def make_decision(
 
     vetoes += reliability_vetoes(trade_count, p_win_shrunk, ev, wf)
     vetoes += margin_expiry_vetoes(expiry_date)
-    vetoes += position_cap_vetoes(total_assets, current_value)
+    # Position cap: appreciation-driven → watch; loss-driven or active buying → reduce
+    if total_assets > 0 and current_value / total_assets > MAX_POSITION_PCT:
+        if cost_price > 0 and entry_price > cost_price and signal_action == "HOLD":
+            vetoes.append("position_over_cap_watch")
+        elif "position_over_cap" not in vetoes:
+            vetoes.append("position_over_cap_reduce")
 
     # --- Correlation check ---
     corr_concentration = False
@@ -266,6 +317,7 @@ def make_decision(
         confidence = "high"
 
     # --- Order sizing ---
+    pos_decisions = []
     order_shares = 0
     target_shares = 0
     order_type = "none"
@@ -294,16 +346,35 @@ def make_decision(
                 order_type = "none"
 
     elif action in ("SELL", "REDUCE"):
-        # SELL/PARTIAL_SELL requires limit order
-        if current_qty > 0:
+        # REDUCE/SELL: allocate across positions (margin first, then worst P&L)
+        positions = _held_positions(portfolio, ticker)
+        if positions and current_qty > 0:
             recommended = signal_info.get("reduce_shares", signal_info.get("order_shares", current_qty))
-            order_shares = compute_sell_order_shares(current_qty, int(recommended))
-            target_shares = order_shares
+            base_shares = compute_sell_order_shares(current_qty, int(recommended))
+            target_shares = base_shares
+            order_shares = base_shares
             order_type = "limit"
-            limit_price = entry_price  # Use current price as limit
-            explanations.append(f"limit sell {order_shares}sh")
+            limit_price = entry_price
+
+            # Allocate across positions
+            allocs = _allocate_reduce_to_positions(base_shares, positions)
+            for a in allocs:
+                pos = PositionDecision(
+                    position_id=a["position_id"],
+                    ticker=ticker,
+                    position_type=a.get("position_type", "現物"),
+                    action=action,
+                    quantity=a.get("quantity", 0),
+                    order_shares=a["allocated"],
+                    reason=vetoes[-1] if vetoes else "",
+                    expiry_date=a.get("expiry_date"),
+                    unrealized_pnl_pct=a.get("unrealized_pnl_pct"),
+                )
+                pos_decisions.append(pos)
+            explanations.append(f"limit sell {order_shares}sh across {len(allocs)} positions")
         else:
             action = "NO_TRADE"
+            order_type = "none"
             order_type = "none"
 
     elif action == "HOLD":
@@ -325,6 +396,7 @@ def make_decision(
         order_shares=order_shares,
         order_type=order_type,
         limit_price=limit_price,
+        position_decisions=pos_decisions,
         vetoes=vetoes,
         explanations=explanations,
     )
@@ -393,6 +465,19 @@ def main():
                 "order_shares": d.order_shares,
                 "order_type": d.order_type,
                 "limit_price": d.limit_price,
+                "position_decisions": [
+                    {
+                        "position_id": pd.position_id,
+                        "position_type": pd.position_type,
+                        "action": pd.action,
+                        "quantity": pd.quantity,
+                        "order_shares": pd.order_shares,
+                        "reason": pd.reason,
+                        "expiry_date": pd.expiry_date,
+                        "unrealized_pnl_pct": pd.unrealized_pnl_pct,
+                    }
+                    for pd in d.position_decisions
+                ],
                 "vetoes": d.vetoes,
                 "explanations": d.explanations,
             }

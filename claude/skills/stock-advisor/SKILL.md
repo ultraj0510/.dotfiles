@@ -89,11 +89,37 @@ done
   -o "$RESULTS_DIR/quant_decisions.json"
 ```
 
+### Step 2e: レポート用コンテキスト生成
+
+以下を実行し、レポート生成には `report_context.json` を唯一の入力コンテキストとして使う:
+
+```bash
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  ~/.claude/skills/stock-advisor/scripts/report_context_builder.py \
+  --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
+  --signals "$RESULTS_DIR/signals.json" \
+  --backtest-dir "$RESULTS_DIR/backtest" \
+  --portfolio-analytics "$RESULTS_DIR/portfolio_analytics.json" \
+  --quant-decisions "$RESULTS_DIR/quant_decisions.json" \
+  -o "$RESULTS_DIR/report_context.json"
+```
+
+レポート提出前に以下を実行する:
+
+```bash
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  ~/.claude/skills/stock-advisor/scripts/validate_report.py \
+  --report "$RESULTS_DIR/report.md" \
+  --signals "$RESULTS_DIR/signals.json" \
+  --quant-decisions "$RESULTS_DIR/quant_decisions.json" \
+  --backtest-dir "$RESULTS_DIR/backtest"
+```
+
 ### Step 3: レポート生成
 
 以下のデータを読み込み、**stock-report** スキルの形式で最終レポートを出力:
 
-1. `portfolio.yaml` — 時価（SBI正）・保有数量・取得単価
+1. `report_context.json` — 正規化済みコンテキスト（アクション・数量・シグナル名・WF判定・口座ラベル）
 2. `signals.json` — シグナル・トレンド・スコア・アナリスト評価
 3. `backtest/*.json` — VaR/CVaR・Sharpe CI・WF判定
 4. `portfolio_analytics.json` — 相関行列・ストレステスト損失率

@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Validate a generated stock report against known artifacts.
+
+Usage:
+    validate_report.py --report <path> --signals <path> --quant-decisions <path> --backtest-dir <path>
+
+Checks:
+  1. Invented signal names -- any lowercase underscored token not in known signal rules
+  2. Quant action override  -- SELL/REDUCE tickers must have matching Japanese action words
+  3. Wrong account label    -- "信用倍率" (must be "委託保証金率")
+  4. Inflated walk-forward  -- "robust" in report but any ticker has non-robust verdict
+
+Exit 0 on clean, exit 1 with message on violation.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+
+def _known_signal_rules(signals_path: str) -> set[str]:
+    """Collect all unique signal rule names from signals.json."""
+    with open(signals_path) as f:
+        data = json.load(f)
+    rules: set[str] = set()
+    for result in data.get("results", []):
+        for signal in result.get("signals", []):
+            rule = signal.get("rule")
+            if rule:
+                rules.add(rule)
+    return rules
+
+
+def _underscore_tokens(text: str) -> list[str]:
+    """Find all lowercase tokens containing at least one underscore."""
+    return re.findall(r"\b[a-z]+[a-z0-9]*(?:_[a-z0-9]+)+\b", text)
+
+
+def check_invented_signals(report_text: str, signals_path: str, quant_decisions_path: str) -> str | None:
+    """Return an error message if the report invents a signal name, else None."""
+    known = _known_signal_rules(signals_path)
+    # Also allow veto names from quant_decisions (e.g. negative_walk_forward)
+    with open(quant_decisions_path) as f:
+        qd = json.load(f)
+    for d in qd.get("decisions", []):
+        for v in d.get("vetoes", []):
+            known.add(v)
+    tokens = _underscore_tokens(report_text)
+    for token in tokens:
+        if token not in known:
+            return (
+                f"invented signal name found: '{token}' "
+                f"(not in known signal rules: {sorted(known)})"
+            )
+    return None
+
+
+def _load_quant_decisions(path: str) -> list[dict]:
+    with open(path) as f:
+        data = json.load(f)
+    return data.get("decisions", [])
+
+
+def check_quant_action_override(
+    report_text: str, quant_decisions_path: str
+) -> str | None:
+    """Return an error if a SELL/REDUCE ticker lacks the required action words in the report."""
+    REDUCE_SELL_KEYWORDS = ("一部売却", "売却")
+    decisions = _load_quant_decisions(quant_decisions_path)
+    for dec in decisions:
+        action = dec.get("action", "")
+        if action not in ("SELL", "REDUCE"):
+            continue
+        ticker = dec.get("ticker", "")
+        if not ticker:
+            continue
+
+        # Scan each line that mentions this ticker + up to 4 following lines
+        found = False
+        lines = report_text.splitlines()
+        for i, line in enumerate(lines):
+            if ticker not in line:
+                continue
+            context = "\n".join(lines[i : i + 5])
+            if any(kw in context for kw in REDUCE_SELL_KEYWORDS):
+                found = True
+                break
+
+        if not found:
+            return (
+                f"quant action '{action}' for {ticker} requires action words "
+                f"{REDUCE_SELL_KEYWORDS} in the report section, but none found"
+            )
+    return None
+
+
+def check_account_label(report_text: str) -> str | None:
+    """Return an error if the report uses the wrong account label."""
+    if "信用倍率" in report_text:
+        return "report contains '信用倍率'; expected '委託保証金率'"
+    return None
+
+
+def check_walk_forward_verdicts(
+    report_text: str, backtest_dir: str
+) -> str | None:
+    """If 'robust' appears in the report, ensure every ticker has a 'robust' WF verdict."""
+    if "robust" not in report_text:
+        return None
+    if not os.path.isdir(backtest_dir):
+        return None
+
+    non_robust: list[str] = []
+    for fname in sorted(os.listdir(backtest_dir)):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(backtest_dir, fname)
+        with open(fpath) as f:
+            data = json.load(f)
+        verdict = (
+            data.get("walk_forward", {}).get("consensus", {}).get("verdict", "")
+        )
+        if verdict != "robust":
+            ticker = fname.removesuffix(".json")
+            non_robust.append(f"{ticker}: verdict='{verdict}'")
+
+    if non_robust:
+        return (
+            "report claims 'robust' walk-forward but some tickers have "
+            f"non-robust verdicts: {', '.join(non_robust)}"
+        )
+    return None
+
+
+def validate(
+    report_path: str,
+    signals_path: str,
+    quant_decisions_path: str,
+    backtest_dir: str,
+) -> list[str]:
+    """Run all checks. Returns a list of error messages (empty = clean)."""
+    with open(report_path) as f:
+        report_text = f.read()
+
+    errors: list[str] = []
+
+    err = check_invented_signals(report_text, signals_path, quant_decisions_path)
+    if err:
+        errors.append(err)
+
+    err = check_quant_action_override(report_text, quant_decisions_path)
+    if err:
+        errors.append(err)
+
+    err = check_account_label(report_text)
+    if err:
+        errors.append(err)
+
+    err = check_walk_forward_verdicts(report_text, backtest_dir)
+    if err:
+        errors.append(err)
+
+    return errors
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Validate a generated stock report against known artifacts."
+    )
+    parser.add_argument(
+        "--report", required=True, help="Path to the generated report file"
+    )
+    parser.add_argument(
+        "--signals", required=True, help="Path to signals.json"
+    )
+    parser.add_argument(
+        "--quant-decisions", required=True, help="Path to quant_decisions.json"
+    )
+    parser.add_argument(
+        "--backtest-dir", required=True, help="Path to backtest directory"
+    )
+    args = parser.parse_args()
+
+    errors = validate(
+        args.report, args.signals, args.quant_decisions, args.backtest_dir
+    )
+    if errors:
+        print("Validation FAILED:", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
