@@ -57,3 +57,16 @@ class TestPositionDecision:
                 position_type="信用", action="REDUCE",
                 quantity=100, order_shares=200, reason="negative_walk_forward",
             )
+
+
+def test_quant_decision_allows_risk_posture_metadata():
+    decision = QuantDecision(
+        ticker="285A.T", action="HOLD",
+        risk_posture="protect_profit", protective_stop_price=58362.71,
+        portfolio_weight_pct=33.49, cost_basis_weight_pct=7.70,
+        unrealized_pnl_pct=335.06, downside_10pct_yen=658500,
+        advisory_plan={"mode": "trail_stop", "stop_source": "close_10_ema"},
+    )
+    assert decision.action == "HOLD"
+    assert decision.risk_posture == "protect_profit"
+    assert decision.advisory_plan["mode"] == "trail_stop"

@@ -62,9 +62,23 @@ def _normalize_signal_single(raw: dict) -> dict:
         "atr": atr_val or (close * 0.02 if close else 0.0),
     }
 
-    # If signals contain a sell rule, suggest reduction
-    sell_signals = [s for s in raw.get("signals", []) if s.get("type") == "SELL"]
-    if sell_signals and action in ("HOLD", "BUY"):
+    raw_signals = raw.get("signals", [])
+    buy_signals = [s for s in raw_signals if s.get("type") == "BUY"]
+    sell_signals = [s for s in raw_signals if s.get("type") == "SELL"]
+    strong_sell_rules = {
+        s.get("rule")
+        for s in sell_signals
+        if s.get("strength") == "strong" or s.get("rule") in {"drawdown_stop", "momentum_breakdown"}
+    }
+
+    flat["signals"] = raw_signals
+    flat["indicators"] = indicators
+    flat["trend_state"] = raw.get("trend_state", "")
+    flat["buy_signal_count"] = len(buy_signals)
+    flat["sell_signal_count"] = len(sell_signals)
+    flat["strong_sell_rules"] = sorted(strong_sell_rules)
+
+    if rec == "HOLD_SELL" or strong_sell_rules:
         flat["action"] = "REDUCE"
 
     return flat
@@ -224,6 +238,56 @@ def _allocate_reduce_to_positions(
     return allocations
 
 
+def _position_metrics(total_assets: float, positions: list[dict]) -> dict:
+    current_value = sum(float(p.get("quantity", 0)) * float(p.get("current_price", 0)) for p in positions)
+    cost_basis = sum(float(p.get("quantity", 0)) * float(p.get("cost_price", 0)) for p in positions)
+    unrealized_pnl_pct = ((current_value - cost_basis) / cost_basis * 100) if cost_basis > 0 else None
+    return {
+        "current_value": current_value,
+        "cost_basis": cost_basis,
+        "portfolio_weight_pct": round(current_value / total_assets * 100, 2) if total_assets > 0 else None,
+        "cost_basis_weight_pct": round(cost_basis / total_assets * 100, 2) if total_assets > 0 else None,
+        "unrealized_pnl_pct": round(unrealized_pnl_pct, 2) if unrealized_pnl_pct is not None else None,
+        "downside_10pct_yen": int(round(current_value * 0.10)),
+    }
+
+
+def _indicator_float(signal_info: dict, key: str) -> float | None:
+    value = signal_info.get("indicators", {}).get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _protective_stop_price(signal_info: dict, entry_price: float, atr: float) -> float | None:
+    ema10 = _indicator_float(signal_info, "close_10_ema")
+    if ema10 and ema10 > 0:
+        return round(ema10, 2)
+    if entry_price > 0 and atr > 0:
+        return round(entry_price - atr * 2, 2)
+    return None
+
+
+def _rebound_trim_plan(signal_info: dict, current_qty: int, portfolio_weight_pct: float | None) -> dict:
+    boll_mid = _indicator_float(signal_info, "boll")
+    ema10 = _indicator_float(signal_info, "close_10_ema")
+    vals = [v for v in [boll_mid, ema10] if v is not None]
+    trigger = max(vals) if vals else 0
+    trim_shares = min(600, max(300, (current_qty // 10 // 100) * 100))
+    if portfolio_weight_pct is not None and portfolio_weight_pct < 30:
+        trim_shares = min(trim_shares, 300)
+    return {
+        "mode": "trim_on_rebound",
+        "trim_shares": trim_shares,
+        "trim_trigger_price": round(trigger, 2),
+        "buyback_allowed": False,
+        "buyback_block_reason": "downtrend_and_position_over_30pct",
+    }
+
+
 # --- Core decision logic ---
 
 def make_decision(
@@ -261,6 +325,8 @@ def make_decision(
     entry_price = float(signal_info.get("current_price", 0))
     atr = float(signal_info.get("atr", 0)) or entry_price * 0.02
     stop_loss = entry_price - atr * 2
+    positions = _held_positions(portfolio, ticker)
+    metrics = _position_metrics(total_assets, positions)
 
     # --- Reliability assessment ---
     bt = backtest or {}
@@ -281,12 +347,28 @@ def make_decision(
 
     vetoes += reliability_vetoes(trade_count, p_win_shrunk, ev, wf)
     vetoes += margin_expiry_vetoes(expiry_date)
-    # Position cap: appreciation-driven → watch; loss-driven or active buying → reduce
-    if total_assets > 0 and current_value / total_assets > MAX_POSITION_PCT:
-        if cost_price > 0 and entry_price > cost_price and signal_action == "HOLD":
+    risk_posture = "neutral"
+    protective_stop = None
+    advisory_plan = {}
+    portfolio_weight_pct = metrics["portfolio_weight_pct"]
+    unrealized_pnl_pct = metrics["unrealized_pnl_pct"]
+
+    if portfolio_weight_pct is not None and portfolio_weight_pct > MAX_POSITION_PCT * 100:
+        if unrealized_pnl_pct is not None and unrealized_pnl_pct >= 50:
+            risk_posture = "protect_profit"
+            protective_stop = _protective_stop_price(signal_info, entry_price, atr)
+            advisory_plan = {
+                "mode": "trail_stop",
+                "stop_source": "close_10_ema_or_2atr",
+                "sell_only_if_stop_breaks": True,
+            }
             vetoes.append("position_over_cap_watch")
-        elif "position_over_cap" not in vetoes:
-            vetoes.append("position_over_cap_reduce")
+        elif unrealized_pnl_pct is not None and unrealized_pnl_pct < 0:
+            risk_posture = "rebalance_on_strength"
+            advisory_plan = _rebound_trim_plan(signal_info, current_qty, portfolio_weight_pct)
+            vetoes.append("position_over_cap_loss_concentration")
+        else:
+            vetoes.append("position_over_cap_watch")
 
     # --- Correlation check ---
     corr_concentration = False
@@ -322,6 +404,12 @@ def make_decision(
     target_shares = 0
     order_type = "none"
     limit_price = None
+
+    if current_qty == 100 and risk_posture == "protect_profit" and not signal_info.get("strong_sell_rules"):
+        if action == "REDUCE":
+            action = "HOLD"
+            explanations.append("single-lot winner protected; use trailing stop instead of full exit")
+        vetoes.append("single_lot_full_exit_guard")
 
     if action == "BUY":
         if entry_price > 0 and total_assets > 0:
@@ -397,6 +485,13 @@ def make_decision(
         order_type=order_type,
         limit_price=limit_price,
         position_decisions=pos_decisions,
+        risk_posture=risk_posture,
+        protective_stop_price=protective_stop,
+        portfolio_weight_pct=metrics["portfolio_weight_pct"],
+        cost_basis_weight_pct=metrics["cost_basis_weight_pct"],
+        unrealized_pnl_pct=metrics["unrealized_pnl_pct"],
+        downside_10pct_yen=metrics["downside_10pct_yen"],
+        advisory_plan=advisory_plan,
         vetoes=vetoes,
         explanations=explanations,
     )
@@ -465,6 +560,13 @@ def main():
                 "order_shares": d.order_shares,
                 "order_type": d.order_type,
                 "limit_price": d.limit_price,
+                "risk_posture": d.risk_posture,
+                "protective_stop_price": d.protective_stop_price,
+                "portfolio_weight_pct": d.portfolio_weight_pct,
+                "cost_basis_weight_pct": d.cost_basis_weight_pct,
+                "unrealized_pnl_pct": d.unrealized_pnl_pct,
+                "downside_10pct_yen": d.downside_10pct_yen,
+                "advisory_plan": d.advisory_plan,
                 "position_decisions": [
                     {
                         "position_id": pd.position_id,

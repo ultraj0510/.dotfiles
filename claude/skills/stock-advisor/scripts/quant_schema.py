@@ -44,6 +44,13 @@ class QuantDecision:
     order_shares: int = 0
     order_type: str = "none"
     limit_price: float | None = None
+    risk_posture: str = "neutral"
+    protective_stop_price: float | None = None
+    portfolio_weight_pct: float | None = None
+    cost_basis_weight_pct: float | None = None
+    unrealized_pnl_pct: float | None = None
+    downside_10pct_yen: int | None = None
+    advisory_plan: dict = field(default_factory=dict)
     position_decisions: list = field(default_factory=list)
     vetoes: list[str] = field(default_factory=list)
     explanations: list[str] = field(default_factory=list)

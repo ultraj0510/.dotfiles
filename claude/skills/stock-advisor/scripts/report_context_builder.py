@@ -117,6 +117,13 @@ def build_quant_decisions(decisions_data: dict) -> dict[str, dict]:
             "limit_price": d["limit_price"],
             "vetoes": d.get("vetoes", []),
             "explanations": d.get("explanations", []),
+            "risk_posture": d.get("risk_posture", "neutral"),
+            "protective_stop_price": d.get("protective_stop_price"),
+            "portfolio_weight_pct": d.get("portfolio_weight_pct"),
+            "cost_basis_weight_pct": d.get("cost_basis_weight_pct"),
+            "unrealized_pnl_pct": d.get("unrealized_pnl_pct"),
+            "downside_10pct_yen": d.get("downside_10pct_yen"),
+            "advisory_plan": d.get("advisory_plan", {}),
         }
     return result
 

@@ -91,3 +91,15 @@ class TestReportContextBuilder:
 
         assert backtest["285A.T"]["walk_forward"]["verdict"] == "unstable"
         assert backtest["5803.T"]["walk_forward"]["verdict"] == "insufficient_data"
+
+
+def test_quant_risk_posture_fields_are_exported():
+    context = _run_builder()
+    decisions = context.get("quant_decisions", {}).get("decisions", {})
+    sample = decisions.get("285A.T", {})
+    for key in [
+        "risk_posture", "protective_stop_price", "portfolio_weight_pct",
+        "cost_basis_weight_pct", "unrealized_pnl_pct",
+        "downside_10pct_yen", "advisory_plan",
+    ]:
+        assert key in sample, f"missing key: {key}"

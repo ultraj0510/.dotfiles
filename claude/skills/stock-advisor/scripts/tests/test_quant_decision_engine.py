@@ -151,6 +151,80 @@ class TestMakeDecision:
         assert decision.action == "HOLD"
 
 
+    def test_mixed_buy_and_overbought_sell_keeps_single_lot_winner_hold(self):
+        signal = {
+            "action": "HOLD",
+            "current_price": 65850,
+            "atr": 4695.38,
+            "signals": [
+                {"type": "BUY", "rule": "trend_following", "strength": "strong"},
+                {"type": "BUY", "rule": "momentum", "strength": "moderate"},
+                {"type": "SELL", "rule": "overbought", "strength": "moderate"},
+            ],
+            "indicators": {
+                "close_10_ema": "58362.71",
+                "boll": "50724.0",
+                "boll_lb": "32223.25",
+                "boll_ub": "69224.75",
+                "rsi": "74.75",
+                "52w_position": "100.0",
+            },
+        }
+        bt = {
+            "total_trades": 9, "wins": 7, "losses": 2,
+            "avg_win_pct": 50.07, "avg_loss_pct": -10.37,
+            "walk_forward": {"verdict": "unstable", "overfit_detected": False},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "285A.T", "quantity": 100, "current_price": 65850, "cost_price": 15136, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("285A.T", signal, bt, pf, {})
+        # After impl: action=HOLD, order_shares=0, risk_posture=protect_profit
+        assert decision.action == "HOLD"
+        assert decision.order_shares == 0
+        assert decision.risk_posture == "protect_profit"
+        assert "single_lot_full_exit_guard" in decision.vetoes
+        assert "position_over_cap_watch" in decision.vetoes
+        assert decision.protective_stop_price == 58362.71
+        assert decision.downside_10pct_yen == 658500
+
+    def test_large_loss_concentration_gets_rebound_trim_plan_without_buyback(self):
+        signal = {
+            "action": "HOLD", "current_price": 2397, "atr": 173.98, "trend_state": "downtrend",
+            "signals": [],
+            "indicators": {
+                "close_10_ema": "2408.45", "close_50_sma": "2561.17",
+                "boll": "2440.4", "boll_lb": "2162.25", "boll_ub": "2718.55",
+                "10d_return": "-8.09", "20d_return": "-1.03",
+            },
+        }
+        bt = {
+            "total_trades": 29, "wins": 10, "losses": 19,
+            "avg_win_pct": 15.0, "avg_loss_pct": -4.71,
+            "walk_forward": {"verdict": "insufficient_data", "overfit_detected": True},
+        }
+        pf = make_portfolio(
+            holdings=[{"ticker": "1515.T", "quantity": 3000, "current_price": 2397, "cost_price": 3552, "position_type": "現物"}],
+            total_assets=19661379, available_cash=624634,
+        )
+        decision = make_decision("1515.T", signal, bt, pf, {})
+        assert decision.action == "HOLD"
+        assert decision.order_shares == 0
+        assert decision.risk_posture == "rebalance_on_strength"
+        assert "position_over_cap_loss_concentration" in decision.vetoes
+        assert decision.portfolio_weight_pct == 36.57
+        assert decision.cost_basis_weight_pct == 54.20
+        assert decision.unrealized_pnl_pct == -32.52
+        assert decision.advisory_plan == {
+            "mode": "trim_on_rebound",
+            "trim_shares": 300,
+            "trim_trigger_price": 2440.4,
+            "buyback_allowed": False,
+            "buyback_block_reason": "downtrend_and_position_over_30pct",
+        }
+
+
 class TestCLIFixture:
     """Run quant_decision_engine.py with test fixtures and verify output."""
     def test_fixture_cli_smoke(self):
@@ -189,6 +263,9 @@ class TestCLIFixture:
         assert d["ticker"] == "7203.T"
         assert "correlation_concentration" in d["vetoes"]
         assert d["order_shares"] == 900
+        assert "risk_posture" in d
+        assert "portfolio_weight_pct" in d
+        assert "advisory_plan" in d
 
 
 class TestLoadBacktest:
