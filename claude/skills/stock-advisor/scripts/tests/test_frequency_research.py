@@ -26,9 +26,11 @@ def test_classify_trade_frequency_marks_sufficient_strategy():
 
 def test_summarize_frequency_diagnostics_counts_sparse_tickers():
     summary = summarize_frequency_diagnostics({
-        "285A.T": {"baseline": {"trade_count": 7}, "walk_forward": {"consensus": {"total_test_trades": 3}}, "period": {"years": 5}},
-        "7974.T": {"baseline": {"trade_count": 45}, "walk_forward": {"consensus": {"total_test_trades": 16}}, "period": {"years": 5}},
+        "285A.T": {"baseline": {"trade_count": 7}, "walk_forward": {"consensus": {"total_test_trades": 3, "valid_test_windows": 2, "overfit_count": 1, "data_quality": "thin_oos_trades"}}, "period": {"years": 5}},
+        "7974.T": {"baseline": {"trade_count": 45}, "walk_forward": {"consensus": {"total_test_trades": 16, "valid_test_windows": 5, "overfit_count": 0, "data_quality": "sufficient_oos_trades"}}, "period": {"years": 5}},
     })
 
-    assert summary["sparse"] == 1
-    assert summary["sufficient"] == 1
+    assert summary["summary"]["sparse"] == 1
+    assert summary["summary"]["sufficient"] == 1
+    assert "285A.T" in summary["tickers"]
+    assert summary["tickers"]["285A.T"]["diagnosis"]

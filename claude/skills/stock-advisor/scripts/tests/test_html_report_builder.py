@@ -31,17 +31,21 @@ def test_html_report_contains_daily_sections():
     })
     assert "<!DOCTYPE html>" in html
     assert "Stock Advisor Daily" in html
-    assert "Strategy Gate" in html
+    assert "戦略ゲート" in html
     assert "7974.T" in html
     assert "negative_ev: negative EV blocks BUY" in html
+    assert "判断理由" in html
+    assert "注意点" in html
     assert "シグナル" in html
     assert "HOLD_BUY" in html
+    assert "買い見送り" in html
     assert "価格ソース" in html
     assert "regularMarketPrice" in html
     assert "価格時刻" in html
     assert "2026-06-01T10:25:52+09:00" in html
     assert "RSI" in html
     assert "40.6" in html
+    assert "ATR（日次値幅）" in html
 
 
 def test_html_report_escapes_json_values():

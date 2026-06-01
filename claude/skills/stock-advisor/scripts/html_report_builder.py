@@ -36,8 +36,16 @@ def action_ja(action: str) -> str:
     return {
         "BUY": "追加買い", "HOLD": "保有継続",
         "REDUCE": "一部売却", "SELL": "全株売却",
-        "NO_TRADE": "取引なし",
+        "NO_TRADE": "注文なし",
     }.get(action, action or "HOLD")
+
+
+def action_display_text(action: str, recommendation: str) -> str:
+    if action == "NO_TRADE" and recommendation == "HOLD_BUY":
+        return "買い見送り"
+    if action == "NO_TRADE" and recommendation == "HOLD_SELL":
+        return "売り見送り"
+    return action_ja(action)
 
 
 def risk_posture_ja(value: str) -> str:
@@ -163,6 +171,11 @@ def render_holding_card(holding: dict, signals: dict, backtest: dict, decisions:
     price_source = holding.get("price_source", "-")
     price_as_of = holding.get("price_as_of", "-")
 
+    atr_val = float(indicators.get("atr", 0) or 0)
+    atr_pct = atr_val / current_price * 100 if current_price > 0 and atr_val > 0 else None
+    atr_display = f"{yen(atr_val)} / {atr_pct:.2f}%" if atr_pct is not None else "-"
+    display_action = action_display_text(action, recommendation)
+
     kv_pairs = [
         ("株数", f"{quantity}株"),
         ("取得単価", yen(cost_price)),
@@ -171,30 +184,61 @@ def render_holding_card(holding: dict, signals: dict, backtest: dict, decisions:
         ("リスク姿勢", risk_posture_ja(dec.get("risk_posture"))),
         ("シグナル", f'{score.get("score", "-")} / {recommendation}'),
         ("RSI", number(indicators.get("rsi"), 1)),
-        ("ATR", yen(float(indicators.get("atr", 0) or 0))),
+        ("ATR（日次値幅）", atr_display),
         ("Sharpe", number(baseline.get("sharpe_ratio"), 2)),
         ("WF判定", wf_ja(wf.get("verdict", ""))),
+    ]
+    # WF diagnostics
+    oos_trades = consensus.get("total_test_trades")
+    valid_win = consensus.get("valid_test_windows")
+    overfit_c = consensus.get("overfit_count")
+    dq = consensus.get("data_quality", "")
+    if oos_trades is not None:
+        kv_pairs.append(("OOS取引", f"{oos_trades}件"))
+    if valid_win is not None:
+        kv_pairs.append(("有効窓", f"{valid_win}窓"))
+    if overfit_c is not None:
+        kv_pairs.append(("過学習窓", f"{overfit_c}窓"))
+    if dq:
+        kv_pairs.append(("WF品質", dq))
+
+    kv_pairs += [
         ("価格ソース", price_source),
         ("価格時刻", price_as_of),
     ]
     kv_html = "\n".join(f"<div><span>{esc(k)}</span><strong>{v}</strong></div>" for k, v in kv_pairs if v)
 
     reason = decision_reason_text(dec)
-    reason_html = f'<div class="reason">{esc(reason)}</div>' if reason else ""
+    reason_html = f'<div class="reason"><strong>判断理由</strong>: {esc(reason)}</div>' if reason else ""
 
     risk_flags = dec.get("risk_flags", [])
     flags_html = ""
     if risk_flags:
-        flags_html = '<div style="margin-top:8px;font-size:11px;color:var(--m2)">' + ", ".join(esc(f) for f in risk_flags) + "</div>"
+        flags_html = '<div style="margin-top:6px;font-size:11px;color:var(--m2)"><strong>注意点</strong>: ' + ", ".join(esc(f) for f in risk_flags) + "</div>"
 
     return f'''<div class="card {action_class(action)}">
 <div class="card-head">
 <div><div class="ticker">{esc(ticker)}</div><div class="name">{esc(name)} ({esc(position_type)})</div></div>
-<div class="badge {badge_class(action)}">{esc(action_ja(action))}</div>
+<div class="badge {badge_class(action)}">{esc(display_action)}</div>
 </div>
 <div class="kv">{kv_html}</div>
 {reason_html}{flags_html}
 </div>'''
+
+
+STRATEGY_LABELS = {
+    "default": "標準", "trend": "トレンド", "contrarian": "逆張り",
+    "balanced_frequency": "頻度調整", "hold_baseline": "買い持ち基準",
+}
+
+GATE_REASON_LABELS = {
+    "positive_edge_unvalidated": "優位性あり・OOS検証不足",
+    "no_strategy_passed_tradeability_gate": "採用条件未達",
+    "strategy_edge_too_small_after_trial_penalty": "試行数補正後の優位性不足",
+    "strategy_underperforms_benchmark": "B&Hに劣後",
+    "too_few_strategy_trades": "戦略取引数不足",
+    "candidate_negative_expected_value": "コスト控除後期待値マイナス",
+}
 
 
 def render_strategy_gate(context: dict) -> str:
@@ -225,15 +269,17 @@ def render_strategy_gate(context: dict) -> str:
             status = strategy
             tradeable = "yes" if sel.get("tradeable") else "no"
             reason = sel.get("reason") or comp.get("reason", "")
-        rows.append(f"<tr><td>{esc(t)}</td><td>{esc(strategy)}</td><td>{esc(status)}</td>"
+        strategy_ja = STRATEGY_LABELS.get(strategy, strategy)
+        reason_ja = GATE_REASON_LABELS.get(reason, reason)
+        rows.append(f"<tr><td>{esc(t)}</td><td>{esc(strategy_ja)}</td><td>{esc(status)}</td>"
                     f"<td>{esc(str(tradeable))}</td>"
                     f"<td>{esc(pct(comp.get('strategy_total_return')))}</td>"
                     f"<td>{esc(pct(comp.get('benchmark_total_return')))}</td>"
                     f"<td>{esc(pct(comp.get('excess_total_return')))}</td>"
-                    f"<td>{esc(reason)}</td></tr>")
+                    f"<td>{esc(reason_ja)}</td></tr>")
     if not rows:
         return ""
-    header = "<tr><th>Ticker</th><th>Strategy</th><th>Status</th><th>Tradeable</th><th>Strat Return</th><th>B&H Return</th><th>Excess</th><th>Reason</th></tr>"
+    header = "<tr><th>銘柄</th><th>戦略</th><th>状態</th><th>採用可否</th><th>戦略リターン</th><th>B&Hリターン</th><th>超過</th><th>理由</th></tr>"
     return f'<div class="gate"><table>{header}{"".join(rows)}</table></div>'
 
 
@@ -282,12 +328,20 @@ def build_html(context: dict) -> str:
     freshness = context.get("price_freshness", {})
     reference_date = context.get("reference_date", "")
 
+    # WF quality summary
+    freq = context.get("frequency_diagnostics", {})
+    freq_summary = freq.get("summary", {})
+    wf_quality_text = f"thin OOS {freq_summary.get('thin_oos_trades', 0)}/{len(holdings)}, stable {freq_summary.get('sufficient', 0)}/{len(holdings)}"
+    if freq_summary.get("sparse"):
+        wf_quality_text += f", sparse {freq_summary['sparse']}"
+
     metrics = "".join([
         render_metric("Total Assets", yen(account.get("total_assets"))),
         render_metric("Cash", yen(account.get("available_cash"))),
         render_metric(account.get("margin_ratio_label", "委託保証金率"), account.get("margin_ratio_text", account.get("margin_ratio", "-"))),
         render_metric("Price Freshness", f"stale_count={freshness.get('stale_count', 0)}"),
         render_metric("Risk Mode", strategy_review.get("risk_mode", "-")),
+        render_metric("WF Quality", wf_quality_text),
     ])
     cards = "".join(render_holding_card(h, signals, backtest, decisions) for h in holdings)
     gate = render_strategy_gate(context)
@@ -305,9 +359,9 @@ def build_html(context: dict) -> str:
 <body><main class="wrap">
 <div class="top"><div><h1>Stock Advisor Daily</h1><div class="meta">reference date: {esc(reference_date)}</div></div></div>
 <section class="hero"><div class="metrics">{metrics}</div></section>
-<section class="section"><h2 class="section-title">Action Board</h2>{orders}</section>
-<section class="section"><h2 class="section-title">Strategy Gate</h2>{gate}</section>
-<section class="section"><h2 class="section-title">Positions</h2><div class="grid">{cards}</div></section>
+<section class="section"><h2 class="section-title">本日のアクション</h2>{orders}</section>
+<section class="section"><h2 class="section-title">戦略ゲート</h2>{gate}</section>
+<section class="section"><h2 class="section-title">保有銘柄</h2><div class="grid">{cards}</div></section>
 {watchlist}
 <p class="meta">教育・参考目的のみ。投資判断はご自身の責任で行ってください。</p>
 </main></body></html>'''
