@@ -27,6 +27,8 @@ log = logging.getLogger("pipeline")
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 VENV_PYTHON = SCRIPTS_DIR / ".venv" / "bin" / "python"
 
+from market_clock import classify_market_session
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -86,7 +88,10 @@ def main() -> None:
     # -- Step 1: Signal engine ---------------------------------------------------
     log.info("=== Step 1: Signal engine ===")
     signals_path = results_dir / "signals.json"
-    run([str(SCRIPTS_DIR / "run_signal_engine"), "--all", "--output", str(signals_path)])
+    signal_cmd = [str(SCRIPTS_DIR / "run_signal_engine"), "--all", "--output", str(signals_path)]
+    if classify_market_session() == "open":
+        signal_cmd.append("--refresh")
+    run(signal_cmd)
 
     # Detect reference date from signals output (or use CLI override)
     reference_date = args.date or read_reference_date(signals_path)

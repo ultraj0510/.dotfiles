@@ -101,11 +101,14 @@ def render_strategy_gate_summary(items: list[dict]) -> str:
 
 
 def render_strategy_review_summary(summary: dict) -> str:
+    candidate_label = "候補戦略（縮小執行）"
+    if summary.get("candidate_strategy", 0) and summary.get("automation_allowed", 0) == 0:
+        candidate_label = "候補戦略（検証中・執行不可）"
     text = (
         f"戦略レビュー: リスクモード: {summary.get('risk_mode', 'balanced')}、"
         f"自動売買可: {summary.get('automation_allowed', 0)}銘柄、"
         f"検証済み戦略: {summary.get('validated_strategy', 0)}銘柄、"
-        f"候補戦略（縮小執行）: {summary.get('candidate_strategy', 0)}銘柄、"
+        f"{candidate_label}: {summary.get('candidate_strategy', 0)}銘柄、"
         f"買い持ち優先: {summary.get('hold_baseline', 0)}銘柄、"
         f"利益伸長ストップ管理: {summary.get('profit_protection', 0)}銘柄。"
     )

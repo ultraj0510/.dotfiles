@@ -237,9 +237,24 @@ def validate(
 
 def _check_strategy_summary_consistency(report_text: str) -> str | None:
     has_all_underperform_claim = "全銘柄でテクニカル戦略が B&H に劣後" in report_text
-    has_candidate = "候補戦略（縮小執行）: 1銘柄" in report_text or "候補: " in report_text
+    has_candidate = "候補戦略（縮小執行）: 1銘柄" in report_text or "候補戦略（検証中・執行不可）: 1銘柄" in report_text or "候補: " in report_text
     if has_all_underperform_claim and has_candidate:
         return "Report claims all strategies underperform while candidate strategies exist"
+
+    # Check candidate/gate contradictions
+    candidate_tickers = set()
+    for match in re.finditer(r"候補:\s*([^。]+)", report_text):
+        for token in match.group(1).split(","):
+            ticker = token.split(":")[0].strip()
+            if ticker:
+                candidate_tickers.add(ticker)
+    for line in report_text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if cells and cells[0] in candidate_tickers and "strategy_underperforms_benchmark" in " ".join(cells):
+            return "Report Strategy Gate contradicts candidate strategy summary"
+
     return None
 
 

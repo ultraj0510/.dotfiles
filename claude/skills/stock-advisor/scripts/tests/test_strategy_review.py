@@ -40,6 +40,7 @@ def test_classify_strategy_posture_uses_candidate_strategy_for_positive_but_unva
             "trade_count": 18,
             "reason": "strategy_beats_benchmark",
         },
+        "baseline": {"wins": 7, "losses": 11, "avg_win_pct": 14.49, "avg_loss_pct": -4.96},
         "walk_forward": {
             "consensus": {
                 "verdict": "unstable",
@@ -58,6 +59,7 @@ def test_classify_strategy_posture_uses_candidate_strategy_for_positive_but_unva
     # Balanced mode allows reduced-size candidate trades
     posture_balanced = classify_strategy_posture({
         "strategy_selection": {"selected_strategy": "hold_baseline", "tradeable": False, "reason": "no_strategy_passed_tradeability_gate"},
+        "baseline": {"wins": 7, "losses": 11, "avg_win_pct": 14.49, "avg_loss_pct": -4.96},
         "benchmark_comparison": {"beats_benchmark_return": True, "beats_benchmark_sharpe": True, "trade_count": 18, "reason": "strategy_beats_benchmark"},
         "walk_forward": {"consensus": {"verdict": "unstable", "data_quality": "thin_oos_trades", "total_test_trades": 7}},
     }, risk_mode="balanced")
@@ -87,6 +89,7 @@ def test_summarize_strategy_review_counts_candidate_strategy():
     summary = summarize_strategy_review({
         "7974.T": {
             "strategy_selection": {"tradeable": False},
+            "baseline": {"wins": 7, "losses": 11, "avg_win_pct": 14.49, "avg_loss_pct": -4.96},
             "benchmark_comparison": {
                 "beats_benchmark_return": True,
                 "beats_benchmark_sharpe": True,
@@ -144,6 +147,7 @@ def test_manual_range_plan_never_allows_automation():
             "trade_count": 18,
             "reason": "strategy_beats_benchmark",
         },
+        "baseline": {"wins": 7, "losses": 11, "avg_win_pct": 14.49, "avg_loss_pct": -4.96},
         "walk_forward": {
             "consensus": {
                 "verdict": "unstable",
@@ -160,6 +164,7 @@ def test_manual_range_plan_never_allows_automation():
 def test_candidate_strategy_is_rejected_when_expected_value_is_negative():
     posture = classify_strategy_posture({
         "strategy_selection": {"tradeable": False},
+        "baseline": {"wins": 4, "losses": 8, "avg_win_pct": 2.0, "avg_loss_pct": -5.0},
         "benchmark_comparison": {
             "beats_benchmark_return": True,
             "beats_benchmark_sharpe": True,
@@ -173,7 +178,6 @@ def test_candidate_strategy_is_rejected_when_expected_value_is_negative():
                 "total_test_trades": 7,
             },
         },
-        "expected_value_after_cost_pct": -0.25,
     }, risk_mode="balanced")
 
     assert posture["posture"] == "hold_baseline"

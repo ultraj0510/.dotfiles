@@ -164,7 +164,28 @@ def build_context(
     decisions_data = load_json(decisions_path)
 
     account = build_account(portfolio)
-    holdings = build_holdings(portfolio)
+    quote_map = {}
+    for entry in signals_data.get("results", []):
+        t = entry.get("ticker")
+        if t:
+            quote_map[t] = entry.get("quote", {})
+    holdings = []
+    stale_tickers = []
+    for h in build_holdings(portfolio):
+        item = dict(h)
+        q = quote_map.get(item.get("ticker"), {})
+        item["portfolio_price"] = item.get("current_price")
+        if q.get("price") is not None and not q.get("is_stale"):
+            item["current_price"] = q["price"]
+            item["price_source"] = q.get("source", "")
+            item["price_as_of"] = q.get("as_of")
+        else:
+            item["price_source"] = q.get("source", "portfolio_yaml")
+            item["price_as_of"] = q.get("as_of")
+            if q.get("is_stale"):
+                stale_tickers.append(item.get("ticker"))
+        holdings.append(item)
+    price_freshness = {"stale_count": len(set(stale_tickers)), "stale_tickers": sorted(set(stale_tickers))}
     watchlist = build_watchlist(portfolio)
     signals = build_signals(signals_data)
     backtest = build_backtest_results(backtest_dir)
@@ -184,6 +205,7 @@ def build_context(
         "quant_decisions": quant,
         "macro_context": build_macro_context(signals_data),
         "frequency_diagnostics": summarize_frequency_diagnostics(backtest),
+        "price_freshness": price_freshness,
     }
 
 

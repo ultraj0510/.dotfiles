@@ -37,6 +37,7 @@ from signal_rules import (
     BREAKDOWN_5D, BREAKDOWN_VOL_GATE,
     DRAWDOWN_20D, BB_PROXIMITY,
 )
+from quote_service import fetch_quote
 
 logger = logging.getLogger(__name__)
 
@@ -467,6 +468,7 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False, macr
         if macro is None:
             macro = fetch_macro_context()
         analyst = fetch_analyst_target(ticker)
+        quote = fetch_quote(ticker)
 
         # Date fallback: retry up to 10 days for indicator data
         working_date = date_str
@@ -502,6 +504,7 @@ def analyze_ticker(ticker: str, date_str: str, force_refresh: bool = False, macr
             "score": score,
             "macro": macro,
             "analyst": analyst,
+            "quote": quote,
             "suggested_entry": compute_suggested_entry(indicators, analyst),
         }
     except Exception as e:

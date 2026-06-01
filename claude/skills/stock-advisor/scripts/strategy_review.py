@@ -1,5 +1,7 @@
 """Strategy review: classify strategy posture and risk-mode sizing after gate evaluation."""
 
+from signal_reliability import expected_value_after_cost_pct, shrink_win_probability
+
 
 RISK_MODE_MULTIPLIERS = {
     "defensive": {
@@ -27,15 +29,31 @@ def _walk_forward_consensus(backtest: dict) -> dict:
     return backtest.get("walk_forward", {}).get("consensus", {})
 
 
+def candidate_expected_value(candidate: dict) -> float | None:
+    baseline = candidate.get("baseline", {})
+    wins = int(baseline.get("wins", 0) or 0)
+    losses = int(baseline.get("losses", 0) or 0)
+    avg_win = float(baseline.get("avg_win_pct", 0) or 0)
+    avg_loss = float(baseline.get("avg_loss_pct", 0) or 0)
+    if wins + losses == 0 or avg_win == 0 or avg_loss == 0:
+        return None
+    return expected_value_after_cost_pct(
+        p_win=shrink_win_probability(wins, losses),
+        avg_win_pct=avg_win,
+        avg_loss_pct=avg_loss,
+        round_trip_cost_pct=0.5,
+    )
+
+
 def _is_candidate_strategy(backtest: dict) -> bool:
     comparison = backtest.get("benchmark_comparison", {})
     consensus = _walk_forward_consensus(backtest)
     trade_count = int(comparison.get("trade_count", 0) or 0)
     total_test_trades = int(consensus.get("total_test_trades", 0) or 0)
     verdict = consensus.get("verdict")
-    ev = backtest.get("expected_value_after_cost_pct")
+    ev = candidate_expected_value(backtest)
 
-    if ev is not None and ev < 0:
+    if ev is None or ev < 0:
         return False
     if not comparison.get("beats_benchmark_return"):
         return False
@@ -122,8 +140,8 @@ def classify_strategy_posture(backtest: dict, risk_mode: str = "balanced") -> di
     else:
         posture = "hold_baseline"
         candidate_strategy = None
-        ev = backtest.get("expected_value_after_cost_pct")
-        if ev is not None and ev < 0:
+        ev = candidate_expected_value(backtest)
+        if ev is not None and ev <= 0 and comparison.get("beats_benchmark_return"):
             reason = "candidate_negative_expected_value"
         else:
             reason = comparison.get("reason", selection.get("reason", "strategy_not_tradeable"))

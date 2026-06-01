@@ -54,13 +54,18 @@ def _normalize_signal_single(raw: dict) -> dict:
     rec = raw.get("score", {}).get("recommendation", "HOLD")
     action = _RECOMMENDATION_TO_ACTION.get(rec, "HOLD")
     indicators = raw.get("indicators", {})
-    close = safe_float(indicators.get("close"))
+    indicator_close = safe_float(indicators.get("close"))
+    quote = raw.get("quote") or {}
+    quote_price = safe_float(quote.get("price"))
+    current_price = quote_price if quote_price is not None and not quote.get("is_stale") else indicator_close
     atr_val = safe_float(indicators.get("atr"))
 
     flat = {
         "action": action,
-        "current_price": close or 0.0,
-        "atr": atr_val or (close * 0.02 if close else 0.0),
+        "current_price": current_price or 0.0,
+        "indicator_close": indicator_close or 0.0,
+        "quote": quote,
+        "atr": atr_val or ((current_price or indicator_close or 0.0) * 0.02),
     }
 
     raw_signals = raw.get("signals", [])
