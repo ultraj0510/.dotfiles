@@ -44,7 +44,7 @@ KNOWN_METADATA_TOKENS = {
     "beats_benchmark_return", "beats_benchmark_sharpe",
     "strategy_comparison",
     # Default strategy names
-    "trend", "contrarian", "default",
+    "trend", "contrarian", "default", "balanced_frequency",
 }
 
 
@@ -228,7 +228,19 @@ def validate(
     if err:
         errors.append(err)
 
+    err = _check_strategy_summary_consistency(report_text)
+    if err:
+        errors.append(err)
+
     return errors
+
+
+def _check_strategy_summary_consistency(report_text: str) -> str | None:
+    has_all_underperform_claim = "全銘柄でテクニカル戦略が B&H に劣後" in report_text
+    has_candidate = "候補戦略（縮小執行）: 1銘柄" in report_text or "候補: " in report_text
+    if has_all_underperform_claim and has_candidate:
+        return "Report claims all strategies underperform while candidate strategies exist"
+    return None
 
 
 def _check_forbidden_strategy_wording(report_text: str) -> str | None:

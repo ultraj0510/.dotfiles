@@ -50,6 +50,49 @@ def _is_candidate_strategy(backtest: dict) -> bool:
     return True
 
 
+def _candidate_input(strategy_name: str, strategy_result: dict) -> dict:
+    return {
+        "strategy_name": strategy_name,
+        "benchmark_comparison": strategy_result.get("benchmark_comparison", {}),
+        "walk_forward": strategy_result.get("walk_forward", {}),
+        "baseline": strategy_result.get("baseline", {}),
+    }
+
+
+def _candidate_score(candidate: dict) -> tuple:
+    comparison = candidate.get("benchmark_comparison", {})
+    return (
+        float(comparison.get("excess_sharpe", 0) or 0),
+        float(comparison.get("excess_total_return", 0) or 0),
+        int(comparison.get("trade_count", 0) or 0),
+    )
+
+
+def select_candidate_strategy(backtest: dict) -> dict | None:
+    candidates = []
+    for strategy_name, strategy_result in backtest.get("strategy_comparison", {}).items():
+        candidate = _candidate_input(strategy_name, strategy_result)
+        if _is_candidate_strategy(candidate):
+            comparison = candidate["benchmark_comparison"]
+            candidates.append({
+                "strategy": strategy_name,
+                "reason": "positive_edge_unvalidated",
+                "excess_sharpe": comparison.get("excess_sharpe", 0),
+                "excess_total_return": comparison.get("excess_total_return", 0),
+                "trade_count": comparison.get("trade_count", 0),
+                "wf_verdict": candidate.get("walk_forward", {}).get("consensus", {}).get("verdict"),
+                "wf_data_quality": candidate.get("walk_forward", {}).get("consensus", {}).get("data_quality"),
+                "_score": _candidate_score(candidate),
+            })
+
+    if not candidates:
+        return None
+
+    selected = max(candidates, key=lambda c: c["_score"])
+    selected.pop("_score", None)
+    return selected
+
+
 def classify_strategy_posture(backtest: dict, risk_mode: str = "balanced") -> dict:
     if backtest.get("risk_posture") == "protect_profit":
         return {
@@ -62,15 +105,23 @@ def classify_strategy_posture(backtest: dict, risk_mode: str = "balanced") -> di
     selection = backtest.get("strategy_selection", {})
     comparison = backtest.get("benchmark_comparison", {})
     risk_policy = RISK_MODE_MULTIPLIERS.get(risk_mode, RISK_MODE_MULTIPLIERS["defensive"])
+    candidate = select_candidate_strategy(backtest)
 
     if selection.get("tradeable"):
         posture = "validated_strategy"
         reason = selection.get("reason", "strategy_tradeable")
+        candidate_strategy = selection.get("selected_strategy")
+    elif candidate:
+        posture = "candidate_strategy"
+        reason = candidate["reason"]
+        candidate_strategy = candidate["strategy"]
     elif _is_candidate_strategy(backtest):
         posture = "candidate_strategy"
         reason = "positive_edge_unvalidated"
+        candidate_strategy = None
     else:
         posture = "hold_baseline"
+        candidate_strategy = None
         ev = backtest.get("expected_value_after_cost_pct")
         if ev is not None and ev < 0:
             reason = "candidate_negative_expected_value"
@@ -78,12 +129,16 @@ def classify_strategy_posture(backtest: dict, risk_mode: str = "balanced") -> di
             reason = comparison.get("reason", selection.get("reason", "strategy_not_tradeable"))
 
     size_multiplier = risk_policy[posture]
-    return {
+    result = {
         "posture": posture,
         "automation_allowed": size_multiplier > 0,
         "size_multiplier": size_multiplier,
         "reason": reason,
+        "candidate_strategy": candidate_strategy,
     }
+    if candidate:
+        result["candidate"] = candidate
+    return result
 
 
 def summarize_strategy_review(backtests: dict, risk_mode: str = "balanced") -> dict:
@@ -94,10 +149,13 @@ def summarize_strategy_review(backtests: dict, risk_mode: str = "balanced") -> d
         "profit_protection": 0,
         "automation_allowed": 0,
         "risk_mode": risk_mode,
+        "candidates": {},
     }
-    for backtest in backtests.values():
+    for ticker, backtest in backtests.items():
         posture = classify_strategy_posture(backtest, risk_mode=risk_mode)
         summary[posture["posture"]] += 1
         if posture["automation_allowed"]:
             summary["automation_allowed"] += 1
+        if posture["posture"] == "candidate_strategy":
+            summary["candidates"][ticker] = posture.get("candidate", {})
     return summary

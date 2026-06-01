@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml
 from strategy_review import summarize_strategy_review
+from frequency_research import summarize_frequency_diagnostics
 
 
 class DateAwareEncoder(json.JSONEncoder):
@@ -111,6 +112,8 @@ def build_backtest_results(backtest_dir: str) -> dict[str, dict]:
             entry["strategy_selection"] = data["strategy_selection"]
         if "benchmark_comparison" in data:
             entry["benchmark_comparison"] = data["benchmark_comparison"]
+        if "strategy_comparison" in data:
+            entry["strategy_comparison"] = data["strategy_comparison"]
         results[ticker] = entry
     return results
 
@@ -180,6 +183,7 @@ def build_context(
         "correlations": correlations,
         "quant_decisions": quant,
         "macro_context": build_macro_context(signals_data),
+        "frequency_diagnostics": summarize_frequency_diagnostics(backtest),
     }
 
 

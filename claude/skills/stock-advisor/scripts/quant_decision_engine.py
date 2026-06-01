@@ -140,6 +140,8 @@ def _normalize_backtest(raw: dict | None) -> dict | None:
         normalized["strategy_selection"] = raw["strategy_selection"]
     if "benchmark_comparison" in raw:
         normalized["benchmark_comparison"] = raw["benchmark_comparison"]
+    if "strategy_comparison" in raw:
+        normalized["strategy_comparison"] = raw["strategy_comparison"]
 
     return normalized
 
