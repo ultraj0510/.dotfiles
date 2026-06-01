@@ -2020,7 +2020,11 @@ def main():
         start_date = start_dt.strftime("%Y-%m-%d")
 
     # Check backtest result cache (must be after start_date is resolved)
-    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
+    cache_allowed = (
+        not args.no_cache and not args.tune and not args.wf_research
+        and args.wf_windows == 5 and args.strategy not in ("all", "auto")
+    )
+    if cache_allowed:
         cached = load_cached_result(args.ticker, args.strategy,
                                     start_date, end_date,
                                     max_age=args.cache_ttl)
@@ -2127,13 +2131,15 @@ def main():
     else:
         sig_df = generate_signals(args.ticker, start_date, end_date,
                                   strategy_mode=args.strategy)
-        baseline = simulate_trades(sig_df, margin_mode=margin_mode)
+        baseline = simulate_trades(sig_df, margin_mode=margin_mode,
+                                    execution_delay=execution_delay)
         baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
         result["baseline"] = baseline
 
         # Walk-forward analysis (rolling windows)
         wf = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
-                                  strategy_mode=args.strategy)
+                                  strategy_mode=args.strategy,
+                                  execution_delay=execution_delay, n_windows=args.wf_windows)
         result["walk_forward"] = wf
 
         result["benchmark_comparison"] = _compare_strategy_to_benchmark(
@@ -2195,7 +2201,7 @@ def main():
     output_json = json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
     # Save to cache (skip for --no-cache, --tune, and --strategy all)
-    if not args.no_cache and not args.tune and args.strategy not in ("all", "auto"):
+    if cache_allowed:
         save_cached_result(args.ticker, args.strategy, start_date, end_date, result)
 
     if args.output:

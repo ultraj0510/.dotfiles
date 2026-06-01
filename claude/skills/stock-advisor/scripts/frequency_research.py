@@ -62,8 +62,30 @@ def classify_trade_frequency(backtest: dict) -> dict:
     }
 
 
+def _empty_summary() -> dict:
+    return {
+        "sparse": 0, "moderate": 0, "sufficient": 0,
+        "thin_oos_trades": 0, "unstable": 0, "limited": 0,
+        "stable_or_robust": 0,
+    }
+
+
+def normalize_frequency_diagnostics(value: dict | None, holdings_count: int = 0, backtests: dict | None = None) -> dict:
+    if isinstance(value, dict) and "summary" in value and "tickers" in value:
+        summary = _empty_summary()
+        summary.update(value.get("summary", {}))
+        return {"summary": summary, "tickers": value.get("tickers", {})}
+    if backtests:
+        return summarize_frequency_diagnostics(backtests)
+    summary = _empty_summary()
+    if isinstance(value, dict):
+        for key in ("sparse", "moderate", "sufficient"):
+            summary[key] = int(value.get(key, 0) or 0)
+    return {"summary": summary, "tickers": {}}
+
+
 def summarize_frequency_diagnostics(backtests: dict) -> dict:
-    summary = {"sparse": 0, "moderate": 0, "sufficient": 0, "thin_oos_trades": 0, "unstable": 0, "limited": 0}
+    summary = _empty_summary()
     tickers = {}
     for ticker, backtest in backtests.items():
         diag = classify_trade_frequency(backtest)
@@ -76,5 +98,7 @@ def summarize_frequency_diagnostics(backtests: dict) -> dict:
             summary["unstable"] += 1
         elif verdict == "limited":
             summary["limited"] += 1
+        if verdict in {"stable", "robust"}:
+            summary["stable_or_robust"] += 1
         tickers[ticker] = diag
     return {"summary": summary, "tickers": tickers}

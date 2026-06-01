@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml
 from strategy_review import summarize_strategy_review
-from frequency_research import summarize_frequency_diagnostics
+from frequency_research import summarize_frequency_diagnostics, normalize_frequency_diagnostics
 
 
 class DateAwareEncoder(json.JSONEncoder):
@@ -204,7 +204,11 @@ def build_context(
         "correlations": correlations,
         "quant_decisions": quant,
         "macro_context": build_macro_context(signals_data),
-        "frequency_diagnostics": summarize_frequency_diagnostics(backtest),
+        "frequency_diagnostics": normalize_frequency_diagnostics(
+            summarize_frequency_diagnostics(backtest),
+            holdings_count=len(holdings),
+            backtests=backtest,
+        ),
         "price_freshness": price_freshness,
     }
 

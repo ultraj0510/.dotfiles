@@ -6,6 +6,8 @@ import html as _html
 import json
 from pathlib import Path
 
+from frequency_research import normalize_frequency_diagnostics
+
 
 def esc(value) -> str:
     return _html.escape("" if value is None else str(value), quote=True)
@@ -231,6 +233,17 @@ STRATEGY_LABELS = {
     "balanced_frequency": "頻度調整", "hold_baseline": "買い持ち基準",
 }
 
+GATE_STATUS_LABELS = {
+    "candidate": "候補",
+    "hold_baseline": "買い持ち基準",
+    "default": "標準", "trend": "トレンド", "contrarian": "逆張り",
+    "balanced_frequency": "頻度調整",
+}
+
+TRADEABLE_LABELS = {
+    "yes": "可", "no": "不可", "reduced": "縮小可", "blocked": "不可",
+}
+
 GATE_REASON_LABELS = {
     "positive_edge_unvalidated": "優位性あり・OOS検証不足",
     "no_strategy_passed_tradeability_gate": "採用条件未達",
@@ -270,9 +283,11 @@ def render_strategy_gate(context: dict) -> str:
             tradeable = "yes" if sel.get("tradeable") else "no"
             reason = sel.get("reason") or comp.get("reason", "")
         strategy_ja = STRATEGY_LABELS.get(strategy, strategy)
+        status_ja = GATE_STATUS_LABELS.get(status, status)
+        tradeable_ja = TRADEABLE_LABELS.get(str(tradeable), str(tradeable))
         reason_ja = GATE_REASON_LABELS.get(reason, reason)
-        rows.append(f"<tr><td>{esc(t)}</td><td>{esc(strategy_ja)}</td><td>{esc(status)}</td>"
-                    f"<td>{esc(str(tradeable))}</td>"
+        rows.append(f"<tr><td>{esc(t)}</td><td>{esc(strategy_ja)}</td><td>{esc(status_ja)}</td>"
+                    f"<td>{esc(tradeable_ja)}</td>"
                     f"<td>{esc(pct(comp.get('strategy_total_return')))}</td>"
                     f"<td>{esc(pct(comp.get('benchmark_total_return')))}</td>"
                     f"<td>{esc(pct(comp.get('excess_total_return')))}</td>"
@@ -301,7 +316,7 @@ def render_orders(holdings: list, decisions: dict) -> str:
                           f'<div class="badge {badge_class(a)}">{esc(action_ja(a))} {shares}株</div>'
                           f'</div>')
     if not active:
-        return '<div class="empty">No active orders today.</div>'
+        return '<div class="empty">本日の発注はありません。</div>'
     return f'<div class="orders">{"".join(active)}</div>'
 
 
@@ -328,20 +343,25 @@ def build_html(context: dict) -> str:
     freshness = context.get("price_freshness", {})
     reference_date = context.get("reference_date", "")
 
-    # WF quality summary
-    freq = context.get("frequency_diagnostics", {})
-    freq_summary = freq.get("summary", {})
-    wf_quality_text = f"thin OOS {freq_summary.get('thin_oos_trades', 0)}/{len(holdings)}, stable {freq_summary.get('sufficient', 0)}/{len(holdings)}"
-    if freq_summary.get("sparse"):
-        wf_quality_text += f", sparse {freq_summary['sparse']}"
+    # WF quality summary (normalized)
+    freq = normalize_frequency_diagnostics(
+        context.get("frequency_diagnostics", {}),
+        holdings_count=len(holdings),
+        backtests=backtest,
+    )
+    freq_summary = freq["summary"]
+    wf_quality_text = (
+        f"thin OOS {freq_summary.get('thin_oos_trades', 0)}/{len(holdings)}, "
+        f"stable {freq_summary.get('stable_or_robust', 0)}/{len(holdings)}"
+    )
 
     metrics = "".join([
-        render_metric("Total Assets", yen(account.get("total_assets"))),
-        render_metric("Cash", yen(account.get("available_cash"))),
+        render_metric("総資産", yen(account.get("total_assets"))),
+        render_metric("現金", yen(account.get("available_cash"))),
         render_metric(account.get("margin_ratio_label", "委託保証金率"), account.get("margin_ratio_text", account.get("margin_ratio", "-"))),
-        render_metric("Price Freshness", f"stale_count={freshness.get('stale_count', 0)}"),
-        render_metric("Risk Mode", strategy_review.get("risk_mode", "-")),
-        render_metric("WF Quality", wf_quality_text),
+        render_metric("価格鮮度", f"stale_count={freshness.get('stale_count', 0)}"),
+        render_metric("リスクモード", strategy_review.get("risk_mode", "-")),
+        render_metric("WF品質", wf_quality_text),
     ])
     cards = "".join(render_holding_card(h, signals, backtest, decisions) for h in holdings)
     gate = render_strategy_gate(context)
