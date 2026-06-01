@@ -110,19 +110,19 @@ h1{font-size:24px;line-height:1.2;margin:0;color:var(--accent);font-weight:800}
 .meta{font-family:var(--mono);font-size:11px;color:var(--m2);margin-top:6px}
 .hero,.panel,.card{background:var(--s1);border:1px solid var(--b1);border-radius:12px}
 .hero{padding:18px 20px;margin-bottom:14px}
-.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
-.metric{background:var(--s2);border:1px solid var(--b1);border-radius:9px;padding:12px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px}
+.metric{background:var(--s2);border:1px solid var(--b1);border-radius:9px;padding:12px;min-width:0}
 .metric .label{font-size:10px;color:var(--m2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
-.metric .value{font-family:var(--mono);font-size:18px;font-weight:700;overflow-wrap:anywhere;min-width:0}
+.metric .value{font-family:var(--mono);font-size:18px;font-weight:700;overflow-wrap:anywhere;word-break:break-word;min-width:0}
 .section{margin-top:14px}
 .section-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--m2);margin:0 0 8px}
 .orders{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
 .empty{padding:16px;color:var(--m2);font-size:13px}
 .gate{width:100%;overflow-x:auto}
-.gate table{width:100%;border-collapse:collapse;font-size:12px}
-.gate th,.gate td{padding:9px 10px;border-bottom:1px solid var(--b1);text-align:left}
+.gate table{width:100%;min-width:860px;border-collapse:collapse;font-size:12px}
+.gate th,.gate td{padding:9px 10px;border-bottom:1px solid var(--b1);text-align:left;white-space:nowrap}
 .gate th{color:var(--m2);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
-.gate td{font-family:var(--mono)}
+.gate td{font-family:var(--mono);white-space:nowrap}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
 .card{padding:14px;position:relative;overflow:hidden}
 .card:before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--m1)}
@@ -142,7 +142,7 @@ h1{font-size:24px;line-height:1.2;margin:0;color:var(--accent);font-weight:800}
 .kv strong{font-family:var(--mono);font-size:13px}
 .reason{margin-top:10px;font-size:12px;line-height:1.65;color:var(--text);background:rgba(232,255,71,.06);border:1px solid rgba(232,255,71,.16);border-radius:8px;padding:9px}
 .up{color:var(--green)}.down{color:var(--red)}.muted{color:var(--m2)}.mono{font-family:var(--mono)}
-@media(max-width:640px){.top{display:block}.grid{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.gate table{font-size:11px}}
+@media(max-width:640px){.top{display:block}.metrics{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.gate table{font-size:11px}}
 """
 
 

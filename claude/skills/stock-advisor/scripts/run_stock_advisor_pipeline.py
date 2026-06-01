@@ -75,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--date", default="", help="Reference date (YYYY-MM-DD), auto-detected from signals if empty")
     parser.add_argument("--strategy-risk-mode", choices=["defensive", "balanced", "aggressive"],
                         default="balanced", help="Risk mode for candidate strategy execution")
+    parser.add_argument("--skip-wf-research", action="store_true",
+                        help="Skip WF research comparison to reduce runtime")
     return parser
 
 
@@ -112,14 +114,17 @@ def main() -> None:
 
     for ticker in tickers:
         out_path = backtest_dir / f"{ticker}.json"
-        run([
+        backtest_cmd = [
             str(VENV_PYTHON), str(SCRIPTS_DIR / "backtest_engine.py"),
             "--ticker", ticker,
             "--strategy", "auto",
             "--execution-delay",
             "--end", reference_date,
             "-o", str(out_path),
-        ])
+        ]
+        if not args.skip_wf_research:
+            backtest_cmd.extend(["--wf-research", "--no-cache"])
+        run(backtest_cmd)
 
     # -- Step 3: Portfolio analytics ----------------------------------------------
     log.info("=== Step 3: Portfolio analytics ===")
@@ -178,6 +183,7 @@ def main() -> None:
         "strategy_risk_mode": args.strategy_risk_mode,
         "market_session": market_session,
         "price_freshness": price_freshness,
+        "settings": {"wf_research": not args.skip_wf_research},
         "tickers": tickers,
         "artifacts": {
             "signals": str(signals_path),
