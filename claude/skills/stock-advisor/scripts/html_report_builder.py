@@ -23,6 +23,15 @@ def pct(value) -> str:
     return f"{float(value):+.2f}%"
 
 
+def number(value, digits: int = 2) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        return f"{float(value):,.{digits}f}"
+    except (TypeError, ValueError):
+        return esc(value)
+
+
 def action_ja(action: str) -> str:
     return {
         "BUY": "追加買い", "HOLD": "保有継続",
@@ -94,7 +103,7 @@ h1{font-size:24px;line-height:1.2;margin:0;color:var(--accent);font-weight:800}
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
 .metric{background:var(--s2);border:1px solid var(--b1);border-radius:9px;padding:12px}
 .metric .label{font-size:10px;color:var(--m2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
-.metric .value{font-family:var(--mono);font-size:18px;font-weight:700}
+.metric .value{font-family:var(--mono);font-size:18px;font-weight:700;overflow-wrap:anywhere;min-width:0}
 .section{margin-top:14px}
 .section-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--m2);margin:0 0 8px}
 .orders{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
@@ -150,17 +159,23 @@ def render_holding_card(holding: dict, signals: dict, backtest: dict, decisions:
     baseline = bt.get("baseline", {})
     consensus = wf.get("consensus", {})
 
+    recommendation = score.get("recommendation", "-")
+    price_source = holding.get("price_source", "-")
+    price_as_of = holding.get("price_as_of", "-")
+
     kv_pairs = [
-        ("Quantity", f"{quantity}株"),
-        ("Cost", yen(cost_price)),
-        ("Current", yen(current_price)),
-        ("PnL", f'<span class="{"up" if pnl>0 else "down"}">{pct(pnl)}</span>'),
-        ("Risk Posture", risk_posture_ja(dec.get("risk_posture"))),
-        ("Score", f'{score.get("score", "-")}'),
-        ("RSI", esc(indicators.get("rsi", "-"))),
-        ("ATR", esc(indicators.get("atr", "-"))),
-        ("Sharpe", f'{baseline.get("sharpe_ratio", "-")}'),
-        ("WF Verdict", wf_ja(wf.get("verdict", ""))),
+        ("株数", f"{quantity}株"),
+        ("取得単価", yen(cost_price)),
+        ("現在値", yen(current_price)),
+        ("含み損益", f'<span class="{"up" if pnl>0 else "down"}">{pct(pnl)}</span>'),
+        ("リスク姿勢", risk_posture_ja(dec.get("risk_posture"))),
+        ("シグナル", f'{score.get("score", "-")} / {recommendation}'),
+        ("RSI", number(indicators.get("rsi"), 1)),
+        ("ATR", yen(float(indicators.get("atr", 0) or 0))),
+        ("Sharpe", number(baseline.get("sharpe_ratio"), 2)),
+        ("WF判定", wf_ja(wf.get("verdict", ""))),
+        ("価格ソース", price_source),
+        ("価格時刻", price_as_of),
     ]
     kv_html = "\n".join(f"<div><span>{esc(k)}</span><strong>{v}</strong></div>" for k, v in kv_pairs if v)
 
@@ -298,6 +313,16 @@ def build_html(context: dict) -> str:
 </main></body></html>'''
 
 
+def update_manifest(output_path: Path) -> None:
+    manifest_path = output_path.parent / "run_manifest.json"
+    if not manifest_path.exists():
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifacts = manifest.setdefault("artifacts", {})
+    artifacts["html_report"] = str(output_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build HTML report from stock-advisor report_context.json")
     parser.add_argument("--context", required=True, help="Path to report_context.json")
@@ -308,6 +333,7 @@ def main():
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html_text, encoding="utf-8")
+    update_manifest(output)
     print(f"HTML report written to {output}")
 
 

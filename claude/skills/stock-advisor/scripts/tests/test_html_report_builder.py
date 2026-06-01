@@ -1,4 +1,9 @@
-from html_report_builder import build_html
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from html_report_builder import build_html, CSS
 
 
 def test_html_report_contains_daily_sections():
@@ -29,6 +34,14 @@ def test_html_report_contains_daily_sections():
     assert "Strategy Gate" in html
     assert "7974.T" in html
     assert "negative_ev: negative EV blocks BUY" in html
+    assert "シグナル" in html
+    assert "HOLD_BUY" in html
+    assert "価格ソース" in html
+    assert "regularMarketPrice" in html
+    assert "価格時刻" in html
+    assert "2026-06-01T10:25:52+09:00" in html
+    assert "RSI" in html
+    assert "40.6" in html
 
 
 def test_html_report_escapes_json_values():
@@ -43,3 +56,36 @@ def test_html_report_escapes_json_values():
     })
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_cli_updates_sibling_manifest_with_html_report(tmp_path):
+    context = tmp_path / "report_context.json"
+    output = tmp_path / "report.html"
+    manifest = tmp_path / "run_manifest.json"
+    context.write_text(json.dumps({
+        "reference_date": "2026-06-01",
+        "account": {}, "holdings": [], "signals": {}, "backtest": {},
+        "quant_decisions": {"decisions": {}}, "watchlist": [],
+    }), encoding="utf-8")
+    manifest.write_text(json.dumps({
+        "generated_at": "2026-06-01T10:42:23",
+        "artifacts": {"report_context": str(context)},
+    }), encoding="utf-8")
+
+    script = Path(__file__).resolve().parents[1] / "html_report_builder.py"
+    subprocess.run([sys.executable, str(script), "--context", str(context), "-o", str(output)], check=True)
+
+    updated = json.loads(manifest.read_text(encoding="utf-8"))
+    assert updated["artifacts"]["html_report"] == str(output)
+
+
+def test_html_report_is_static_and_mobile_safe():
+    html = build_html({
+        "reference_date": "2026-06-01", "account": {}, "holdings": [],
+        "signals": {}, "backtest": {}, "quant_decisions": {"decisions": {}}, "watchlist": [],
+    })
+    assert "<script" not in html.lower()
+    assert "https://" not in html
+    assert "http://" not in html
+    assert "overflow-wrap:anywhere" in CSS
+    assert "min-width:0" in CSS
