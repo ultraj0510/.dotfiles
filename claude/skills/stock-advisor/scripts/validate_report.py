@@ -46,6 +46,8 @@ KNOWN_METADATA_TOKENS = {
     # Default strategy names
     "trend", "contrarian", "default", "balanced_frequency",
     "stale_count", "stale_tickers",
+    "positive_edge_unvalidated", "candidate", "wf_quality_insufficient",
+    "let_winner_run_with_stop",
 }
 
 
