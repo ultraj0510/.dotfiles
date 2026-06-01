@@ -38,6 +38,18 @@ def advisory_mode_ja(mode: str) -> str:
     }.get(mode, mode)
 
 
+def decision_reason_text(decision: dict) -> str:
+    vetoes = decision.get("vetoes", [])
+    explanations = decision.get("explanations", [])
+    if vetoes:
+        if explanations:
+            return f"{', '.join(vetoes)}: {'; '.join(explanations)}"
+        return ", ".join(vetoes)
+    if explanations:
+        return "; ".join(explanations)
+    return ""
+
+
 def format_verdict(verdict: str) -> str:
     mapping = {"robust": "頑健", "stable": "安定",
                "unstable": "不安定", "limited": "限定的",
@@ -294,6 +306,10 @@ def build_report(context: dict) -> str:
         risk_flags_list = dec.get("risk_flags", [])
         if risk_flags_list:
             lines.append(f"| 注意点 | {risk_flag_text(risk_flags_list)} |")
+
+        reason_text = decision_reason_text(dec)
+        if reason_text:
+            lines.append(f"| 判断理由 | {reason_text} |")
 
         plan = dec.get("advisory_plan") or {}
         if plan:

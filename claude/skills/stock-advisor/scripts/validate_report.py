@@ -212,6 +212,10 @@ def validate(
     if err:
         errors.append(err)
 
+    err = check_no_trade_reason_consistency(report_text, quant_decisions_path)
+    if err:
+        errors.append(err)
+
     err = check_account_label(report_text)
     if err:
         errors.append(err)
@@ -254,6 +258,27 @@ def check_price_freshness(report_context_path: str | None) -> str | None:
         return None
     tickers = ", ".join(freshness.get("stale_tickers", []))
     return f"Stale market prices in report_context: {tickers}"
+
+
+BUY_BLOCKING_VETOES = {"negative_ev", "negative_walk_forward", "low_sample", "overfit_walk_forward"}
+
+
+def check_no_trade_reason_consistency(report_text: str, quant_decisions_path: str) -> str | None:
+    decisions = _load_quant_decisions(quant_decisions_path)
+    for decision in decisions:
+        ticker = decision.get("ticker", "")
+        action = decision.get("action", "")
+        vetoes = set(decision.get("vetoes", []))
+        blocking = sorted(vetoes & BUY_BLOCKING_VETOES)
+        if action != "NO_TRADE" or not ticker or not blocking:
+            continue
+        pattern = rf"{re.escape(ticker)}[\s\S]{{0,240}}HOLD_BUY[\s\S]{{0,80}}注文なし"
+        if re.search(pattern, report_text):
+            return (
+                f"Report attributes {ticker} no-order reason to HOLD_BUY "
+                f"while vetoes require: {', '.join(blocking)}"
+            )
+    return None
 
 
 def _check_strategy_summary_consistency(report_text: str) -> str | None:
