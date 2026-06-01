@@ -92,4 +92,9 @@ def test_html_report_is_static_and_mobile_safe():
     assert "https://" not in html
     assert "http://" not in html
     assert "overflow-wrap:anywhere" in CSS
+    assert "word-break:break-word" in CSS
     assert "min-width:0" in CSS
+    assert ".metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px}" in CSS
+    assert ".gate table{width:100%;min-width:860px;border-collapse:collapse;font-size:12px}" in CSS
+    assert "white-space:nowrap" in CSS
+    assert "@media(max-width:640px){.top{display:block}.metrics{grid-template-columns:1fr}" in CSS
