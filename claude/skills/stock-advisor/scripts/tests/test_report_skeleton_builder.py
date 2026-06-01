@@ -237,7 +237,7 @@ def test_report_shows_strategy_gate_for_untradeable_strategy():
     assert "## Strategy Gate" in markdown
     assert "285A.T" in markdown
     assert "hold_baseline" in markdown
-    assert "strategy_underperforms_benchmark" in markdown
+    assert "no_strategy_passed_tradeability_gate" in markdown
     assert "-2899.75" in markdown
 
 

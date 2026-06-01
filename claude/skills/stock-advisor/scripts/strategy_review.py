@@ -31,8 +31,19 @@ def _walk_forward_consensus(backtest: dict) -> dict:
 
 def candidate_expected_value(candidate: dict) -> float | None:
     baseline = candidate.get("baseline", {})
-    wins = int(baseline.get("wins", 0) or 0)
-    losses = int(baseline.get("losses", 0) or 0)
+    trade_count = int(baseline.get("trade_count", 0) or 0)
+    wins_raw = baseline.get("wins")
+    losses_raw = baseline.get("losses")
+    if wins_raw is not None and losses_raw is not None:
+        wins = int(wins_raw or 0)
+        losses = int(losses_raw or 0)
+    else:
+        win_rate = baseline.get("win_rate")
+        if win_rate is None or trade_count <= 0:
+            return None
+        wins = round(trade_count * float(win_rate) / 100)
+        losses = max(trade_count - wins, 0)
+
     avg_win = float(baseline.get("avg_win_pct", 0) or 0)
     avg_loss = float(baseline.get("avg_loss_pct", 0) or 0)
     if wins + losses == 0 or avg_win == 0 or avg_loss == 0:
@@ -92,12 +103,14 @@ def select_candidate_strategy(backtest: dict) -> dict | None:
         candidate = _candidate_input(strategy_name, strategy_result)
         if _is_candidate_strategy(candidate):
             comparison = candidate["benchmark_comparison"]
+            ev = candidate_expected_value(candidate)
             candidates.append({
                 "strategy": strategy_name,
                 "reason": "positive_edge_unvalidated",
                 "excess_sharpe": comparison.get("excess_sharpe", 0),
                 "excess_total_return": comparison.get("excess_total_return", 0),
                 "trade_count": comparison.get("trade_count", 0),
+                "expected_value_after_cost_pct": round(ev, 4) if ev is not None else None,
                 "wf_verdict": candidate.get("walk_forward", {}).get("consensus", {}).get("verdict"),
                 "wf_data_quality": candidate.get("walk_forward", {}).get("consensus", {}).get("data_quality"),
                 "_score": _candidate_score(candidate),

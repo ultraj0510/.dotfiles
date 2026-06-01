@@ -45,6 +45,7 @@ KNOWN_METADATA_TOKENS = {
     "strategy_comparison",
     # Default strategy names
     "trend", "contrarian", "default", "balanced_frequency",
+    "stale_count", "stale_tickers",
 }
 
 
@@ -193,6 +194,7 @@ def validate(
     quant_decisions_path: str,
     backtest_dir: str,
     portfolio_path: str | None = None,
+    report_context_path: str | None = None,
 ) -> list[str]:
     """Run all checks. Returns a list of error messages (empty = clean)."""
     with open(report_path) as f:
@@ -232,7 +234,24 @@ def validate(
     if err:
         errors.append(err)
 
+    err = check_price_freshness(report_context_path)
+    if err:
+        errors.append(err)
+
     return errors
+
+
+def check_price_freshness(report_context_path: str | None) -> str | None:
+    if not report_context_path:
+        return None
+    with open(report_context_path) as f:
+        context = json.load(f)
+    freshness = context.get("price_freshness", {})
+    stale_count = int(freshness.get("stale_count", 0) or 0)
+    if stale_count <= 0:
+        return None
+    tickers = ", ".join(freshness.get("stale_tickers", []))
+    return f"Stale market prices in report_context: {tickers}"
 
 
 def _check_strategy_summary_consistency(report_text: str) -> str | None:
@@ -302,10 +321,14 @@ def main() -> None:
     parser.add_argument(
         "--portfolio", help="Optional portfolio.yaml path for position-count validation"
     )
+    parser.add_argument(
+        "--report-context", help="Optional report_context.json path for price freshness validation"
+    )
     args = parser.parse_args()
 
     errors = validate(
-        args.report, args.signals, args.quant_decisions, args.backtest_dir, args.portfolio
+        args.report, args.signals, args.quant_decisions, args.backtest_dir,
+        args.portfolio, args.report_context,
     )
     if errors:
         print("Validation FAILED:", file=sys.stderr)

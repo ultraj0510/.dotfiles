@@ -52,24 +52,29 @@ def render_strategy_gate_section(items: list[dict]) -> str:
     lines = [
         "## Strategy Gate",
         "",
-        "| Ticker | Selected | Tradeable | Strategy Return | B&H Return | Excess Return | Reason |",
-        "|---|---:|---:|---:|---:|---:|---|",
+        "| Ticker | Strategy | Status | Tradeable | Strategy Return | B&H Return | Excess Return | Reason |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for item in items:
         selection = item.get("strategy_selection", {})
         comparison = item.get("benchmark_comparison", {})
         ticker = item.get("ticker", "-")
-        selected = selection.get("selected_strategy", "unknown")
-        tradeable = "yes" if selection.get("tradeable") else "no"
+        strategy = selection.get("selected_strategy", "unknown")
+        status = selection.get("status") or strategy
+        tradeable = selection.get("tradeable", False)
+        if isinstance(tradeable, bool):
+            tradeable_text = "yes" if tradeable else "no"
+        else:
+            tradeable_text = str(tradeable) if tradeable else "no"
         strategy_return = comparison.get("strategy_total_return", 0.0)
         benchmark_return = comparison.get("benchmark_total_return", 0.0)
         excess_return = comparison.get("excess_total_return", 0.0)
-        reason = comparison.get("reason", selection.get("reason", "unknown"))
+        reason = selection.get("reason") or comparison.get("reason", "unknown")
 
         lines.append(
-            f"| {ticker} | {selected} | {tradeable} | {strategy_return:.2f}% | "
-            f"{benchmark_return:.2f}% | {excess_return:.2f}% | {reason} |"
+            f"| {ticker} | {strategy} | {status} | {tradeable_text} | "
+            f"{strategy_return:.2f}% | {benchmark_return:.2f}% | {excess_return:.2f}% | {reason} |"
         )
 
     lines.append("")
@@ -159,6 +164,12 @@ def build_report(context: dict) -> str:
             lines.append(f"| 最大相関 | {'/'.join(pair)} ({val}) |")
 
     strategy_review = context.get("strategy_review", {})
+    price_freshness = context.get("price_freshness", {})
+    if price_freshness:
+        sc = price_freshness.get("stale_count", 0)
+        st = ",".join(price_freshness.get("stale_tickers", []))
+        suffix = f" stale_tickers={st}" if st else ""
+        lines.append(f"| 価格鮮度 | stale_count={sc}{suffix} |")
     if strategy_review:
         lines.append("")
         lines.append(f"- **{render_strategy_review_summary(strategy_review)}**")
@@ -214,13 +225,30 @@ def build_report(context: dict) -> str:
             continue
         seen_gate_tickers.add(ticker)
         dec = quant_decisions.get(ticker, {})
-        # Strategy gate data is in the backtest section of the context
+        # Strategy gate data: prefer candidate metadata from strategy_review
         bt = backtest.get(ticker, {})
-        item = {
-            "ticker": ticker,
-            "strategy_selection": bt.get("strategy_selection", {}),
-            "benchmark_comparison": bt.get("benchmark_comparison", {}),
-        }
+        candidate = strategy_review.get("candidates", {}).get(ticker)
+        if candidate:
+            strategy_name = candidate.get("strategy", "?")
+            strategy_result = bt.get("strategy_comparison", {}).get(strategy_name, {})
+            comparison = strategy_result.get("benchmark_comparison", {})
+            tradeable = "reduced" if strategy_review.get("automation_allowed", 0) else "blocked"
+            item = {
+                "ticker": ticker,
+                "strategy_selection": {
+                    "selected_strategy": strategy_name,
+                    "tradeable": tradeable,
+                    "status": "candidate",
+                    "reason": candidate.get("reason", comparison.get("reason", "positive_edge_unvalidated")),
+                },
+                "benchmark_comparison": comparison,
+            }
+        else:
+            item = {
+                "ticker": ticker,
+                "strategy_selection": bt.get("strategy_selection", {}),
+                "benchmark_comparison": bt.get("benchmark_comparison", {}),
+            }
         if item["strategy_selection"] or item["benchmark_comparison"]:
             strategy_items.append(item)
 

@@ -20,6 +20,7 @@ import logging
 import pathlib
 import subprocess
 import sys
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("pipeline")
@@ -88,8 +89,9 @@ def main() -> None:
     # -- Step 1: Signal engine ---------------------------------------------------
     log.info("=== Step 1: Signal engine ===")
     signals_path = results_dir / "signals.json"
+    market_session = classify_market_session()
     signal_cmd = [str(SCRIPTS_DIR / "run_signal_engine"), "--all", "--output", str(signals_path)]
-    if classify_market_session() == "open":
+    if market_session == "open":
         signal_cmd.append("--refresh")
     run(signal_cmd)
 
@@ -156,10 +158,17 @@ def main() -> None:
     ])
 
     # -- Manifest -----------------------------------------------------------------
+    price_freshness = {}
+    if context_path.exists():
+        ctx_data = json.loads(context_path.read_text())
+        price_freshness = ctx_data.get("price_freshness", {})
     manifest = {
+        "generated_at": datetime.now().isoformat(),
         "results_dir": str(results_dir),
         "reference_date": reference_date,
         "strategy_risk_mode": args.strategy_risk_mode,
+        "market_session": market_session,
+        "price_freshness": price_freshness,
         "tickers": tickers,
         "artifacts": {
             "signals": str(signals_path),
