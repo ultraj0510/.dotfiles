@@ -54,9 +54,11 @@ mkdir -p "$RESULTS_DIR"
   --results-dir "$RESULTS_DIR"
 ```
 
-出力された `run_manifest.json` の `artifacts` を確認し、`signals.json`、`backtest/*.json`、`portfolio_analytics.json`、`quant_decisions.json`、`report_context.json` が存在することを確認する。
+出力された `run_manifest.json` の `artifacts` を確認し、`signals.json`、`backtest/*.json`、`portfolio_analytics.json`、`quant_decisions.json`、`report_context.json`、`report.html` が存在することを確認する。
 
-### Step 2: レポート骨子生成
+### Step 2: レポート生成
+
+`report.md` は検証用の Markdown サマリー。`report.html` は推奨される人間向けの可読レポート。
 
 ```bash
 RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
@@ -65,7 +67,14 @@ RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
   ~/.claude/skills/stock-advisor/scripts/report_skeleton_builder.py \
   --context "$RESULTS_DIR/report_context.json" \
   -o "$RESULTS_DIR/report.md"
+
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  ~/.claude/skills/stock-advisor/scripts/html_report_builder.py \
+  --context "$RESULTS_DIR/report_context.json" \
+  -o "$RESULTS_DIR/report.html"
 ```
+
+`report.html` はダークテーマ・カードレイアウトのスタンドアロン HTML で、外部依存なし。
 
 LLMはこの `report.md` を整える。アクション、数量、シグナル名、WF判定、口座ラベルは変更しない。
 

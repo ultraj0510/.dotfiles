@@ -157,6 +157,15 @@ def main() -> None:
         "-o", str(context_path),
     ])
 
+    # -- Step 6: HTML report --------------------------------------------------------
+    log.info("=== Step 6: HTML report ===")
+    html_report_path = results_dir / "report.html"
+    run([
+        str(VENV_PYTHON), str(SCRIPTS_DIR / "html_report_builder.py"),
+        "--context", str(context_path),
+        "-o", str(html_report_path),
+    ])
+
     # -- Manifest -----------------------------------------------------------------
     price_freshness = {}
     if context_path.exists():
@@ -176,6 +185,7 @@ def main() -> None:
             "portfolio_analytics": str(analytics_path),
             "quant_decisions": str(decisions_path),
             "report_context": str(context_path),
+            "html_report": str(html_report_path),
         },
     }
     manifest_path = results_dir / "run_manifest.json"
