@@ -2003,6 +2003,10 @@ def main():
                         help="Cache TTL in seconds (default: 86400 = 24h)")
     parser.add_argument("--execution-delay", action="store_true",
                         help="Apply 1-day delay between signal and execution")
+    parser.add_argument("--wf-windows", type=int, default=5,
+                        help="Number of walk-forward rolling windows (default 5)")
+    parser.add_argument("--wf-research", action="store_true",
+                        help="Compare multiple WF window settings for research")
     args = parser.parse_args()
 
 
@@ -2068,7 +2072,7 @@ def main():
             baseline["signal_census"] = compute_signal_census(sig_df, baseline["trades"])
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
                                       margin_mode=margin_mode, strategy_mode=sm,
-                                      execution_delay=execution_delay)
+                                      execution_delay=execution_delay, n_windows=args.wf_windows)
             sc_result = {
                 "label": strategy_labels[sm],
                 "baseline": baseline,
@@ -2114,7 +2118,7 @@ def main():
             result["baseline"] = baseline
             wf = walk_forward_rolling(args.ticker, start_date, end_date,
                                       margin_mode=margin_mode,
-                                      execution_delay=execution_delay)
+                                      execution_delay=execution_delay, n_windows=args.wf_windows)
             result["walk_forward"] = wf
             result["benchmark_comparison"] = _compare_strategy_to_benchmark(
                 result.get("baseline", {}),
@@ -2141,6 +2145,41 @@ def main():
     ic_result = compute_signal_ic(sig_df)
     if ic_result:
         result["signal_ic"] = ic_result
+
+    # WF research: compare different n_windows settings
+    if args.wf_research:
+        result["wf_research"] = {"configs": []}
+        strategies = ["default", "trend", "contrarian", "balanced_frequency"] if args.strategy in ("all", "auto") else [args.strategy]
+        for sm in strategies:
+            for nw in [3, 4, 5]:
+                sig_df_r = generate_signals(args.ticker, start_date, end_date, strategy_mode=sm)
+                baseline_r = simulate_trades(sig_df_r, margin_mode=margin_mode, execution_delay=execution_delay)
+                wf_r = walk_forward_rolling(args.ticker, start_date, end_date, margin_mode=margin_mode,
+                                            strategy_mode=sm, execution_delay=execution_delay, n_windows=nw)
+                consensus = wf_r.get("consensus", {})
+                bc = _compare_strategy_to_benchmark(baseline_r, result["benchmark"])
+                candidate = (bc.get("beats_benchmark_return") and bc.get("beats_benchmark_sharpe")
+                             and consensus.get("data_quality") != "no_oos_trades")
+                result["wf_research"]["configs"].append({
+                    "strategy_mode": sm,
+                    "n_windows": nw,
+                    "total_test_trades": consensus.get("total_test_trades", 0),
+                    "valid_test_windows": consensus.get("valid_test_windows", 0),
+                    "verdict": consensus.get("verdict"),
+                    "data_quality": consensus.get("data_quality"),
+                    "excess_total_return": bc.get("excess_total_return"),
+                    "excess_sharpe": bc.get("excess_sharpe"),
+                    "candidate": candidate,
+                })
+        # Find best diagnostic config
+        best_config = max(result["wf_research"]["configs"],
+                          key=lambda c: (c["total_test_trades"], c.get("excess_sharpe", 0) or 0))
+        result["wf_research"]["best_diagnostic_config"] = {
+            "strategy_mode": best_config["strategy_mode"],
+            "n_windows": best_config["n_windows"],
+            "reason": ("OOS取引数は改善したが、十分水準には未達" if best_config["data_quality"] == "thin_oos_trades"
+                       else f"WF品質: {best_config['data_quality']}"),
+        }
 
     if args.tune:
         tune_result = grid_search(args.ticker, start_date, end_date, margin_mode=margin_mode)
