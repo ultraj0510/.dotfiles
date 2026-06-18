@@ -16,25 +16,11 @@ import os
 import sys
 from pathlib import Path
 
-# Auto-discover a venv with Playwright if system python3 lacks it
-try:
-    from playwright.sync_api import sync_playwright  # noqa: F401
-except ImportError:
-    candidates = [
-        os.path.expanduser("~/.claude/skills/stock-advisor/scripts/.venv/bin/python"),
-        os.path.expanduser("~/.agents/skills/portfolio-auth/.venv/bin/python"),
-        os.path.expanduser("~/.dotfiles/claude/skills/portfolio-auth/.venv/bin/python"),
-    ]
-    for venv_python in candidates:
-        if os.path.isfile(venv_python) and os.access(venv_python, os.X_OK):
-            os.execv(venv_python, [venv_python] + sys.argv)
-
-_CORE = os.path.expanduser("~/.dotfiles/portfolio-core")
-if _CORE not in sys.path:
-    sys.path.insert(0, _CORE)
-
-from cookie_store import read_cookie, save_cookie
-from sbi_auth import validate, parse_cookie_input, missing_critical_keys
+# Ensure scripts/ subdirectory is on sys.path for internal imports
+_this_dir = Path(__file__).resolve().parent
+_scripts_dir = _this_dir / "scripts"
+if _scripts_dir.is_dir() and str(_scripts_dir) not in sys.path:
+    sys.path.insert(0, str(_scripts_dir))
 
 
 def parse_args():
@@ -54,6 +40,9 @@ def parse_args():
 
 
 def save_fresh_cookie(cookie: str, source: str):
+    from cookie_store import save_cookie
+    from sbi_auth import parse_cookie_input, missing_critical_keys, validate
+
     tokens = parse_cookie_input(cookie)
     missing = missing_critical_keys(tokens)
     if missing:
@@ -73,6 +62,9 @@ def save_fresh_cookie(cookie: str, source: str):
 
 
 def cmd_default():
+    from cookie_store import read_cookie
+    from sbi_auth import validate
+
     cookie = read_cookie()
     if not cookie:
         print("STATUS: UNSET")
@@ -97,6 +89,19 @@ def cmd_default():
 
 
 if __name__ == "__main__":
+    # Auto-discover a venv with Playwright if system python3 lacks it
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        candidates = [
+            os.path.expanduser("~/.claude/skills/stock-advisor/scripts/.venv/bin/python"),
+            os.path.expanduser("~/.agents/skills/portfolio-auth/.venv/bin/python"),
+            os.path.expanduser("~/.dotfiles/claude/skills/portfolio-auth/.venv/bin/python"),
+        ]
+        for venv_python in candidates:
+            if os.path.isfile(venv_python) and os.access(venv_python, os.X_OK):
+                os.execv(venv_python, [venv_python] + sys.argv)
+
     args = parse_args()
     if args.save:
         cookie = os.environ.get("SBI_COOKIE", "").strip()

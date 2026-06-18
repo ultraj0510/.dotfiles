@@ -1,61 +1,50 @@
 ---
 name: portfolio-auth
-description: SBI証券セッションCookieの管理・状態検証・取得方法案内
-when_to_use: 「SBIにログイン」「証券認証」「Cookie取得」または portfolio-auth 明示呼出時
+description: Use when SBI証券のセッションCookieを検証・保存・状態確認する。Cookie切れ時の再取得案内を含む。
 ---
 
 # portfolio-auth — SBI証券 認証
 
-SBI証券サイトのセッションCookieを管理し、有効性を検証する。
+SBI証券サイトのセッションCookieを管理し、有効性を検証する。`portfolio-fetch` 実行前の前提認証を担う。
 
-## 仕組み
+## 適用範囲
 
-- ユーザがブラウザでSBI証券に手動ログインし、Cookieを取得する
-- 本スキルはCookieの有効性検証・状態表示・取得方法案内を行う
-- Cookie-Editor JSON と `name=value; ...` 形式の両方を受け付ける
-- 必須Cookie（JSESSIONID, __lt__sid, __lt__cid, AWSALBCORS）が欠けている場合は保存しない
+- SBI証券にログイン済みのブラウザからCookieを取得し、検証・保存する
+- 保存済みCookieの有効性を確認する
+- Cookieが未設定・期限切れの場合、再取得方法を案内する
 
-## 保存済みCookieの検証
+**非適用:** テクニカル分析、保有銘柄の取得（`portfolio-fetch` を使用）。
 
-```bash
-python3 ~/.dotfiles/claude/skills/portfolio-auth/auth_sbi.py
-```
-
-- Cookie有効 → `STATUS: OK` と表示
-- Cookie未設定 → `STATUS: UNSET` と表示
-- Cookie切れ → `STATUS: EXPIRED` と表示、再取得を案内
-
-## Fresh Cookie Handling
-
-ユーザが新しいCookieを会話内で提供した場合、保存済みCookieを使わずに fresh input として扱う。
-portfolio-fetch を実行する前に、必ずCookieを検証・保存すること。
-
-### 環境変数経由（--save）
+## コマンド
 
 ```bash
-export SBI_COOKIE='<Cookie-Editor JSON>'
-python3 ~/.dotfiles/claude/skills/portfolio-auth/auth_sbi.py --save
+cd ~/.agents/skills/portfolio-auth
+
+# 保存済みCookieの有効性検証・状態表示
+python3 auth_sbi.py
+
+# SBI_COOKIE環境変数からCookieを検証→保存
+python3 auth_sbi.py --save
+
+# stdinからCookieを検証→保存
+python3 auth_sbi.py --save-stdin
+
+# 0600権限のファイルからCookieを検証→保存
+python3 auth_sbi.py --save-file /path/to/cookie.json
 ```
 
-### stdin経由（--save-stdin）
+## データ保存先
 
-Cookie-Editor JSONをパイプまたは貼り付け:
+`~/.config/sbi-portfolio/tokens.json` — canonical。スキーマ詳細は `references/storage.md` 参照。
 
-```bash
-python3 ~/.dotfiles/claude/skills/portfolio-auth/auth_sbi.py --save-stdin
-```
+## Gotchas
 
-### ファイル経由（--save-file）
+- **import 時 execv:** `auth_sbi.py` は Playwright 不在時に venv 再実行する。この判定は `if __name__ == "__main__"` 配下にあり、pytest 等の import では発動しない。
+- **必須Cookie欠損:** `JSESSIONID`, `__lt__sid`, `__lt__cid`, `AWSALBCORS` のいずれかが欠けたCookieは保存を拒否する。
+- **Playwright不在:** システムの python3 に Playwright がない場合、`~/.dotfiles/claude/skills/portfolio-auth/.venv/bin/python` で再実行を試みる。
 
-```bash
-python3 ~/.dotfiles/claude/skills/portfolio-auth/auth_sbi.py --save-file /path/to/cookie.json
-```
+## 完了証拠
 
-ファイルは所有者のみ読み取り可能（0600）であること。
-
-### 注意
-
-- **位置引数でCookieを渡さないでください。** `auth_sbi.py "<cookie>"` はエラーになります。
-  `--save-stdin`, `--save-file`, または `SBI_COOKIE` 環境変数 + `--save` を使用してください。
-- 成功時は `STATUS: OK` が出力され、`~/.config/sbi-portfolio/tokens.json` に保存されます。
-- 保存されたCookieには source（env/stdin/file:path）と fingerprint（12桁の非秘密ハッシュ）が記録されます。
+- 検証成功: `STATUS: OK` + exit 0 + `tokens.json` の `saved_at` 更新
+- 未設定: `STATUS: UNSET` + exit 1
+- 期限切れ: `STATUS: EXPIRED` + exit 1 + 再取得手順表示

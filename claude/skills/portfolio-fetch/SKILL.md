@@ -1,39 +1,53 @@
 ---
 name: portfolio-fetch
-description: 全保有銘柄のテクニカル指標・シグナル・信用リスクを一括取得
-when_to_use: 「保有銘柄を見て」「ポートフォリオ確認」「今日の評価額」または portfolio-fetch 明示呼出時
+description: Use when SBI証券から保有銘柄・口座情報をJSONとして取得する。テクニカル分析・売買判断は stock-advisor を使用。
 ---
 
-# portfolio-fetch — 保有銘柄データ取得
+# portfolio-fetch — SBI証券 Raw Data Fetch
 
-stock-price-analyze の分析モジュールで全保有銘柄のテクニカル指標・シグナル・信用リスクを一括計算する。
+SBI証券画面から保有銘柄・口座情報を取得し、事実データをJSONで出力する。
 
-## 前提
+## 責務
 
-- stock-price-analyze が `~/code/playground/stock-price-analyze/` に存在すること
-- `portfolio.yaml` が同ディレクトリに存在すること
-- `SBI_COOKIE` 環境変数が設定されていれば、SBIからポートフォリオ自動同期後にデータ取得する
+- SBI証券HTMLを取得する
+- HTMLから `holdings` と `account` を抽出する
+- JSONを標準出力へ出す
+- `~/code/playground/stock-price-analyze/portfolio.yaml` を更新する
 
-## 手順
+## 非責務
+
+テクニカル分析、シグナル判定、売買判断、スコアリング、レポート生成は行わない。分析が必要な場合は `stock-advisor` を使用する。
+
+## 正本データ源
+
+URL・UA・エンコーディング詳細は `references/data-sources.md`、出力スキーマは `references/schema.md`。
+
+## コマンド
 
 ```bash
-# 要アクション銘柄のみ（デフォルト。SBI同期失敗時は非0終了）
+# SBIから取得してJSON出力 + portfolio.yaml更新
 ~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio
 
-# 全銘柄詳細
-~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio --all
-
-# SBI自動同期をスキップ
+# SBIに接続せず、既存portfolio.yamlをJSON出力
 ~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio --skip-sync
 
-# SBI同期失敗時にキャッシュ表示を続行
+# SBI取得失敗時にキャッシュJSONを出力
 ~/.claude/skills/portfolio-fetch/scripts/fetch_portfolio --use-cache-on-fail
 ```
 
-実行後は先頭3行を必ず確認し、`[AUTH_EXPIRED]`, `[ERROR]`, `[NOTICE]`, `[WARN]` があれば同期状態を判断する。
-
 ## 出力
 
-- Portfolio Snapshot（日付 + 総資産 + 現金残高）
-- Macro Context（VIX, S&P500前日比 + データ鮮度）
-- 要アクション銘柄一覧（スコア順、テクニカル指標・シグナル・信用リスク付き）
+標準出力はJSONのみ。`[AUTH_EXPIRED]`, `[ERROR]`, `[NOTICE]`, `[WARN]` は標準エラーへ。
+
+## Gotchas
+
+- **モバイルUA 0件parse:** SBIがモバイルUAに保有銘柄を返さない場合、自動で desktop UA に retry する。
+- **Cookie期限切れ:** `auth_expired` 時は exit 2。`portfolio-auth` でCookieを再取得する。
+- **マージ安全ガード:** 既存 `portfolio.yaml` との統合時、SBI取得件数が既存の50%未満または3件以上欠損する場合はマージを中止し `parse_error` を返す。
+- **Playwright不在:** urllib に fallback する。一部ページ構造の差異により parse 精度が低下する可能性がある。
+
+## 完了証拠
+
+- 正常系: stdout が valid JSON + exit 0 + `holdings` 配列が空でない + `portfolio.yaml` 更新
+- キャッシュ系: stdout が valid JSON + exit 0 + `cache_used: true`
+- 認証切れ: stderr に `[AUTH_EXPIRED]` + exit 2
