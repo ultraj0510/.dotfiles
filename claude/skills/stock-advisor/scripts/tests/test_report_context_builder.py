@@ -91,3 +91,156 @@ class TestReportContextBuilder:
 
         assert backtest["285A.T"]["walk_forward"]["verdict"] == "unstable"
         assert backtest["5803.T"]["walk_forward"]["verdict"] == "insufficient_data"
+
+
+def test_quant_risk_posture_fields_are_exported():
+    context = _run_builder()
+    decisions = context.get("quant_decisions", {}).get("decisions", {})
+    sample = decisions.get("285A.T", {})
+    for key in [
+        "risk_posture", "protective_stop_price", "portfolio_weight_pct",
+        "cost_basis_weight_pct", "unrealized_pnl_pct",
+        "downside_10pct_yen", "advisory_plan",
+    ]:
+        assert key in sample, f"missing key: {key}"
+
+
+def test_build_quant_decisions_preserves_risk_flags():
+    from report_context_builder import build_quant_decisions
+
+    context = build_quant_decisions({
+        "generated_at": "2026-05-30T00:00:00",
+        "decisions": [
+            {
+                "ticker": "5803.T",
+                "action": "REDUCE",
+                "confidence": "moderate",
+                "order_shares": 300,
+                "order_type": "limit",
+                "limit_price": 4771.0,
+                "vetoes": [],
+                "risk_flags": ["negative_walk_forward"],
+                "explanations": ["limit sell 300sh across 2 positions"],
+                "risk_posture": "neutral",
+                "protective_stop_price": None,
+                "portfolio_weight_pct": 7.28,
+                "cost_basis_weight_pct": 7.39,
+                "unrealized_pnl_pct": -1.43,
+                "downside_10pct_yen": 143130,
+                "advisory_plan": {},
+            }
+        ],
+    })
+
+    decision = context["decisions"]["5803.T"]
+    assert decision["report_action"] == "REDUCE"
+    assert decision["vetoes"] == []
+    assert decision["risk_flags"] == ["negative_walk_forward"]
+
+
+def test_context_fixture_preserves_any_risk_flags_when_present(tmp_path):
+    from report_context_builder import build_quant_decisions
+
+    decisions = {
+        "generated_at": None,
+        "decisions": [
+            {
+                "ticker": "1515.T",
+                "action": "HOLD",
+                "confidence": "moderate",
+                "order_shares": 0,
+                "order_type": "none",
+                "limit_price": None,
+                "vetoes": [],
+                "risk_flags": ["negative_walk_forward", "position_over_cap_loss_concentration"],
+                "explanations": ["no actionable signal"],
+                "risk_posture": "rebalance_on_strength",
+                "protective_stop_price": None,
+                "portfolio_weight_pct": 36.57,
+                "cost_basis_weight_pct": 54.2,
+                "unrealized_pnl_pct": -32.52,
+                "downside_10pct_yen": 719100,
+                "advisory_plan": {
+                    "mode": "trim_on_rebound_rebuy_on_pullback",
+                    "trim_shares": 300,
+                    "trim_trigger_price": 2440.4,
+                    "reentry_watch_price": 2162.25,
+                    "max_reentry_shares": 300,
+                    "reentry_allowed_after_trim": True,
+                    "reentry_requires": [
+                        "trim_filled",
+                        "price_near_lower_band",
+                        "rsi_below_40_or_reversal_signal",
+                    ],
+                },
+            }
+        ],
+    }
+
+    context = build_quant_decisions(decisions)
+
+    assert context["decisions"]["1515.T"]["risk_flags"] == [
+        "negative_walk_forward",
+        "position_over_cap_loss_concentration",
+    ]
+
+
+def test_backtest_builder_preserves_strategy_gate(tmp_path):
+    import json
+    from report_context_builder import build_backtest_results
+
+    data = {
+        "ticker": "285A.T",
+        "baseline": {"sharpe_ratio": 2.63, "total_return": 827.86},
+        "walk_forward": {
+            "consensus": {"verdict": "limited"},
+            "data_quality": "thin_oos_trades",
+        },
+        "strategy_selection": {
+            "selected_strategy": "hold_baseline",
+            "tradeable": False,
+            "reason": "no_strategy_passed_tradeability_gate",
+        },
+        "benchmark_comparison": {
+            "strategy_total_return": 827.86,
+            "benchmark_total_return": 3727.61,
+            "excess_total_return": -2899.75,
+            "tradeable": False,
+            "reason": "strategy_underperforms_benchmark",
+        },
+    }
+
+    bt_dir = tmp_path / "backtest"
+    bt_dir.mkdir()
+    (bt_dir / "285A.T.json").write_text(json.dumps(data))
+
+    results = build_backtest_results(str(bt_dir))
+
+    assert "285A.T" in results
+    r = results["285A.T"]
+    assert r["strategy_selection"]["selected_strategy"] == "hold_baseline"
+    assert r["strategy_selection"]["tradeable"] is False
+    assert r["benchmark_comparison"]["excess_total_return"] == -2899.75
+    assert r["benchmark_comparison"]["reason"] == "strategy_underperforms_benchmark"
+
+
+def test_report_context_uses_consensus_data_quality(tmp_path):
+    import json
+    from report_context_builder import build_backtest_results
+
+    data = {
+        "baseline": {"trade_count": 18},
+        "walk_forward": {
+            "consensus": {
+                "verdict": "unstable",
+                "data_quality": "thin_oos_trades",
+            },
+            "overfit_detected": True,
+        },
+    }
+    bt_dir = tmp_path / "backtest"
+    bt_dir.mkdir()
+    (bt_dir / "7974.T.json").write_text(json.dumps(data))
+
+    result = build_backtest_results(str(bt_dir))
+    assert result["7974.T"]["walk_forward"]["data_quality"] == "thin_oos_trades"

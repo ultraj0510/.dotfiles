@@ -17,6 +17,38 @@ import json
 import os
 import re
 import sys
+import yaml
+
+KNOWN_METADATA_TOKENS = {
+    "open_date", "expiry_date", "quant_decisions", "report_context",
+    "risk_posture", "advisory_plan", "protective_stop_price",
+    "portfolio_weight_pct", "cost_basis_weight_pct", "unrealized_pnl_pct",
+    "downside_10pct_yen", "report_action", "order_shares", "order_type", "limit_price",
+    # Trend states (from signal_engine trend_state field)
+    "strong_uptrend", "strong_downtrend", "downtrend", "ranging",
+    "uptrend",
+    # Walk-forward data quality / stability fields
+    "thin_oos_trades", "no_oos_trades", "sufficient_oos_trades",
+    "insufficient_price_history", "overfit_majority", "some_overfit",
+    "thin_sample", "not_evaluable", "low_dispersion", "moderate_dispersion",
+    "limited", "total_test_trades", "valid_test_windows", "data_quality",
+    "stability_flag", "data_insufficient",
+    # Strategy gate tokens
+    "hold_baseline", "too_few_strategy_trades", "no_strategy_passed_tradeability_gate",
+    "strategy_underperforms_benchmark", "strategy_not_tradeable",
+    "strategy_beats_benchmark", "strategy_improves_risk_adjusted_return",
+    "strategy_selection", "benchmark_comparison", "selected_strategy",
+    "strategy_total_return", "benchmark_total_return", "excess_total_return",
+    "strategy_sharpe", "benchmark_sharpe", "excess_sharpe",
+    "strategy_max_drawdown", "benchmark_max_drawdown", "drawdown_not_worse",
+    "beats_benchmark_return", "beats_benchmark_sharpe",
+    "strategy_comparison",
+    # Default strategy names
+    "trend", "contrarian", "default", "balanced_frequency",
+    "stale_count", "stale_tickers",
+    "positive_edge_unvalidated", "candidate", "wf_quality_insufficient",
+    "let_winner_run_with_stop",
+}
 
 
 def _known_signal_rules(signals_path: str) -> set[str]:
@@ -40,11 +72,14 @@ def _underscore_tokens(text: str) -> list[str]:
 def check_invented_signals(report_text: str, signals_path: str, quant_decisions_path: str, backtest_dir: str = "") -> str | None:
     """Return an error message if the report invents a signal name, else None."""
     known = _known_signal_rules(signals_path)
-    # Also allow veto names from quant_decisions (e.g. negative_walk_forward)
+    known.update(KNOWN_METADATA_TOKENS)
+    # Also allow veto and risk_flag names from quant_decisions
     with open(quant_decisions_path) as f:
         qd = json.load(f)
     for d in qd.get("decisions", []):
         for v in d.get("vetoes", []):
+            known.add(v)
+        for v in d.get("risk_flags", []):
             known.add(v)
     # Also allow WF verdict terms from backtest dir
     if backtest_dir and os.path.isdir(backtest_dir):
@@ -142,11 +177,26 @@ def check_walk_forward_verdicts(
     return None
 
 
+def check_position_count(report_text: str, portfolio_path: str | None) -> str | None:
+    if not portfolio_path:
+        return None
+    with open(portfolio_path) as f:
+        portfolio = yaml.safe_load(f) or {}
+    expected = len(portfolio.get("holdings", []))
+    # Count position headings: "#### 5803.T フジクラ（現物） — 一部売却（+3.7%）" or "### 285A.T ..."
+    actual = len(re.findall(r"^(#### .+|### .+ — .+（[-+0-9.]+%）)$", report_text, re.MULTILINE))
+    if actual != expected:
+        return f"position count mismatch: portfolio={expected}, report={actual}"
+    return None
+
+
 def validate(
     report_path: str,
     signals_path: str,
     quant_decisions_path: str,
     backtest_dir: str,
+    portfolio_path: str | None = None,
+    report_context_path: str | None = None,
 ) -> list[str]:
     """Run all checks. Returns a list of error messages (empty = clean)."""
     with open(report_path) as f:
@@ -162,6 +212,10 @@ def validate(
     if err:
         errors.append(err)
 
+    err = check_no_trade_reason_consistency(report_text, quant_decisions_path)
+    if err:
+        errors.append(err)
+
     err = check_account_label(report_text)
     if err:
         errors.append(err)
@@ -170,7 +224,109 @@ def validate(
     if err:
         errors.append(err)
 
+    err = check_position_count(report_text, portfolio_path)
+    if err:
+        errors.append(err)
+
+    err = _check_strategy_gate_table(report_text)
+    if err:
+        errors.append(err)
+
+    err = _check_forbidden_strategy_wording(report_text)
+    if err:
+        errors.append(err)
+
+    err = _check_strategy_summary_consistency(report_text)
+    if err:
+        errors.append(err)
+
+    err = check_price_freshness(report_context_path)
+    if err:
+        errors.append(err)
+
     return errors
+
+
+def check_price_freshness(report_context_path: str | None) -> str | None:
+    if not report_context_path:
+        return None
+    with open(report_context_path) as f:
+        context = json.load(f)
+    freshness = context.get("price_freshness", {})
+    stale_count = int(freshness.get("stale_count", 0) or 0)
+    if stale_count <= 0:
+        return None
+    tickers = ", ".join(freshness.get("stale_tickers", []))
+    return f"Stale market prices in report_context: {tickers}"
+
+
+BUY_BLOCKING_VETOES = {"negative_ev", "negative_walk_forward", "low_sample", "overfit_walk_forward"}
+
+
+def check_no_trade_reason_consistency(report_text: str, quant_decisions_path: str) -> str | None:
+    decisions = _load_quant_decisions(quant_decisions_path)
+    for decision in decisions:
+        ticker = decision.get("ticker", "")
+        action = decision.get("action", "")
+        vetoes = set(decision.get("vetoes", []))
+        blocking = sorted(vetoes & BUY_BLOCKING_VETOES)
+        if action != "NO_TRADE" or not ticker or not blocking:
+            continue
+        pattern = rf"{re.escape(ticker)}[\s\S]{{0,240}}HOLD_BUY[\s\S]{{0,80}}注文なし"
+        if re.search(pattern, report_text):
+            return (
+                f"Report attributes {ticker} no-order reason to HOLD_BUY "
+                f"while vetoes require: {', '.join(blocking)}"
+            )
+    return None
+
+
+def _check_strategy_summary_consistency(report_text: str) -> str | None:
+    has_all_underperform_claim = "全銘柄でテクニカル戦略が B&H に劣後" in report_text
+    has_candidate = "候補戦略（縮小執行）: 1銘柄" in report_text or "候補戦略（検証中・執行不可）: 1銘柄" in report_text or "候補: " in report_text
+    if has_all_underperform_claim and has_candidate:
+        return "Report claims all strategies underperform while candidate strategies exist"
+
+    # Check candidate/gate contradictions
+    candidate_tickers = set()
+    for match in re.finditer(r"候補:\s*([^。]+)", report_text):
+        for token in match.group(1).split(","):
+            ticker = token.split(":")[0].strip()
+            if ticker:
+                candidate_tickers.add(ticker)
+    for line in report_text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if cells and cells[0] in candidate_tickers and "strategy_underperforms_benchmark" in " ".join(cells):
+            return "Report Strategy Gate contradicts candidate strategy summary"
+
+    return None
+
+
+def _check_forbidden_strategy_wording(report_text: str) -> str | None:
+    forbidden = ["手動レンジ", "手動判断", "裁量で売買"]
+    for token in forbidden:
+        if token in report_text:
+            return f"Forbidden discretionary wording found: {token}"
+    return None
+
+
+def _check_strategy_gate_table(report_text: str) -> str | None:
+    lines = report_text.splitlines()
+    for idx, line in enumerate(lines):
+        if line.strip() == "## Strategy Gate":
+            table_lines = [l for l in lines[idx + 1: idx + 12] if l.startswith("|")]
+            if len(table_lines) >= 2:
+                expected = table_lines[0].count("|")
+                for table_line in table_lines[1:]:
+                    if table_line.count("|") != expected:
+                        return (
+                            f"Strategy Gate table column mismatch: "
+                            f"expected {expected} pipes, got {table_line.count('|')}"
+                        )
+            break
+    return None
 
 
 def main() -> None:
@@ -189,10 +345,17 @@ def main() -> None:
     parser.add_argument(
         "--backtest-dir", required=True, help="Path to backtest directory"
     )
+    parser.add_argument(
+        "--portfolio", help="Optional portfolio.yaml path for position-count validation"
+    )
+    parser.add_argument(
+        "--report-context", help="Optional report_context.json path for price freshness validation"
+    )
     args = parser.parse_args()
 
     errors = validate(
-        args.report, args.signals, args.quant_decisions, args.backtest_dir
+        args.report, args.signals, args.quant_decisions, args.backtest_dir,
+        args.portfolio, args.report_context,
     )
     if errors:
         print("Validation FAILED:", file=sys.stderr)

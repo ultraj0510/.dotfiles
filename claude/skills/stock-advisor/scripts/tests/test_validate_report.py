@@ -88,3 +88,43 @@ def test_accepts_artifact_aligned_snippet():
 """
     result = _run_validator(report)
     assert result.returncode == 0, f"expected exit 0, stderr: {result.stderr}"
+
+
+def test_accepts_known_metadata_tokens():
+    """Metadata tokens in report should not be flagged as invented signals -> exit 0."""
+    report = """\
+285A.T 一部売却
+5803.T 一部売却
+open_date expiry_date quant_decisions risk_posture advisory_plan
+委託保証金率 1124.46%
+"""
+    result = _run_validator(report)
+    assert result.returncode == 0, result.stderr
+
+
+def test_rejects_wrong_position_count(tmp_path):
+    """Report has 1 position but portfolio has 2 holdings -> exit 1."""
+    import subprocess as sp
+    portfolio = tmp_path / "portfolio.yaml"
+    portfolio.write_text("holdings:\n  - ticker: 285A.T\n  - ticker: 5803.T\n")
+    report = tmp_path / "report.md"
+    report.write_text("### 285A.T キオクシアHD — HOLD（+335.1%）\n")
+    result = sp.run(
+        [VENV_PYTHON, VALIDATOR,
+         "--report", str(report),
+         "--signals", os.path.join(FIXTURE_DIR, "signals.json"),
+         "--quant-decisions", os.path.join(FIXTURE_DIR, "quant_decisions.json"),
+         "--backtest-dir", os.path.join(FIXTURE_DIR, "backtest"),
+         "--portfolio", str(portfolio)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "position count mismatch" in result.stderr
+
+
+def test_validate_rejects_manual_range_wording():
+    from validate_report import _check_forbidden_strategy_wording
+
+    err = _check_forbidden_strategy_wording("戦略レビュー: 手動レンジ計画: 1銘柄")
+    assert err is not None
+    assert "手動レンジ" in err
