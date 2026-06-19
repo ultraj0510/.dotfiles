@@ -273,6 +273,8 @@ def test_info_not_available_gives_not_available_status(monkeypatch, tmp_path):
     result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
     assert result["sections"]["company_scores"]["status"] == "not_available"
     assert result["sections"]["stock_reports"]["status"] == "not_available"
+    assert result["sections"]["performance"]["status"] == "not_available"
+    assert result["sections"]["disclosures"]["status"] == "not_available"
 
 
 def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):

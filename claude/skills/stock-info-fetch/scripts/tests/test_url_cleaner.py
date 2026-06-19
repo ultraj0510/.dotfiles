@@ -49,3 +49,11 @@ def test_removes_all_sensitive_params_combined():
     for param in ["token", "enc", "ahash", "hhash", "ihash"]:
         assert param not in result
     assert "safe=keep" in result
+
+
+def test_removes_sensitive_params_case_insensitive():
+    url = "https://example.com/?Token=secret&ENC=encrypted&SAFE=keep"
+    result = clean_url(url)
+    assert "Token" not in result
+    assert "ENC" not in result
+    assert "SAFE=keep" in result

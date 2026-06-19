@@ -218,12 +218,13 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
                 dt_jst = dt.replace(tzinfo=JST)
             except ValueError:
                 try:
-                    dt = datetime.strptime(date_text, "%m/%d %H:%M").replace(
-                        year=(as_of or datetime.now(JST)).year,
-                        tzinfo=JST,
-                    )
+                    # Use a known leap year as base (2024) to handle 02/29,
+                    # then snap to the target year.
+                    target_year = (as_of or datetime.now(JST)).year
+                    dt = datetime.strptime(f"2024/{date_text}", "%Y/%m/%d %H:%M")
+                    dt = dt.replace(year=target_year, tzinfo=JST)
                     if dt.date() > (as_of or datetime.now(JST)).date():
-                        dt = dt.replace(year=dt.year - 1)
+                        dt = dt.replace(year=target_year - 1)
                     dt_jst = dt
                 except ValueError:
                     continue

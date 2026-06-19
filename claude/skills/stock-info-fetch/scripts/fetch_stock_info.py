@@ -129,7 +129,12 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                        "Score iframe URL is missing", analysis_fetch.url)
 
         # 5b. Performance via onclick popup url (cookie IS sent -- sbisec host)
-        if sources.performance_entry_url:
+        if info_not_available:
+            result["sections"]["performance"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
+        elif sources.performance_entry_url:
             perf_fetch = client.fetch_html(sources.performance_entry_url, cookie_header)
             if perf_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")
@@ -180,7 +185,12 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                            "")
 
         # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
-        if sources.disclosures_entry_url:
+        if info_not_available:
+            result["sections"]["disclosures"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
+        elif sources.disclosures_entry_url:
             disc_fetch = client.fetch_html(sources.disclosures_entry_url, cookie_header)
             if disc_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")

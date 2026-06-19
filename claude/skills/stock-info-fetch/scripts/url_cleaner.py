@@ -14,7 +14,7 @@ def clean_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.query:
         params = parse_qs(parsed.query, keep_blank_values=True)
-        cleaned = {k: v for k, v in params.items() if k not in SENSITIVE_PARAMS}
+        cleaned = {k: v for k, v in params.items() if k.lower() not in SENSITIVE_PARAMS}
         query = urlencode(cleaned, doseq=True)
     else:
         query = ""

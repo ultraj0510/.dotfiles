@@ -52,3 +52,16 @@ def test_parse_news_filters_outside_90_days():
 def test_parse_news_structure_changed():
     result = parse_news("<div>garbage</div>", as_of=datetime(2026, 6, 19, tzinfo=JST))
     assert result["status"] == "source_changed"
+
+
+def test_parse_news_leap_day_feb29():
+    """02/29 must parse correctly using leap year 2024 as base."""
+    html = """
+    <table>
+    <tr><td>02/29 10:00</td><td>IR</td><td><a href="/news/leap">leap day news</a></td></tr>
+    </table>
+    """
+    # as_of must be within 90 days of Feb 29 for the item to pass the cutoff
+    result = parse_news(html, as_of=datetime(2024, 3, 15, tzinfo=JST))
+    assert result["status"] == "ok"
+    assert result["data"][0]["published_at"] == "2024-02-29T10:00:00+09:00"
