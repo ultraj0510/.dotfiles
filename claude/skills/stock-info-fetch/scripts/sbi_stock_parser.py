@@ -224,16 +224,16 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
                     ref = (as_of or datetime.now(JST))
                     target_year = ref.year
                     dt = datetime.strptime(f"2024/{date_text}", "%Y/%m/%d %H:%M")
-                    for candidate_year in (target_year, target_year - 1):
+                    for candidate_year in range(target_year, target_year - 3, -1):
                         try:
                             dt_jst = dt.replace(year=candidate_year, tzinfo=JST)
                             break
                         except ValueError:
                             continue
                     else:
-                        continue  # neither year valid
-                    # Snap to previous year if date is still in the future (date-only compare)
-                    if dt_jst.date() > ref.date():
+                        continue  # no valid year within 3-year window
+                    # Snap to previous year if still in the future
+                    if dt_jst > ref:
                         try:
                             dt_jst = dt_jst.replace(year=dt_jst.year - 1)
                         except ValueError:
@@ -241,8 +241,8 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
                 except ValueError:
                     continue
 
-        # Exclude dates strictly in the future (compare date-only).
-        if dt_jst.date() > (as_of or datetime.now(JST)).date():
+        # Exclude dates strictly in the future.
+        if dt_jst > (as_of or datetime.now(JST)):
             continue
         if dt_jst < cutoff:
             recognized += 1

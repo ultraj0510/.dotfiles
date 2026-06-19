@@ -27,7 +27,7 @@ _NEWS_HTML_OLD_OUTSIDE_90D = """
 
 
 def test_parse_news_basic():
-    result = parse_news(_NEWS_HTML, as_of=datetime(2026, 6, 19, tzinfo=JST))
+    result = parse_news(_NEWS_HTML, as_of=datetime(2026, 6, 19, 23, 59, 59, tzinfo=JST))
     assert result["status"] == "ok"
     data = result["data"]
     assert len(data) == 3
