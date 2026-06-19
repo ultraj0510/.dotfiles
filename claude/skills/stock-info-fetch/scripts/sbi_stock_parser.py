@@ -221,7 +221,8 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
                     # Use a known leap year as base (2024) to handle 02/29,
                     # then snap to the target year. Both target and previous
                     # year are candidates (Feb 29 only exists in leap years).
-                    target_year = (as_of or datetime.now(JST)).year
+                    ref = (as_of or datetime.now(JST))
+                    target_year = ref.year
                     dt = datetime.strptime(f"2024/{date_text}", "%Y/%m/%d %H:%M")
                     for candidate_year in (target_year, target_year - 1):
                         try:
@@ -230,10 +231,19 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
                         except ValueError:
                             continue
                     else:
-                        continue  # neither year valid (should not happen with leap base)
+                        continue  # neither year valid
+                    # Snap to previous year if date is still in the future (date-only compare)
+                    if dt_jst.date() > ref.date():
+                        try:
+                            dt_jst = dt_jst.replace(year=dt_jst.year - 1)
+                        except ValueError:
+                            continue
                 except ValueError:
                     continue
 
+        # Exclude dates strictly in the future (compare date-only).
+        if dt_jst.date() > (as_of or datetime.now(JST)).date():
+            continue
         if dt_jst < cutoff:
             recognized += 1
             continue

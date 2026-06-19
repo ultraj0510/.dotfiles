@@ -273,8 +273,10 @@ def _global_error_result(ticker: str, code: str) -> dict:
 
 
 def _has_not_available_marker(html: str, *markers: str) -> bool:
-    """Check if any explicit 'not available' marker appears in the HTML."""
-    return any(m in html for m in markers)
+    """Check if any explicit 'not available' marker appears in visible text only."""
+    from bs4 import BeautifulSoup
+    visible = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    return any(m in visible for m in markers)
 
 
 def _classify_global_error(html: str, url: str) -> str | None:

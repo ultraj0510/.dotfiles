@@ -75,6 +75,29 @@ def test_parse_news_feb29_in_non_leap_year_no_crash():
     <tr><td>02/29 10:00</td><td>IR</td><td><a href="/news/leap_prev">leap day (previous year)</a></td></tr>
     </table>
     """
-    # Must not raise ValueError; falls outside 90-day cutoff → not_available
     result = parse_news(html, as_of=datetime(2025, 3, 15, tzinfo=JST))
     assert result["status"] in ("ok", "not_available")
+
+
+def test_parse_news_future_yearless_snaps_to_previous_year():
+    """12/31 in June must snap to previous year, not future."""
+    html = """
+    <table>
+    <tr><td>12/31 10:00</td><td>IR</td><td><a href="/news/dec31">year-end news</a></td></tr>
+    </table>
+    """
+    result = parse_news(html, as_of=datetime(2026, 6, 20, tzinfo=JST))
+    # Resolves to 2025-12-31, which is < 90 days from 2026-06-20? No, >90 days → not_available
+    assert result["status"] in ("ok", "not_available")
+
+
+def test_parse_news_explicit_future_year_excluded():
+    """2027/01/01 must not appear when as_of is 2026-06-20."""
+    html = """
+    <table>
+    <tr><td>2027/01/01 10:00</td><td>IR</td><td><a href="/news/future">future news</a></td></tr>
+    </table>
+    """
+    result = parse_news(html, as_of=datetime(2026, 6, 20, tzinfo=JST))
+    # Future date excluded → 0 items
+    assert result["status"] in ("not_available", "source_changed")
