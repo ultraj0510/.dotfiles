@@ -65,3 +65,16 @@ def test_parse_news_leap_day_feb29():
     result = parse_news(html, as_of=datetime(2024, 3, 15, tzinfo=JST))
     assert result["status"] == "ok"
     assert result["data"][0]["published_at"] == "2024-02-29T10:00:00+09:00"
+
+
+def test_parse_news_feb29_in_non_leap_year_no_crash():
+    """In non-leap year, Feb 29 resolves to previous year without crashing.
+    It will be outside the 90-day cutoff, but must not ValueError."""
+    html = """
+    <table>
+    <tr><td>02/29 10:00</td><td>IR</td><td><a href="/news/leap_prev">leap day (previous year)</a></td></tr>
+    </table>
+    """
+    # Must not raise ValueError; falls outside 90-day cutoff → not_available
+    result = parse_news(html, as_of=datetime(2025, 3, 15, tzinfo=JST))
+    assert result["status"] in ("ok", "not_available")

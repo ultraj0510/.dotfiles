@@ -106,15 +106,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         sources = extract_analysis_sources(html, analysis_fetch.url)
         score_html = ""
         score_fetch_ok = False
-        info_not_available = "該当する情報はありません" in html or "対象銘柄の情報はありません" in html
 
         # 5a. Company scores via iframe (NO cookie!)
-        if info_not_available:
-            result["sections"]["company_scores"] = {
-                "status": "not_available", "data": {},
-                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-            }
-        elif sources.score_url:
+        if sources.score_url:
             score_fetch = client.fetch_html(sources.score_url)  # no cookie_header!
             if score_fetch.status == "ok":
                 score_html = _decode_html(score_fetch.body)
@@ -124,17 +118,17 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             else:
                 _add_error(result, "company_scores", score_fetch.status,
                            "Failed to fetch company scores iframe", score_fetch.url)
+        elif _has_not_available_marker(html, "スコア情報はありません", "企業スコアはありません"):
+            result["sections"]["company_scores"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
         else:
             _add_error(result, "company_scores", "source_changed",
                        "Score iframe URL is missing", analysis_fetch.url)
 
         # 5b. Performance via onclick popup url (cookie IS sent -- sbisec host)
-        if info_not_available:
-            result["sections"]["performance"] = {
-                "status": "not_available", "data": {},
-                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-            }
-        elif sources.performance_entry_url:
+        if sources.performance_entry_url:
             perf_fetch = client.fetch_html(sources.performance_entry_url, cookie_header)
             if perf_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")
@@ -148,49 +142,47 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             else:
                 _add_error(result, "performance", perf_fetch.status,
                            "Failed to fetch STOCK REPORTS HTML", perf_fetch.url)
+        elif _has_not_available_marker(html, "業績情報はありません"):
+            result["sections"]["performance"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
         else:
             _add_error(result, "performance", "source_changed",
                        "Performance popup URL is missing", analysis_fetch.url)
 
         # 5c. Stock Reports PDF from score iframe HTML (NO cookie!)
-        if info_not_available:
-            result["sections"]["stock_reports"] = {
-                "status": "not_available", "data": {},
-                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-            }
-        else:
-            pdf_url = (
-                extract_stock_report_pdf_url(score_html, sources.score_url)
-                if sources.score_url and score_html
-                else None
-            )
-            if pdf_url:
-                pdf_result = _fetch_and_parse_pdf(client, pdf_url)
-                _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
-            elif sources.score_url is None:
-                # Score iframe missing from analysis page — may be structural change.
-                _add_error(result, "stock_reports", "source_changed",
-                           "Score iframe not found in analysis page", analysis_fetch.url)
-            elif score_fetch_ok:
-                # Score page was fetched, no PDF link — report genuinely not available.
+        pdf_url = (
+            extract_stock_report_pdf_url(score_html, sources.score_url)
+            if sources.score_url and score_html
+            else None
+        )
+        if pdf_url:
+            pdf_result = _fetch_and_parse_pdf(client, pdf_url)
+            _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
+        elif sources.score_url is None:
+            # Score iframe missing — check for explicit marker before calling it changed.
+            if _has_not_available_marker(html, "スコア情報はありません", "企業スコアはありません"):
                 result["sections"]["stock_reports"] = {
                     "status": "not_available", "data": {},
                     "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
                 }
             else:
-                # Score iframe URL exists but fetch failed — cannot check.
-                _add_error(result, "stock_reports",
-                           "fetch_failed",
-                           "Cannot check STOCK REPORTS PDF: score page unavailable",
-                           "")
-
-        # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
-        if info_not_available:
-            result["sections"]["disclosures"] = {
+                _add_error(result, "stock_reports", "source_changed",
+                           "Score iframe not found in analysis page", analysis_fetch.url)
+        elif score_fetch_ok:
+            result["sections"]["stock_reports"] = {
                 "status": "not_available", "data": {},
                 "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
             }
-        elif sources.disclosures_entry_url:
+        else:
+            _add_error(result, "stock_reports",
+                       "fetch_failed",
+                       "Cannot check STOCK REPORTS PDF: score page unavailable",
+                       "")
+
+        # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
+        if sources.disclosures_entry_url:
             disc_fetch = client.fetch_html(sources.disclosures_entry_url, cookie_header)
             if disc_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")
@@ -204,6 +196,11 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             else:
                 _add_error(result, "disclosures", disc_fetch.status,
                            "Failed to fetch disclosures", disc_fetch.url)
+        elif _has_not_available_marker(html, "適時開示はありません"):
+            result["sections"]["disclosures"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
         else:
             _add_error(result, "disclosures", "source_changed",
                        "Disclosure popup URL is missing", analysis_fetch.url)
@@ -273,6 +270,11 @@ def _global_error_result(ticker: str, code: str) -> dict:
         "ticker_not_found": f"Ticker {ticker} not found",
     }
     return _error_result(ticker, code, messages.get(code, code))
+
+
+def _has_not_available_marker(html: str, *markers: str) -> bool:
+    """Check if any explicit 'not available' marker appears in the HTML."""
+    return any(m in html for m in markers)
 
 
 def _classify_global_error(html: str, url: str) -> str | None:

@@ -52,3 +52,16 @@ def test_parse_company_scores_below_threshold():
     result = parse_company_scores(html)
     assert result["status"] == "source_changed"
     assert result["data"]["total_score"] == 5.0
+
+
+def test_parse_company_scores_out_of_range():
+    """Scores outside 1-10 must be source_changed."""
+    html = """
+    <table>
+    <tr><th>企業スコア総合</th><td>0.0</td></tr>
+    <tr><th>財務健全性</th><td>0.0</td></tr>
+    <tr><th>収益性</th><td>0.0</td></tr>
+    </table>
+    """
+    result = parse_company_scores(html)
+    assert result["status"] == "source_changed"

@@ -253,12 +253,14 @@ def test_auth_expired_html_on_performance_is_global(monkeypatch, tmp_path):
 
 
 class InfoNotAvailableClient:
-    """Analysis tab says 'information not available', no iframe or popup links."""
+    """Analysis tab has no iframe/popup links, but explicit per-section markers."""
     def fetch_html(self, url, cookie_header=""):
         if "Idtl70" in url:
-            return SimpleNamespace(body="該当する情報はありません".encode(), status="ok", url=url)
+            return SimpleNamespace(body="""スコア情報はありません
+業績情報はありません
+適時開示はありません""".encode(), status="ok", url=url)
         if "Idtl10" in url:
-            return SimpleNamespace(body="<table><tr><th>现在值</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
+            return SimpleNamespace(body="<table><tr><th>current</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
         if "Idtl20" in url:
             return SimpleNamespace(body="no news".encode(), status="ok", url=url)
         if "Idtl50" in url:
@@ -275,6 +277,41 @@ def test_info_not_available_gives_not_available_status(monkeypatch, tmp_path):
     assert result["sections"]["stock_reports"]["status"] == "not_available"
     assert result["sections"]["performance"]["status"] == "not_available"
     assert result["sections"]["disclosures"]["status"] == "not_available"
+
+
+class MixedAvailableClient:
+    """One widget has not-available marker, but iframe and popups are present."""
+    def fetch_html(self, url, cookie_header=""):
+        if "Idtl70" in url:
+            return SimpleNamespace(body="""該当する情報はありません
+<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=synthetic&sym=3932.T"></iframe>
+<a onclick="window.open('/ETGate/?sw_param1=report_summary&stock_sec_code_mul=3932','report_summary')">業績</a>
+<a onclick="window.open('/ETGate/?sw_param1=report_disclose&stock_sec_code_mul=3932','report_disclose')">適時開示</a>""".encode(), status="ok", url=url)
+        if "Idtl10" in url:
+            return SimpleNamespace(body="<table><tr><th>current</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
+        if "Idtl20" in url:
+            return SimpleNamespace(body="no news".encode(), status="ok", url=url)
+        if "Idtl50" in url:
+            return SimpleNamespace(body="no profile".encode(), status="ok", url=url)
+        if "graph.sbisec.co.jp" in url:
+            return SimpleNamespace(body="<table><tr><th>score</th><td>6.0</td><td>7.0</td><td>5.0</td></tr></table>".encode(), status="ok", url=url)
+        if "report_summary" in url:
+            return SimpleNamespace(body="<table></table>".encode(), status="ok", url=url)
+        if "report_disclose" in url:
+            return SimpleNamespace(body="<table></table>".encode(), status="ok", url=url)
+        return SimpleNamespace(body=b"", status="ok", url=url)
+
+
+def test_mixed_marker_and_valid_links_still_fetches(monkeypatch, tmp_path):
+    """Global 'not available' text must not block sections with valid links."""
+    _set_fake_cookie(monkeypatch)
+    _set_mocks(monkeypatch, MixedAvailableClient)
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    # These sections have valid links and should be fetched (not blocked)
+    assert result["sections"]["company_scores"]["status"] != "not_available"
+    assert result["sections"]["performance"]["status"] != "not_available"
+    assert result["sections"]["disclosures"]["status"] != "not_available"
 
 
 def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):

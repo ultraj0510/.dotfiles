@@ -219,13 +219,18 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
             except ValueError:
                 try:
                     # Use a known leap year as base (2024) to handle 02/29,
-                    # then snap to the target year.
+                    # then snap to the target year. Both target and previous
+                    # year are candidates (Feb 29 only exists in leap years).
                     target_year = (as_of or datetime.now(JST)).year
                     dt = datetime.strptime(f"2024/{date_text}", "%Y/%m/%d %H:%M")
-                    dt = dt.replace(year=target_year, tzinfo=JST)
-                    if dt.date() > (as_of or datetime.now(JST)).date():
-                        dt = dt.replace(year=target_year - 1)
-                    dt_jst = dt
+                    for candidate_year in (target_year, target_year - 1):
+                        try:
+                            dt_jst = dt.replace(year=candidate_year, tzinfo=JST)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        continue  # neither year valid (should not happen with leap base)
                 except ValueError:
                     continue
 
@@ -349,6 +354,8 @@ def parse_company_scores(html: str) -> dict:
                 pass
 
     if extracted < 3:
+        return {"status": "source_changed", "data": data}
+    if not all(1.0 <= v <= 10.0 for v in data.values()):
         return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}
 
