@@ -64,6 +64,18 @@ def test_all_dash_row_not_counted_as_extracted():
     assert result["status"] == "source_changed"
 
 
+def test_unknown_row_type_not_counted_as_extracted():
+    """Row with values but unknown type label (市場予想) must not increment extracted."""
+    html = """
+    <table>
+    <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
+    <tr><th>2027/03 市場予想</th><td>240</td><td>--</td><td>--</td><td>11,000</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "source_changed"
+
+
 def test_all_dash_row_excluded_when_real_row_present():
     """Mix: one real row, one all-dash row. Dash row must be absent from output."""
     html = """

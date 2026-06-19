@@ -400,11 +400,15 @@ def parse_performance(html: str) -> dict:
                 continue
             if "コンセンサス予想" in cells[0]:
                 data["consensus_forecast"].append(item)
+                extracted += 1
             elif "会社予想" in cells[0] and "会社実績" not in cells[0]:
                 data["company_forecast"].append(item)
+                extracted += 1
             elif "会社実績" in cells[0]:
                 data["actual_results"].append(item)
-            extracted += 1
+                extracted += 1
+            # Unknown row type with numeric values is not counted —
+            # it may indicate a page structure change.
 
     # Rating current value
     rating_table = soup.find(

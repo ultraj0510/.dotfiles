@@ -151,10 +151,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             pdf_result = _fetch_and_parse_pdf(client, pdf_url)
             _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
         elif sources.score_url is None:
-            result["sections"]["stock_reports"] = {
-                "status": "not_available", "data": {},
-                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-            }
+            # Score iframe missing from analysis page — may be structural change.
+            _add_error(result, "stock_reports", "source_changed",
+                       "Score iframe not found in analysis page", analysis_fetch.url)
         elif score_fetch_ok:
             # Score page was fetched, no PDF link — report genuinely not available.
             result["sections"]["stock_reports"] = {
