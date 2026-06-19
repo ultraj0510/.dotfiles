@@ -272,20 +272,32 @@ def _global_error_result(ticker: str, code: str) -> dict:
     return _error_result(ticker, code, messages.get(code, code))
 
 
-def _has_not_available_marker(html: str, *markers: str) -> bool:
-    """Check if any explicit 'not available' marker appears in visible text only."""
+def _visible_text(html: str) -> str:
+    """Extract visible text, excluding scripts, styles, templates, and hidden elements."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.select("script, style, template, [hidden]"):
+    for tag in soup.select(
+        "script, style, template, [hidden], "
+        "[style*='display:none'], [style*='display: none'], "
+        "[style*='visibility:hidden'], [style*='visibility: hidden'], "
+        "[aria-hidden='true'], [aria-hidden=true]"
+    ):
         tag.extract()
-    visible = soup.get_text(" ", strip=True)
-    return any(m in visible for m in markers)
+    return soup.get_text(" ", strip=True)
+
+
+def _has_not_available_marker(html: str, *markers: str) -> bool:
+    """Check if any explicit 'not available' marker appears in visible text only."""
+    return any(m in _visible_text(html) for m in markers)
 
 
 def _classify_global_error(html: str, url: str) -> str | None:
-    if "login" in url.lower() or "ログイン" in html[:3000]:
+    if "login" in url.lower():
         return "auth_expired"
-    if "該当する銘柄はありません" in html or "銘柄コードが正しくありません" in html:
+    visible = _visible_text(html)
+    if "ログイン" in visible[:3000]:
+        return "auth_expired"
+    if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
         return "ticker_not_found"
     return None
 
