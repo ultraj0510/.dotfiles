@@ -98,6 +98,28 @@ def _normalize_date(jp_date: str) -> str:
     return jp_date
 
 
+def _extract_article_blocks(text: str) -> list[str]:
+    """Extract article content from 【...】 blocks positioned between 事業構成 and 業種.
+
+    SBI四季報 places two free-form article blocks (labels vary per company) between
+    the 事業構成/連結事業 block and the 業種 block. We identify them by position:
+    find all 【...】 blocks, locate the ones after 事業構成 and before 業種.
+    """
+    blocks = re.findall(r"【(.+?)】\s*(.+?)(?=\n?【|\Z)", text, re.DOTALL)
+    in_range = False
+    articles = []
+    for label, content in blocks:
+        label = label.strip()
+        if label in ("連結事業", "事業構成"):
+            in_range = True
+            continue
+        if label in ("業種",):
+            break
+        if in_range:
+            articles.append(content.strip())
+    return articles
+
+
 def parse_company_profile(html: str) -> dict:
     """Parse SBI 四季報 (company profile) tab HTML.
 
@@ -116,6 +138,10 @@ def parse_company_profile(html: str) -> dict:
     data = {}
     extracted = 0
 
+    # Extract all 【...】 blocks by position — labels vary across companies.
+    blocks = re.findall(r"【(.+?)】\s*(.+?)(?=【|$)", text, re.DOTALL)
+    block_map = {label.strip(): content.strip() for label, content in blocks}
+
     patterns = [
         (r"\d{4}\s+\(株\)(.+?)\s+［", "company_name", lambda s: s.strip()),
         (r"作成日[：:]\s*(\d{4}年\d{1,2}月\d{1,2}日)", "report_date", _normalize_date),
@@ -123,10 +149,8 @@ def parse_company_profile(html: str) -> dict:
         (r"【決算】\s*(\d{1,2}月)", "fiscal_month", str),
         (r"【設立】\s*([0-9.]+)", "established", str),
         (r"【上場】\s*([0-9.]+)", "listed", str),
-        (r"【特色】\s*(.+?)\s*【連結事業】", "characteristics", lambda s: s.strip()),
-        (r"【連結事業】\s*(.+?)\s*【", "business_segments", lambda s: s.strip()),
-        (r"【連続増配】\s*(.+?)\s*【", "performance_summary", lambda s: s.strip()),
-        (r"【経営統合】\s*(.+?)\s*【", "material_notes", lambda s: s.strip()),
+        (r"【特色】\s*(.+?)\s*(?:【連結事業】|【事業構成】)", "characteristics", lambda s: s.strip()),
+        (r"(?:【連結事業】|【事業構成】)\s*(.+?)\s*【", "business_segments", lambda s: s.strip()),
         (r"【業種】\s*(.+?)\s+時価総額順位", "sector", lambda s: s.strip()),
         (r"時価総額順位\s*([0-9]+/[0-9]+社)", "sector_rank", lambda s: s.strip()),
         (r"【比較会社】\s*(.+?)(?:\s*【|$)", "peer_companies", lambda s: s.strip()),
@@ -139,6 +163,17 @@ def parse_company_profile(html: str) -> dict:
             if val:
                 data[key] = val
                 extracted += 1
+
+    # performance_summary and material_notes: the two 【...】 blocks between
+    # 事業構成 and 業種, in document order. Labels vary per company
+    # (e.g. 【連続増配】【経営統合】 or 【業績回復】【海外展開】).
+    article_blocks = _extract_article_blocks(text)
+    if len(article_blocks) >= 1:
+        data["performance_summary"] = article_blocks[0]
+        extracted += 1
+    if len(article_blocks) >= 2:
+        data["material_notes"] = article_blocks[1]
+        extracted += 1
 
     if extracted == 0:
         return {"status": "source_changed", "data": {}}
@@ -312,8 +347,8 @@ def parse_company_scores(html: str) -> dict:
             except ValueError:
                 pass
 
-    if extracted == 0:
-        return {"status": "source_changed", "data": {}}
+    if extracted < 3:
+        return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}
 
 

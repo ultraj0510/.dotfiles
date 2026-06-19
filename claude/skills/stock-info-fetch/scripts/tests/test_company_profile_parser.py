@@ -28,6 +28,31 @@ _PROFILE_HTML_EMPTY = "<div>四季報情報はありません</div>"
 
 _PROFILE_HTML_CHANGED = "<div>unrecognizable structure</div>"
 
+# Different article labels — tags vary per company (not always 【連続増配】【経営統合】)
+_PROFILE_HTML_ALT_LABELS = """
+<div class="shikiho">
+  <div>作成日：2026年06月17日</div>
+  <div>7203 (株)トヨタ自動車 ［ 輸送用機器 ］</div>
+  <div>【特色】自動車製造販売を主力とする世界的企業。</div>
+  <div>【連結事業】自動車90、金融8、その他2</div>
+  <div>【業績回復】北米販売が好調で営業益は増加。</div>
+  <div>【海外展開】EVシフトを加速、2026年までに30モデル投入予定。</div>
+  <div>【業種】 輸送用機器 時価総額順位 1/85社</div>
+  <div>【比較会社】7267 ホンダ,7270 SUBARU</div>
+</div>
+"""
+
+
+def test_parse_company_profile_different_article_labels():
+    result = parse_company_profile(_PROFILE_HTML_ALT_LABELS)
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["company_name"] == "トヨタ自動車"
+    assert "自動車製造販売" in data["characteristics"]
+    assert "北米販売が好調" in data["performance_summary"]
+    assert "EVシフト" in data["material_notes"]
+    assert data["sector"] == "輸送用機器"
+
 
 def test_parse_company_profile_basic():
     result = parse_company_profile(_PROFILE_HTML)

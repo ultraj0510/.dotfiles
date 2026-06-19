@@ -107,6 +107,24 @@ def test_fetch_bytes_returns_body():
     assert result.body == b"%PDF-1.4 fake pdf"
 
 
+class FakeLoginRedirectTransport:
+    """Simulates a redirect to login.sbisec.co.jp (auth expired)."""
+    def open(self, req, timeout=30):
+        resp = SimpleNamespace()
+        resp.read = lambda: b"<html>login</html>"
+        resp.geturl = lambda: "https://login.sbisec.co.jp/ETGate/"
+        resp.headers = SimpleNamespace(get_content_type=lambda: "text/html")
+        return resp
+
+
+def test_login_redirect_returns_auth_expired():
+    result = SafeHttpClient(transport=FakeLoginRedirectTransport()).fetch_html(
+        "https://site1.sbisec.co.jp/ETGate/?entry=1",
+        cookie_header="session_a=value_a",
+    )
+    assert result.status == "auth_expired"
+
+
 def test_fetch_html_decodes_body():
     transport = FakeTransport(body="<html>テスト</html>".encode("utf-8"))
     client = SafeHttpClient(transport=transport)

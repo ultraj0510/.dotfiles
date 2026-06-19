@@ -58,6 +58,8 @@ def parse_stock_report_pdf(pdf_path: str) -> dict:
             "changes": _extract_changes(full_text),
             "risk_factors": _extract_risk_factors(full_text),
         }
+        if not _has_minimum_data(data):
+            return {"status": "source_changed", "data": data}
         return {"status": "ok", "data": data}
     except Exception as e:
         return {"status": "error", "data": {}, "error_code": "pdf_parse_failed",
@@ -67,6 +69,19 @@ def parse_stock_report_pdf(pdf_path: str) -> dict:
             pdf.close()
         except Exception:
             pass
+
+
+def _has_minimum_data(data: dict) -> bool:
+    """Require at least 2 of the 6 data categories to be non-empty."""
+    filled = sum(1 for v in [
+        data["report_date"],
+        data["company_overview"],
+        data["key_metrics"],
+        data["actual_and_forecast"].get("actual") or data["actual_and_forecast"].get("forecast"),
+        data["changes"],
+        data["risk_factors"],
+    ] if v)
+    return filled >= 2
 
 
 def _extract_report_date(text: str) -> str:

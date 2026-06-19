@@ -62,3 +62,24 @@ def test_parse_stock_report_pdf_corrupted(tmp_path):
     pdf_path.write_text("not a real PDF file")
     result = parse_stock_report_pdf(str(pdf_path))
     assert result["status"] in ("error", "pdf_parse_failed")
+
+
+def test_parse_stock_report_pdf_insufficient_data(tmp_path):
+    if importlib.util.find_spec("reportlab") is None:
+        pytest.skip("reportlab not installed")
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen.canvas import Canvas
+
+    pdf_path = tmp_path / "barely_structured.pdf"
+    pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
+    canvas = Canvas(str(pdf_path))
+    canvas.setFont("HeiseiKakuGo-W5", 10)
+    # Only one meaningful data category — below minimum threshold of 2
+    canvas.drawString(40, 800, "企業概要: ゲーム開発企業です。")
+    canvas.drawString(40, 780, "これは投資レポートとは無関係な文章です。")
+    canvas.drawString(40, 760, "ダミーテキストが続きます。")
+    canvas.save()
+
+    result = parse_stock_report_pdf(str(pdf_path))
+    assert result["status"] == "source_changed"

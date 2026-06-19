@@ -39,3 +39,16 @@ def test_parse_company_scores_not_available():
 def test_parse_company_scores_structure_changed():
     result = parse_company_scores("<div>unrecognizable</div>")
     assert result["status"] == "source_changed"
+
+
+def test_parse_company_scores_below_threshold():
+    """Only 2 of 6 scores extracted — should be source_changed."""
+    html = """
+    <table>
+    <tr><th>企業スコア総合</th><td>5.0</td></tr>
+    <tr><th>財務健全性</th><td>6.0</td></tr>
+    </table>
+    """
+    result = parse_company_scores(html)
+    assert result["status"] == "source_changed"
+    assert result["data"]["total_score"] == 5.0

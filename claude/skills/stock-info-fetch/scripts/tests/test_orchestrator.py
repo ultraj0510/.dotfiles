@@ -37,6 +37,23 @@ def _set_mocks(monkeypatch, ClientClass, cache_get=None, cache_save=None):
     monkeypatch.setitem(sys.modules, "pdf_parser", fake_pdf)
 
 
+class AuthExpiredHttpClient:
+    """HTTP client returns auth_expired status directly (login redirect)."""
+    def fetch_html(self, url, cookie_header=""):
+        return SimpleNamespace(body=None, status="auth_expired", url="https://login.sbisec.co.jp/ETGate/")
+
+
+def test_auth_expired_http_status_is_global_and_not_cached(monkeypatch, tmp_path):
+    _set_fake_cookie(monkeypatch)
+    saved = []
+    _set_mocks(monkeypatch, AuthExpiredHttpClient, cache_save=lambda ticker, data: saved.append(data))
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    assert result["errors"][0]["code"] == "auth_expired"
+    assert result["sections"] == {}
+    assert saved == []
+
+
 class OkPriceOnlyClient:
     def fetch_html(self, url, cookie_header=""):
         if "Idtl10" in url:

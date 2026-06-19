@@ -81,6 +81,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     for section_key, (tab_name, parser) in tab_sections.items():
         fetched = client.fetch_html(build_detail_url(ticker, tab_name), cookie_header)
+        if fetched.status == "auth_expired":
+            return _global_error_result(ticker, "auth_expired")
         if fetched.status != "ok":
             _add_error(result, section_key, fetched.status, f"Failed to fetch {tab_name}", fetched.url)
             continue
@@ -90,14 +92,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             return _global_error_result(ticker, global_code)
 
         parsed = parser(html)
-        result["sections"][section_key] = {
-            "status": parsed["status"],
-            "data": parsed["data"],
-            "source": {"url": fetched.url, "fetched_at": now_iso},
-        }
-        if parsed["status"] == "source_changed":
-            _add_error(result, section_key, "source_changed",
-                       f"Structure changed for {section_key}", fetched.url)
+        _set_section(result, section_key, parsed, fetched.url, now_iso)
 
     # 5. Analysis tab -> scores + performance + disclosures
     analysis_fetch = client.fetch_html(build_detail_url(ticker, "analysis"), cookie_header)
@@ -115,11 +110,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             if score_fetch.status == "ok":
                 score_html = _decode_html(score_fetch.body)
                 parsed = parse_company_scores(score_html)
-                result["sections"]["company_scores"] = {
-                    "status": parsed["status"],
-                    "data": parsed["data"],
-                    "source": {"url": score_fetch.url, "fetched_at": now_iso},
-                }
+                _set_section(result, "company_scores", parsed, score_fetch.url, now_iso)
             else:
                 _add_error(result, "company_scores", score_fetch.status,
                            "Failed to fetch company scores iframe", score_fetch.url)
@@ -132,11 +123,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             perf_fetch = client.fetch_html(sources.performance_entry_url, cookie_header)
             if perf_fetch.status == "ok":
                 parsed = parse_performance(_decode_html(perf_fetch.body))
-                result["sections"]["performance"] = {
-                    "status": parsed["status"],
-                    "data": parsed["data"],
-                    "source": {"url": perf_fetch.url, "fetched_at": now_iso},
-                }
+                _set_section(result, "performance", parsed, perf_fetch.url, now_iso)
             else:
                 _add_error(result, "performance", perf_fetch.status,
                            "Failed to fetch STOCK REPORTS HTML", perf_fetch.url)
@@ -152,14 +139,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         )
         if pdf_url:
             pdf_result = _fetch_and_parse_pdf(client, pdf_url)
-            result["sections"]["stock_reports"] = {
-                "status": pdf_result["status"],
-                "data": pdf_result["data"],
-                "source": {"url": pdf_result.get("url", ""), "fetched_at": now_iso},
-            }
-            if pdf_result["status"] == "error":
-                _add_error(result, "stock_reports", pdf_result.get("error_code", "pdf_parse_failed"),
-                           pdf_result.get("message", ""), pdf_result.get("url", ""))
+            _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
         else:
             result["sections"]["stock_reports"] = {
                 "status": "not_available", "data": {},
@@ -171,11 +151,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             disc_fetch = client.fetch_html(sources.disclosures_entry_url, cookie_header)
             if disc_fetch.status == "ok":
                 parsed = parse_disclosures(_decode_html(disc_fetch.body))
-                result["sections"]["disclosures"] = {
-                    "status": parsed["status"],
-                    "data": parsed["data"],
-                    "source": {"url": disc_fetch.url, "fetched_at": now_iso},
-                }
+                _set_section(result, "disclosures", parsed, disc_fetch.url, now_iso)
             else:
                 _add_error(result, "disclosures", disc_fetch.status,
                            "Failed to fetch disclosures", disc_fetch.url)
@@ -205,6 +181,21 @@ def _add_error(result: dict, section: str, code: str, message: str, url: str = "
         }
     result["sections"][section]["status"] = "error"
     result["errors"].append({"section": section, "code": code, "message": message})
+
+
+def _set_section(result: dict, section_key: str, parsed: dict, url: str, now_iso: str) -> None:
+    """Write a parsed section into the result, normalizing status to ok/not_available/error."""
+    status = parsed["status"]
+    if status not in ("ok", "not_available"):
+        status = "error"
+    result["sections"][section_key] = {
+        "status": status,
+        "data": parsed["data"],
+        "source": {"url": url, "fetched_at": now_iso},
+    }
+    if parsed["status"] == "source_changed":
+        _add_error(result, section_key, "source_changed",
+                   f"Structure changed for {section_key}", url)
 
 
 def _error_result(ticker: str, code: str, message: str) -> dict:

@@ -19,6 +19,8 @@ PUBLIC_HOSTS = {
     "sbi.ifis.co.jp",
     "app.stockreportsplus.com",
 }
+# Redirect targets that signal an expired session — no cookie sent, no body returned.
+AUTH_REDIRECT_HOSTS = {"login.sbisec.co.jp"}
 ALLOWED_HOSTS = COOKIE_HOSTS | PUBLIC_HOSTS
 USER_AGENT = "Mozilla/5.0"
 
@@ -34,6 +36,8 @@ class FetchResult:
 class SafeRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         host = urlparse(newurl).hostname
+        if host in AUTH_REDIRECT_HOSTS:
+            raise URLError("auth_expired")
         if host not in ALLOWED_HOSTS:
             raise URLError("unexpected_host")
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -56,6 +60,8 @@ class SafeHttpClient:
         try:
             response = self.transport.open(Request(url, headers=headers), timeout=30)
             final_host = urlparse(response.geturl()).hostname
+            if final_host in AUTH_REDIRECT_HOSTS:
+                return FetchResult(None, "auth_expired", clean_url(response.geturl()), "")
             if final_host not in ALLOWED_HOSTS:
                 return FetchResult(None, "unexpected_host", clean_url(response.geturl()), "")
             body = response.read()
@@ -66,7 +72,12 @@ class SafeHttpClient:
                 response.headers.get_content_type(),
             )
         except URLError as exc:
-            status = "unexpected_host" if "unexpected_host" in str(exc) else "fetch_failed"
+            if "auth_expired" in str(exc):
+                status = "auth_expired"
+            elif "unexpected_host" in str(exc):
+                status = "unexpected_host"
+            else:
+                status = "fetch_failed"
             return FetchResult(None, status, clean_url(url), "")
         except HTTPError:
             return FetchResult(None, "fetch_failed", clean_url(url), "")
