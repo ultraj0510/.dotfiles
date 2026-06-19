@@ -6,6 +6,7 @@ Usage:
 Output: JSON to stdout. Logs/warnings to stderr.
 """
 import json
+import re
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -283,7 +284,7 @@ def _visible_text(html: str) -> str:
         if tag.get("hidden") is not None:
             tag.extract()
             continue
-        style = (tag.get("style") or "").lower().replace(" ", "")
+        style = re.sub(r"\s+", "", (tag.get("style") or "").lower())
         if "display:none" in style or "visibility:hidden" in style:
             tag.extract()
             continue
@@ -305,11 +306,7 @@ def _classify_global_error(html: str, url: str) -> str | None:
     # Login page: must have login form terms, not just "ログイン" in isolation.
     # A single "ログイン履歴" link on a stock page should not trigger auth_expired.
     visible = _visible_text(html)
-    if "ログイン" in visible[:3000] and (
-        "パスワード" in visible[:3000]
-        or "ログインID" in visible[:3000]
-        or "お取引" in visible[:3000]
-    ):
+    if "ログイン" in visible[:3000] and "パスワード" in visible[:3000]:
         return "auth_expired"
     if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
         return "ticker_not_found"
