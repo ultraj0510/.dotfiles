@@ -374,6 +374,7 @@ def parse_performance(html: str) -> dict:
         "rating_distribution": {},
     }
     extracted = 0
+    unknown_rows = 0
 
     def parse_value(cell: str) -> dict:
         match = re.search(r"(-?[\d,]+)(?:\s*\(([-\d.]+)%\))?", cell)
@@ -407,8 +408,8 @@ def parse_performance(html: str) -> dict:
             elif "会社実績" in cells[0]:
                 data["actual_results"].append(item)
                 extracted += 1
-            # Unknown row type with numeric values is not counted —
-            # it may indicate a page structure change.
+            else:
+                unknown_rows += 1
 
     # Rating current value
     rating_table = soup.find(
@@ -428,6 +429,7 @@ def parse_performance(html: str) -> dict:
     # Rating distribution
     labels = {"強気": "strong", "やや強気": "moderately_strong",
               "中立": "neutral", "やや弱気": "moderately_weak", "弱気": "weak"}
+    dist_extracted = 0
     for row in soup.find_all("tr"):
         cells = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"])]
         if len(cells) >= 2:
@@ -435,6 +437,7 @@ def parse_performance(html: str) -> dict:
                 if cells[0].startswith(label):
                     count = re.search(r"(\d+)人", cells[1])
                     data["rating_distribution"][key] = int(count.group(1)) if count else 0
+                    dist_extracted += 1
 
     # Target price
     target = re.search(
@@ -447,6 +450,8 @@ def parse_performance(html: str) -> dict:
         data["target_price_vs_market_pct"] = float(target.group(3))
         extracted += 1
 
-    if extracted == 0:
-        return {"status": "source_changed", "data": {}}
+    if extracted == 0 and unknown_rows == 0:
+        return {"status": "source_changed", "data": data}  # preserve dist/target if any
+    if unknown_rows > 0:
+        return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}

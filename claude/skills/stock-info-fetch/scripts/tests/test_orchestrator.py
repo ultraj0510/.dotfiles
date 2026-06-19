@@ -252,6 +252,29 @@ def test_auth_expired_html_on_performance_is_global(monkeypatch, tmp_path):
     assert saved == []
 
 
+class InfoNotAvailableClient:
+    """Analysis tab says 'information not available', no iframe or popup links."""
+    def fetch_html(self, url, cookie_header=""):
+        if "Idtl70" in url:
+            return SimpleNamespace(body="該当する情報はありません".encode(), status="ok", url=url)
+        if "Idtl10" in url:
+            return SimpleNamespace(body="<table><tr><th>现在值</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
+        if "Idtl20" in url:
+            return SimpleNamespace(body="no news".encode(), status="ok", url=url)
+        if "Idtl50" in url:
+            return SimpleNamespace(body="no profile".encode(), status="ok", url=url)
+        return SimpleNamespace(body=b"", status="ok", url=url)
+
+
+def test_info_not_available_gives_not_available_status(monkeypatch, tmp_path):
+    _set_fake_cookie(monkeypatch)
+    _set_mocks(monkeypatch, InfoNotAvailableClient)
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    assert result["sections"]["company_scores"]["status"] == "not_available"
+    assert result["sections"]["stock_reports"]["status"] == "not_available"
+
+
 def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):
     _set_fake_cookie(monkeypatch)
     _set_mocks(monkeypatch, FullClient)

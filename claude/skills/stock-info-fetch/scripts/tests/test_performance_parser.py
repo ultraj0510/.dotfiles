@@ -76,6 +76,36 @@ def test_unknown_row_type_not_counted_as_extracted():
     assert result["status"] == "source_changed"
 
 
+def test_unknown_row_alongside_known_row_is_source_changed():
+    """Mixed: known row + unknown row (市場予想) → source_changed with partial data."""
+    html = """
+    <table>
+    <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
+    <tr><th>2026/03 会社実績</th><td>-1,907</td><td>1,676</td><td>3,318</td><td>7,618</td></tr>
+    <tr><th>2027/03 市場予想</th><td>240</td><td>--</td><td>--</td><td>11,000</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "source_changed"
+    # Known row data is preserved
+    assert len(result["data"]["actual_results"]) == 1
+    assert result["data"]["actual_results"][0]["values"]["通期"]["value"] == 7618.0
+
+
+def test_rating_distribution_preserved_on_source_changed():
+    """When only rating distribution is found, data must be preserved."""
+    html = """
+    <table>
+    <tr><th>強気 (5点)</th><td>3人</td></tr>
+    <tr><th>中立 (3点)</th><td>2人</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "source_changed"
+    assert result["data"]["rating_distribution"]["strong"] == 3
+    assert result["data"]["rating_distribution"]["neutral"] == 2
+
+
 def test_all_dash_row_excluded_when_real_row_present():
     """Mix: one real row, one all-dash row. Dash row must be absent from output."""
     html = """
