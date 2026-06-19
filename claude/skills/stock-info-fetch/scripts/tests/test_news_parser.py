@@ -1,0 +1,54 @@
+"""Tests for news tab parser."""
+import sys
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from sbi_stock_parser import parse_news
+
+JST = timezone(timedelta(hours=9))
+
+_NEWS_HTML = """
+<table>
+<tr><td>06/19 14:30</td><td><a href="/news/article123">2026年3月期 決算発表</a></td></tr>
+<tr><td>2026/06/15 09:00</td><td>レーティング</td><td><a href="/news/article122">目標株価引き上げ</a></td></tr>
+<tr><td>2026/04/10 15:00</td><td>IR</td><td><a href="/news/article121">新作ゲーム発表</a></td></tr>
+</table>
+"""
+
+_NEWS_HTML_EMPTY = "<div>ニュースはありません</div>"
+
+_NEWS_HTML_OLD_OUTSIDE_90D = """
+<table>
+<tr><td>2025/12/01 10:00</td><td>IR</td><td><a href="/news/article1">古いニュース</a></td></tr>
+</table>
+"""
+
+
+def test_parse_news_basic():
+    result = parse_news(_NEWS_HTML, as_of=datetime(2026, 6, 19, tzinfo=JST))
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert len(data) == 3
+    assert data[0]["published_at"] == "2026-06-19T14:30:00+09:00"
+    assert data[0]["headline"] == "2026年3月期 決算発表"
+    assert data[0]["url"].endswith("/news/article123")
+
+
+def test_parse_news_not_available():
+    result = parse_news(_NEWS_HTML_EMPTY, as_of=datetime(2026, 6, 19, tzinfo=JST))
+    assert result["status"] == "not_available"
+
+
+def test_parse_news_filters_outside_90_days():
+    result = parse_news(
+        _NEWS_HTML_OLD_OUTSIDE_90D,
+        as_of=datetime(2026, 6, 19, tzinfo=JST),
+    )
+    assert result["status"] == "not_available"
+
+
+def test_parse_news_structure_changed():
+    result = parse_news("<div>garbage</div>", as_of=datetime(2026, 6, 19, tzinfo=JST))
+    assert result["status"] == "source_changed"
