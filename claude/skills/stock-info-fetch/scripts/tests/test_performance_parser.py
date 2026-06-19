@@ -50,3 +50,15 @@ def test_parse_performance_not_available():
 def test_parse_performance_source_changed():
     result = parse_performance("<div>garbage</div>")
     assert result["status"] == "source_changed"
+
+
+def test_all_dash_row_not_counted_as_extracted():
+    """Rows where all 4 periods are '--' must not count toward extracted."""
+    html = """
+    <table>
+    <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
+    <tr><th>2027/03 会社予想</th><td>--</td><td>--</td><td>--</td><td>--</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "source_changed"

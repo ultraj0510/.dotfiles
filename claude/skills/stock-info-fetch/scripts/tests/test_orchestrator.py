@@ -188,6 +188,47 @@ def test_partial_success(monkeypatch, tmp_path):
     assert len(result["errors"]) > 0
 
 
+class AuthExpiredOnAnalysisClient:
+    """Direct tabs succeed, but analysis tab redirects to login (auth_expired)."""
+    def fetch_html(self, url, cookie_header=""):
+        if "Idtl70" in url:
+            return SimpleNamespace(body=None, status="auth_expired", url="https://login.sbisec.co.jp/ETGate/")
+        return SimpleNamespace(body="<table><tr><th>current</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
+
+
+class AuthExpiredOnPerformanceClient:
+    """Price + analysis succeed, but performance popup redirects to login."""
+    def fetch_html(self, url, cookie_header=""):
+        if "report_summary" in url:
+            return SimpleNamespace(body=None, status="auth_expired", url="https://login.sbisec.co.jp/ETGate/")
+        if "Idtl70" in url:
+            return SimpleNamespace(body="""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=synthetic&sym=3932.T"></iframe>
+<a onclick="window.open('/ETGate/?sw_param1=report_summary&stock_sec_code_mul=3932','report_summary')">業績</a>""".encode(), status="ok", url=url)
+        if "graph.sbisec.co.jp" in url:
+            return SimpleNamespace(body="<table><tr><th>score</th><td>6.0</td><td>7.0</td><td>5.0</td></tr></table>".encode(), status="ok", url=url)
+        return SimpleNamespace(body="<table><tr><th>current</th><td>2150.5</td></tr></table>".encode(), status="ok", url=url)
+
+
+def test_auth_expired_on_analysis_is_global(monkeypatch, tmp_path):
+    _set_fake_cookie(monkeypatch)
+    saved = []
+    _set_mocks(monkeypatch, AuthExpiredOnAnalysisClient, cache_save=lambda ticker, data: saved.append(data))
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    assert result["errors"][0]["code"] == "auth_expired"
+    assert saved == []
+
+
+def test_auth_expired_on_performance_is_global(monkeypatch, tmp_path):
+    _set_fake_cookie(monkeypatch)
+    saved = []
+    _set_mocks(monkeypatch, AuthExpiredOnPerformanceClient, cache_save=lambda ticker, data: saved.append(data))
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    assert result["errors"][0]["code"] == "auth_expired"
+    assert saved == []
+
+
 def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):
     _set_fake_cookie(monkeypatch)
     _set_mocks(monkeypatch, FullClient)

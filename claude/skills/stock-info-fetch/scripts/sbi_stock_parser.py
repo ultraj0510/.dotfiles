@@ -382,6 +382,12 @@ def parse_performance(html: str) -> dict:
             "progress_pct": float(match.group(2)) if match and match.group(2) and re.match(r"-?\d+(\.\d+)?$", match.group(2)) else None,
         }
 
+    def _row_has_any_value(item: dict, periods: list[str]) -> bool:
+        return any(
+            v.get("value") is not None
+            for v in item.get("values", {}).values()
+        )
+
     for row in soup.find_all("tr"):
         cells = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"])]
         if len(cells) == 5 and re.match(r"\d{4}/\d{2}", cells[0]):
@@ -396,7 +402,8 @@ def parse_performance(html: str) -> dict:
                 data["company_forecast"].append(item)
             elif "会社実績" in cells[0]:
                 data["actual_results"].append(item)
-            extracted += 1
+            if _row_has_any_value(item, data["periods"]):
+                extracted += 1
 
     # Rating current value
     rating_table = soup.find(

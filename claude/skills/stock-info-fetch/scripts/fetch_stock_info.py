@@ -96,6 +96,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     # 5. Analysis tab -> scores + performance + disclosures
     analysis_fetch = client.fetch_html(build_detail_url(ticker, "analysis"), cookie_header)
+    if analysis_fetch.status == "auth_expired":
+        return _global_error_result(ticker, "auth_expired")
     if analysis_fetch.status == "ok":
         html = _decode_html(analysis_fetch.body)
         global_code = _classify_global_error(html, analysis_fetch.url)
@@ -103,12 +105,14 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             return _global_error_result(ticker, global_code)
         sources = extract_analysis_sources(html, analysis_fetch.url)
         score_html = ""
+        score_fetch_ok = False
 
         # 5a. Company scores via iframe (NO cookie!)
         if sources.score_url:
             score_fetch = client.fetch_html(sources.score_url)  # no cookie_header!
             if score_fetch.status == "ok":
                 score_html = _decode_html(score_fetch.body)
+                score_fetch_ok = True
                 parsed = parse_company_scores(score_html)
                 _set_section(result, "company_scores", parsed, score_fetch.url, now_iso)
             else:
@@ -121,6 +125,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         # 5b. Performance via onclick popup url (cookie IS sent -- sbisec host)
         if sources.performance_entry_url:
             perf_fetch = client.fetch_html(sources.performance_entry_url, cookie_header)
+            if perf_fetch.status == "auth_expired":
+                return _global_error_result(ticker, "auth_expired")
             if perf_fetch.status == "ok":
                 parsed = parse_performance(_decode_html(perf_fetch.body))
                 _set_section(result, "performance", parsed, perf_fetch.url, now_iso)
@@ -140,15 +146,24 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         if pdf_url:
             pdf_result = _fetch_and_parse_pdf(client, pdf_url)
             _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
-        else:
+        elif sources.score_url is None:
             result["sections"]["stock_reports"] = {
                 "status": "not_available", "data": {},
                 "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
             }
+        else:
+            # Score iframe URL exists but we couldn't fetch/parse it —
+            # cannot determine report existence, so error.
+            _add_error(result, "stock_reports",
+                       "fetch_failed" if not score_fetch_ok else "parse_failed",
+                       "Cannot check STOCK REPORTS PDF: score page unavailable",
+                       "")
 
         # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
         if sources.disclosures_entry_url:
             disc_fetch = client.fetch_html(sources.disclosures_entry_url, cookie_header)
+            if disc_fetch.status == "auth_expired":
+                return _global_error_result(ticker, "auth_expired")
             if disc_fetch.status == "ok":
                 parsed = parse_disclosures(_decode_html(disc_fetch.body))
                 _set_section(result, "disclosures", parsed, disc_fetch.url, now_iso)
@@ -158,6 +173,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         else:
             _add_error(result, "disclosures", "source_changed",
                        "Disclosure popup URL is missing", analysis_fetch.url)
+    elif analysis_fetch.status == "auth_expired":
+        return _global_error_result(ticker, "auth_expired")
     else:
         for sec in ["company_scores", "performance", "stock_reports", "disclosures"]:
             _add_error(result, sec, analysis_fetch.status,
@@ -196,6 +213,11 @@ def _set_section(result: dict, section_key: str, parsed: dict, url: str, now_iso
     if parsed["status"] == "source_changed":
         _add_error(result, section_key, "source_changed",
                    f"Structure changed for {section_key}", url)
+    elif parsed["status"] == "error":
+        _add_error(result, section_key,
+                   parsed.get("error_code", "parse_failed"),
+                   parsed.get("message", f"Failed to parse {section_key}"),
+                   url)
 
 
 def _error_result(ticker: str, code: str, message: str) -> dict:
