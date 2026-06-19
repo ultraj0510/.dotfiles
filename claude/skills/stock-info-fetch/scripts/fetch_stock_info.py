@@ -276,13 +276,21 @@ def _visible_text(html: str) -> str:
     """Extract visible text, excluding scripts, styles, templates, and hidden elements."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.select(
-        "script, style, template, [hidden], "
-        "[style*='display:none'], [style*='display: none'], "
-        "[style*='visibility:hidden'], [style*='visibility: hidden'], "
-        "[aria-hidden='true'], [aria-hidden=true]"
-    ):
-        tag.extract()
+    for tag in soup.find_all(True):
+        if tag.name in ("script", "style", "template"):
+            tag.extract()
+            continue
+        if tag.get("hidden") is not None:
+            tag.extract()
+            continue
+        style = (tag.get("style") or "").lower().replace(" ", "")
+        if "display:none" in style or "visibility:hidden" in style:
+            tag.extract()
+            continue
+        aria = (tag.get("aria-hidden") or "").lower()
+        if aria == "true":
+            tag.extract()
+            continue
     return soup.get_text(" ", strip=True)
 
 
@@ -294,8 +302,14 @@ def _has_not_available_marker(html: str, *markers: str) -> bool:
 def _classify_global_error(html: str, url: str) -> str | None:
     if "login" in url.lower():
         return "auth_expired"
+    # Login page: must have login form terms, not just "ログイン" in isolation.
+    # A single "ログイン履歴" link on a stock page should not trigger auth_expired.
     visible = _visible_text(html)
-    if "ログイン" in visible[:3000]:
+    if "ログイン" in visible[:3000] and (
+        "パスワード" in visible[:3000]
+        or "ログインID" in visible[:3000]
+        or "お取引" in visible[:3000]
+    ):
         return "auth_expired"
     if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
         return "ticker_not_found"
