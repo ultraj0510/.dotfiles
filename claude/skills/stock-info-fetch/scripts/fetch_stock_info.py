@@ -128,7 +128,11 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             if perf_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")
             if perf_fetch.status == "ok":
-                parsed = parse_performance(_decode_html(perf_fetch.body))
+                perf_html = _decode_html(perf_fetch.body)
+                global_code = _classify_global_error(perf_html, perf_fetch.url)
+                if global_code:
+                    return _global_error_result(ticker, global_code)
+                parsed = parse_performance(perf_html)
                 _set_section(result, "performance", parsed, perf_fetch.url, now_iso)
             else:
                 _add_error(result, "performance", perf_fetch.status,
@@ -151,11 +155,16 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                 "status": "not_available", "data": {},
                 "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
             }
+        elif score_fetch_ok:
+            # Score page was fetched, no PDF link — report genuinely not available.
+            result["sections"]["stock_reports"] = {
+                "status": "not_available", "data": {},
+                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+            }
         else:
-            # Score iframe URL exists but we couldn't fetch/parse it —
-            # cannot determine report existence, so error.
+            # Score iframe URL exists but fetch failed — cannot check.
             _add_error(result, "stock_reports",
-                       "fetch_failed" if not score_fetch_ok else "parse_failed",
+                       "fetch_failed",
                        "Cannot check STOCK REPORTS PDF: score page unavailable",
                        "")
 
@@ -165,7 +174,11 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             if disc_fetch.status == "auth_expired":
                 return _global_error_result(ticker, "auth_expired")
             if disc_fetch.status == "ok":
-                parsed = parse_disclosures(_decode_html(disc_fetch.body))
+                disc_html = _decode_html(disc_fetch.body)
+                global_code = _classify_global_error(disc_html, disc_fetch.url)
+                if global_code:
+                    return _global_error_result(ticker, global_code)
+                parsed = parse_disclosures(disc_html)
                 _set_section(result, "disclosures", parsed, disc_fetch.url, now_iso)
             else:
                 _add_error(result, "disclosures", disc_fetch.status,

@@ -396,14 +396,15 @@ def parse_performance(html: str) -> dict:
                 "fiscal_period": fiscal_period,
                 "values": dict(zip(data["periods"], map(parse_value, cells[1:]))),
             }
+            if not _row_has_any_value(item, data["periods"]):
+                continue
             if "コンセンサス予想" in cells[0]:
                 data["consensus_forecast"].append(item)
             elif "会社予想" in cells[0] and "会社実績" not in cells[0]:
                 data["company_forecast"].append(item)
             elif "会社実績" in cells[0]:
                 data["actual_results"].append(item)
-            if _row_has_any_value(item, data["periods"]):
-                extracted += 1
+            extracted += 1
 
     # Rating current value
     rating_table = soup.find(

@@ -53,7 +53,7 @@ def test_parse_performance_source_changed():
 
 
 def test_all_dash_row_not_counted_as_extracted():
-    """Rows where all 4 periods are '--' must not count toward extracted."""
+    """Rows where all 4 periods are '--' must not appear in output arrays."""
     html = """
     <table>
     <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
@@ -62,3 +62,18 @@ def test_all_dash_row_not_counted_as_extracted():
     """
     result = parse_performance(html)
     assert result["status"] == "source_changed"
+
+
+def test_all_dash_row_excluded_when_real_row_present():
+    """Mix: one real row, one all-dash row. Dash row must be absent from output."""
+    html = """
+    <table>
+    <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
+    <tr><th>2026/03 会社実績</th><td>-1,907</td><td>1,676</td><td>3,318</td><td>7,618</td></tr>
+    <tr><th>2027/03 会社予想</th><td>--</td><td>--</td><td>--</td><td>--</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "ok"
+    assert len(result["data"]["actual_results"]) == 1
+    assert len(result["data"]["company_forecast"]) == 0
