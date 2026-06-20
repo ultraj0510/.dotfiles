@@ -72,16 +72,15 @@ def parse_stock_report_pdf(pdf_path: str) -> dict:
 
 
 def _has_minimum_data(data: dict) -> bool:
-    """Require at least 2 of the 6 data categories to be non-empty."""
-    filled = sum(1 for v in [
-        data["report_date"],
-        data["company_overview"],
-        data["key_metrics"],
-        data["actual_and_forecast"].get("actual") or data["actual_and_forecast"].get("forecast"),
-        data["changes"],
-        data["risk_factors"],
-    ] if v)
-    return filled >= 2
+    """Require report_date AND at least one filled data category."""
+    if not data["report_date"]:
+        return False
+    if data["key_metrics"]:
+        return True
+    af = data["actual_and_forecast"]
+    if af.get("actual") or af.get("forecast"):
+        return True
+    return False
 
 
 def _extract_report_date(text: str) -> str:
@@ -111,25 +110,43 @@ def _extract_company_overview(text: str) -> str:
 
 def _extract_key_metrics(text: str, tables: list[list[str]]) -> dict:
     metrics = {}
-    metric_patterns = [
-        (r"PER[：:]?\s*([\d,.]+)\s*倍", "per"),
-        (r"PBR[：:]?\s*([\d,.]+)\s*倍", "pbr"),
-        (r"EPS[：:]?\s*([\d,.]+)\s*円", "eps"),
-        (r"BPS[：:]?\s*([\d,.]+)\s*円", "bps"),
-        (r"ROE[：:]?\s*([\d,.]+)\s*%", "roe"),
-        (r"ROA[：:]?\s*([\d,.]+)\s*%", "roa"),
-        (r"自己資本比率[：:]?\s*([\d,.]+)\s*%", "equity_ratio"),
-        (r"配当利回り[：:]?\s*([\d,.]+)\s*%", "dividend_yield"),
-        (r"時価総額[：:]?\s*([\d,.]+)\s*億円", "market_cap_billion_yen"),
-        (r"発行済株式数[：:]?\s*([\d,.]+)\s*万株", "shares_outstanding_10k"),
-    ]
-    for pattern, key in metric_patterns:
-        m = re.search(pattern, text)
-        if m:
-            try:
-                metrics[key] = float(m.group(1).replace(",", ""))
-            except ValueError:
-                metrics[key] = m.group(1)
+
+    # Primary: extract from table rows
+    TABLE_KEYS = ("per", "pbr", "eps", "bps", "roe", "roa")
+    for row in tables:
+        if len(row) < 2:
+            continue
+        label = row[0].strip().lower()
+        for key in TABLE_KEYS:
+            if key in label:
+                try:
+                    val = row[1].replace(",", "").replace("倍", "").replace("円", "").replace("%", "")
+                    metrics[key] = float(val)
+                except ValueError:
+                    pass
+                break
+
+    # Fall back to text patterns if tables didn't yield enough
+    if len(metrics) < 2:
+        metric_patterns = [
+            (r"PER[：:]?\s*([\d,.]+)\s*倍", "per"),
+            (r"PBR[：:]?\s*([\d,.]+)\s*倍", "pbr"),
+            (r"EPS[：:]?\s*([\d,.]+)\s*円", "eps"),
+            (r"BPS[：:]?\s*([\d,.]+)\s*円", "bps"),
+            (r"ROE[：:]?\s*([\d,.]+)\s*%", "roe"),
+            (r"ROA[：:]?\s*([\d,.]+)\s*%", "roa"),
+            (r"自己資本比率[：:]?\s*([\d,.]+)\s*%", "equity_ratio"),
+            (r"配当利回り[：:]?\s*([\d,.]+)\s*%", "dividend_yield"),
+            (r"時価総額[：:]?\s*([\d,.]+)\s*億円", "market_cap_billion_yen"),
+            (r"発行済株式数[：:]?\s*([\d,.]+)\s*万株", "shares_outstanding_10k"),
+        ]
+        for pattern, key in metric_patterns:
+            m = re.search(pattern, text)
+            if m:
+                try:
+                    metrics[key] = float(m.group(1).replace(",", ""))
+                except ValueError:
+                    metrics[key] = m.group(1)
     return metrics
 
 

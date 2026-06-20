@@ -48,3 +48,11 @@ def test_parse_disclosures_filters_outside_1_year():
 def test_parse_disclosures_structure_changed():
     result = parse_disclosures("<div>unknown</div>", as_of=datetime(2026, 6, 19, tzinfo=JST))
     assert result["status"] == "source_changed"
+
+
+def test_disclosures_excludes_future_items():
+    """Disclosures dated after as_of must be excluded."""
+    html = '<table><tr><td>2026/12/01 10:00</td><td>IR</td><td><a href="/future.pdf">未来の開示</a></td></tr></table>'
+    result = parse_disclosures(html, as_of=datetime(2026, 6, 20, tzinfo=JST))
+    assert result["status"] in ("not_available", "source_changed")
+    assert result["data"] == []

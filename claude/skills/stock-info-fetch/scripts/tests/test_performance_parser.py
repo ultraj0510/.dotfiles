@@ -119,3 +119,10 @@ def test_all_dash_row_excluded_when_real_row_present():
     assert result["status"] == "ok"
     assert len(result["data"]["actual_results"]) == 1
     assert len(result["data"]["company_forecast"]) == 0
+
+
+def test_rating_distro_no_fabricated_zero():
+    """When regex doesn't match, don't add key at all (no fabricated 0)."""
+    html = "<table><tr><th>強気 (5点)</th><td>不明</td></tr></table>"
+    result = parse_performance(html)
+    assert "strong" not in result["data"].get("rating_distribution", {})

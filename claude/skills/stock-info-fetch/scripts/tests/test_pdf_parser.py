@@ -83,3 +83,12 @@ def test_parse_stock_report_pdf_insufficient_data(tmp_path):
 
     result = parse_stock_report_pdf(str(pdf_path))
     assert result["status"] == "source_changed"
+
+
+def test_extract_key_metrics_uses_table_data():
+    """When text has no metric patterns, table data must be used."""
+    from pdf_parser import _extract_key_metrics
+    tables = [["指標", "値", "単位"], ["PER", "15.2", "倍"], ["PBR", "1.85", "倍"]]
+    result = _extract_key_metrics("no regex matches here", tables)
+    assert result.get("per") == 15.2
+    assert result.get("pbr") == 1.85

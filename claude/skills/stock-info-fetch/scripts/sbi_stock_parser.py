@@ -31,7 +31,18 @@ def _count_numeric_values(text: str) -> int:
     return len(re.findall(r"[\d,]+\.?\d*", text))
 
 
-def parse_price(html: str) -> dict:
+def _within_window(value: datetime, as_of: datetime | None, days: int) -> bool:
+    """Check if value is within [as_of-days, as_of] window inclusive.
+
+    Upper bound uses end of as_of day to include items on the same
+    calendar day as as_of regardless of time.
+    """
+    ref = as_of if as_of is not None else datetime.now(JST)
+    end_of_day = ref.replace(hour=23, minute=59, second=59)
+    return ref - timedelta(days=days) <= value <= end_of_day
+
+
+def parse_price(html: str, as_of: datetime | None = None) -> dict:
     """Parse SBI price tab HTML into structured data.
 
     Returns:
@@ -85,8 +96,26 @@ def parse_price(html: str) -> dict:
             except ValueError:
                 pass
 
+    # Extract quote_timestamp from MM/DD HH:MM pattern
+    ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", text)
+    if ts_match:
+        month, day, hour, minute = int(ts_match.group(1)), int(ts_match.group(2)), int(ts_match.group(3)), int(ts_match.group(4))
+        ref = as_of or datetime.now(JST)
+        for candidate_year in (ref.year, ref.year - 1):
+            try:
+                dt = datetime(candidate_year, month, day, hour, minute, tzinfo=JST)
+                if dt <= ref:
+                    data["quote_timestamp"] = dt.isoformat()
+                    extracted += 1
+                    break
+            except ValueError:
+                continue
+
     if extracted == 0:
         return {"status": "source_changed", "data": {}}
+    MANDATORY = {"current_price", "quote_timestamp"}
+    if not MANDATORY.issubset(data.keys()):
+        return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}
 
 
@@ -177,9 +206,10 @@ def parse_company_profile(html: str) -> dict:
 
     if extracted == 0:
         return {"status": "source_changed", "data": {}}
+    MANDATORY = {"company_name", "report_date", "characteristics", "business_segments"}
+    if not MANDATORY.issubset(data.keys()):
+        return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}
-
-
 def parse_news(html: str, as_of: datetime | None = None) -> dict:
     """Parse SBI news tab HTML. Returns up to 90 days of news items.
 
@@ -193,7 +223,6 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
     if "ニュースはありません" in text:
         return {"status": "not_available", "data": []}
 
-    cutoff = (as_of or datetime.now(JST)) - timedelta(days=90)
     items = []
     recognized = 0
 
@@ -244,7 +273,7 @@ def parse_news(html: str, as_of: datetime | None = None) -> dict:
         # Exclude dates strictly in the future.
         if dt_jst > (as_of or datetime.now(JST)):
             continue
-        if dt_jst < cutoff:
+        if not _within_window(dt_jst, as_of, 90):
             recognized += 1
             continue
         recognized += 1
@@ -280,7 +309,6 @@ def parse_disclosures(html: str, as_of: datetime | None = None) -> dict:
     if "適時開示はありません" in text or "該当する開示はありません" in text:
         return {"status": "not_available", "data": []}
 
-    cutoff = (as_of or datetime.now(JST)) - timedelta(days=365)
     items = []
     recognized = 0
 
@@ -305,7 +333,7 @@ def parse_disclosures(html: str, as_of: datetime | None = None) -> dict:
             except ValueError:
                 continue
 
-        if dt_jst < cutoff:
+        if not _within_window(dt_jst, as_of, 365):
             recognized += 1
             continue
         recognized += 1
@@ -363,7 +391,10 @@ def parse_company_scores(html: str) -> dict:
             except ValueError:
                 pass
 
-    if extracted < 3:
+    if extracted == 0:
+        return {"status": "source_changed", "data": data}
+    MANDATORY = {"total_score", "financial_health", "profitability", "valuation", "stability", "price_momentum"}
+    if not MANDATORY.issubset(data.keys()):
         return {"status": "source_changed", "data": data}
     if not all(1.0 <= v <= 10.0 for v in data.values()):
         return {"status": "source_changed", "data": data}
@@ -454,7 +485,8 @@ def parse_performance(html: str) -> dict:
             for label, key in labels.items():
                 if cells[0].startswith(label):
                     count = re.search(r"(\d+)人", cells[1])
-                    data["rating_distribution"][key] = int(count.group(1)) if count else 0
+                    if count:
+                        data["rating_distribution"][key] = int(count.group(1))
                     dist_extracted += 1
 
     # Target price

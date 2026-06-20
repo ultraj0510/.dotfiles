@@ -6,9 +6,11 @@ from types import SimpleNamespace
 from urllib.error import URLError
 from urllib.request import Request
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from http_client import SafeHttpClient, COOKIE_HOSTS, PUBLIC_HOSTS, ALLOWED_HOSTS
+from http_client import SafeHttpClient, SafeRedirectHandler, COOKIE_HOSTS, PUBLIC_HOSTS, ALLOWED_HOSTS
 
 
 class FakeTransport:
@@ -131,3 +133,26 @@ def test_fetch_html_decodes_body():
     result = client.fetch_html("https://site1.sbisec.co.jp/ETGate/")
     assert result.status == "ok"
     assert result.body == "<html>テスト</html>".encode("utf-8")
+
+
+def test_rejects_plain_http_before_cookie_attachment():
+    transport = FakeTransport(final_url="http://site1.sbisec.co.jp/ETGate/")
+    result = SafeHttpClient(transport).fetch_html(
+        "http://site1.sbisec.co.jp/ETGate/",
+        cookie_header="session=secret",
+    )
+    assert result.status == "insecure_url"
+    assert transport.requests == []
+
+
+def test_rejects_https_to_http_redirect():
+    handler = SafeRedirectHandler()
+    request = Request(
+        "https://site1.sbisec.co.jp/ETGate/",
+        headers={"Cookie": "session=secret"},
+    )
+    with pytest.raises(URLError, match="insecure_url"):
+        handler.redirect_request(
+            request, None, 302, "Found", {},
+            "http://site1.sbisec.co.jp/ETGate/",
+        )

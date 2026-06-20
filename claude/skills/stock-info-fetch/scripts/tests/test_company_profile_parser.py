@@ -81,3 +81,9 @@ def test_parse_company_profile_not_available():
 def test_parse_company_profile_structure_changed():
     result = parse_company_profile(_PROFILE_HTML_CHANGED)
     assert result["status"] == "source_changed"
+
+
+def test_profile_requires_core_fields():
+    """Missing company_name, characteristics, business_segments → source_changed."""
+    result = parse_company_profile("<div>作成日：2026年06月17日</div>")
+    assert result["status"] == "source_changed"

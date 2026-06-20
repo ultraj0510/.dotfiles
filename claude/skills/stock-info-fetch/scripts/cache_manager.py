@@ -4,11 +4,18 @@ Cache key: ticker code + JST date. Atomic writes via temp file + rename.
 """
 import json
 import os
+import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 DEFAULT_CACHE_DIR = Path.home() / ".claude" / "cache" / "stock-info-fetch"
 JST = timezone(timedelta(hours=9))
+
+VALID_STATUSES = {"ok", "not_available", "error"}
+EXPECTED_SECTIONS = {
+    "price", "company_profile", "company_scores",
+    "performance", "news", "disclosures", "stock_reports",
+}
 
 
 class CacheManager:
@@ -33,9 +40,20 @@ class CacheManager:
             data = json.loads(path.read_text())
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
-        cached_date = data.get("cache", {}).get("date", "")
-        if cached_date != self._today():
+        if data.get("schema_version") != "1.0":
             return None
+        if not isinstance(data.get("ticker"), str):
+            return None
+        if data.get("cache", {}).get("date") != self._today():
+            return None
+        sections = data.get("sections")
+        if not isinstance(sections, dict) or set(sections.keys()) != EXPECTED_SECTIONS:
+            return None
+        for name, section in sections.items():
+            if not isinstance(section, dict):
+                return None
+            if section.get("status") not in VALID_STATUSES:
+                return None
         data["cache"]["hit"] = True
         return data
 
@@ -43,10 +61,11 @@ class CacheManager:
         data["cache"]["hit"] = False
         data["cache"]["date"] = self._today()
         path = self._cache_path(ticker)
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        tmp_path.chmod(0o600)
-        os.replace(tmp_path, path)
+        with tempfile.NamedTemporaryFile(
+            dir=self.cache_dir, delete=False, suffix=".tmp", mode="w", encoding="utf-8"
+        ) as tmp:
+            json.dump(data, tmp, ensure_ascii=False, indent=2)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.chmod(tmp.name, 0o600)
+        os.replace(tmp.name, path)

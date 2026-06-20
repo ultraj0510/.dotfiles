@@ -65,3 +65,10 @@ def test_parse_company_scores_out_of_range():
     """
     result = parse_company_scores(html)
     assert result["status"] == "source_changed"
+
+
+def test_scores_require_all_six_fields():
+    """Only 3 scores → source_changed."""
+    html = "<table><tr><th>企業スコア総合</th><td>5.0</td></tr><tr><th>財務健全性</th><td>6.0</td></tr><tr><th>収益性</th><td>7.0</td></tr></table>"
+    result = parse_company_scores(html)
+    assert result["status"] == "source_changed"

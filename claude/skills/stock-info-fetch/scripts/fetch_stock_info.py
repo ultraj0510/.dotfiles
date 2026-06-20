@@ -6,11 +6,11 @@ Usage:
 Output: JSON to stdout. Logs/warnings to stderr.
 """
 import json
-import re
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+
+from page_state import classify_page_state, visible_soup
 
 PORTFOLIO_CORE = Path.home() / ".dotfiles" / "portfolio-core"
 if str(PORTFOLIO_CORE) not in sys.path:
@@ -89,7 +89,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             _add_error(result, section_key, fetched.status, f"Failed to fetch {tab_name}", fetched.url)
             continue
         html = _decode_html(fetched.body)
-        global_code = _classify_global_error(html, fetched.url)
+        global_code = classify_page_state(html, fetched.url)
         if global_code:
             return _global_error_result(ticker, global_code)
 
@@ -102,7 +102,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         return _global_error_result(ticker, "auth_expired")
     if analysis_fetch.status == "ok":
         html = _decode_html(analysis_fetch.body)
-        global_code = _classify_global_error(html, analysis_fetch.url)
+        global_code = classify_page_state(html, analysis_fetch.url)
         if global_code:
             return _global_error_result(ticker, global_code)
         sources = extract_analysis_sources(html, analysis_fetch.url)
@@ -136,7 +136,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                 return _global_error_result(ticker, "auth_expired")
             if perf_fetch.status == "ok":
                 perf_html = _decode_html(perf_fetch.body)
-                global_code = _classify_global_error(perf_html, perf_fetch.url)
+                global_code = classify_page_state(perf_html, perf_fetch.url)
                 if global_code:
                     return _global_error_result(ticker, global_code)
                 parsed = parse_performance(perf_html)
@@ -190,7 +190,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                 return _global_error_result(ticker, "auth_expired")
             if disc_fetch.status == "ok":
                 disc_html = _decode_html(disc_fetch.body)
-                global_code = _classify_global_error(disc_html, disc_fetch.url)
+                global_code = classify_page_state(disc_html, disc_fetch.url)
                 if global_code:
                     return _global_error_result(ticker, global_code)
                 parsed = parse_disclosures(disc_html)
@@ -274,101 +274,9 @@ def _global_error_result(ticker: str, code: str) -> dict:
     return _error_result(ticker, code, messages.get(code, code))
 
 
-def _clean_soup(html: str):
-    """Return BeautifulSoup with hidden/invisible elements removed."""
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(True):
-        if tag.name in ("script", "style", "template"):
-            tag.extract()
-            continue
-        if tag.get("hidden") is not None:
-            tag.extract()
-            continue
-        style = re.sub(r"\s+", "", (tag.get("style") or "").lower())
-        if "display:none" in style or "visibility:hidden" in style:
-            tag.extract()
-            continue
-        aria = (tag.get("aria-hidden") or "").lower()
-        if aria == "true":
-            tag.extract()
-            continue
-    return soup
-
-
-def _visible_text(html: str) -> str:
-    """Extract visible text, excluding hidden elements."""
-    return _clean_soup(html).get_text(" ", strip=True)
-
-
 def _has_not_available_marker(html: str, *markers: str) -> bool:
     """Check if any explicit 'not available' marker appears in visible text only."""
-    return any(m in _visible_text(html) for m in markers)
-
-
-def _classify_global_error(html: str, url: str) -> str | None:
-    # Check redirect host (not arbitrary URL substring).
-    host = urlparse(url).hostname
-    if host and host.endswith("login.sbisec.co.jp"):
-        return "auth_expired"
-    # Check for login form structure (only in visible DOM, not hidden/template).
-    if _has_login_form(html):
-        return "auth_expired"
-    visible = _visible_text(html)
-    if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
-        return "ticker_not_found"
-    return None
-
-
-def _has_login_form(html: str) -> bool:
-    """Check visible DOM for login form structure.
-
-    Requires: form action containing 'login', OR a password input
-    whose name does not suggest password-change (new/confirm/current/old),
-    paired with a login-specific user-id field in the same form.
-    Hidden/invisible elements are excluded via _clean_soup.
-    """
-    soup = _clean_soup(html)
-    for form in soup.find_all("form"):
-        # Find at least one non-change password input (not just the first).
-        pw_inputs = form.find_all("input", type="password")
-        has_login_pw = False
-        for pw in pw_inputs:
-            pw_name = (pw.get("name") or "").lower()
-            pw_id = (pw.get("id") or "").lower()
-            if not any(kw in pw_name or kw in pw_id
-                       for kw in ("new", "confirm", "current", "old", "change")):
-                has_login_pw = True
-                break
-        if not has_login_pw:
-            continue
-
-        # User-id field only counts if the action path is not a known non-login path.
-        action = (form.get("action") or "").lower()
-        action_path = _action_path(action)
-        if action_path and any(kw in action_path for kw in (
-            "change", "history", "help", "reset", "forgot", "register", "signup",
-        )):
-            continue
-
-        for inp in form.find_all("input"):
-            name = (inp.get("name") or "").lower()
-            f_id = (inp.get("id") or "").lower()
-            if name in ("userid", "user_id", "username", "login_id"):
-                return True
-            if f_id in ("userid", "user_id", "username", "login_id"):
-                return True
-
-        # Action path segments contain "login" as a complete component.
-        if action_path and "login" in [s for s in action_path.split("/") if s]:
-            return True
-    return False
-
-
-def _action_path(action: str) -> str:
-    """Extract URL path from a form action, without query string."""
-    from urllib.parse import urlparse as _urlparse
-    return _urlparse(action).path
+    return any(m in visible_soup(html).get_text(" ", strip=True) for m in markers)
 
 
 def _decode_html(body: bytes | None) -> str:
@@ -422,7 +330,13 @@ def main(cli_args: list[str] | None = None):
     args = parser.parse_args(cli_args)
 
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
-    result = fetch_stock_info(args.ticker, refresh=args.refresh, cache_dir=cache_dir)
+    try:
+        result = fetch_stock_info(args.ticker, refresh=args.refresh, cache_dir=cache_dir)
+    except Exception:
+        result = _error_result(args.ticker, "internal_error", "Unexpected internal failure")
+        json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+        sys.stdout.write("\n")
+        sys.exit(1)
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

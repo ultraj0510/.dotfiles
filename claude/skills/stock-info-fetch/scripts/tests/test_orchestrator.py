@@ -4,7 +4,47 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+EXPECTED_SECTIONS = {
+    "price", "company_profile", "company_scores",
+    "performance", "news", "disclosures", "stock_reports",
+}
+VALID_STATUSES = {"ok", "not_available", "error"}
+SENSITIVE_PARAMS = {"token", "enc", "ahash", "hhash", "ihash"}
+
+
+def assert_valid_stock_info(payload, expected_ticker="3932"):
+    """Verify JSON output contract."""
+    assert payload["schema_version"] == "1.0"
+    assert payload["ticker"] == expected_ticker
+    assert isinstance(payload["company_name"], str)
+    sections = payload["sections"]
+    assert isinstance(sections, dict)
+    assert set(sections.keys()) == EXPECTED_SECTIONS
+    for name, section in sections.items():
+        assert isinstance(section, dict), f"{name} section is not a dict"
+        assert section["status"] in VALID_STATUSES, f"{name} status={section['status']}"
+        assert "data" in section
+        assert "source" in section
+        assert "url" in section["source"]
+        for param in SENSITIVE_PARAMS:
+            assert param not in section["source"]["url"], f"{param} in {name} url"
+
+    # Secret values must not appear in entire payload
+    payload_str = json.dumps(payload, ensure_ascii=False)
+    for param in SENSITIVE_PARAMS:
+        assert f"{param}=" not in payload_str, f"{param} leaked in output"
+
+    errors = payload.get("errors", [])
+    assert isinstance(errors, list)
+    for err in errors:
+        assert "section" in err
+        assert "code" in err
+        assert "message" in err
 
 
 def _set_fake_cookie(monkeypatch):
@@ -84,7 +124,7 @@ class TickerNotFoundJPClient:
 class PartialClient:
     def fetch_html(self, url, cookie_header=""):
         if "Idtl10" in url:
-            return SimpleNamespace(body=("<table><tr><th>現在値</th><td>2,150.5</td></tr></table>").encode("utf-8"), status="ok", url=url)
+            return SimpleNamespace(body=("<table><tr><th>現在値</th><td>2,150.5<span>06/19 14:30</span></td></tr></table>").encode("utf-8"), status="ok", url=url)
         return SimpleNamespace(body=None, status="fetch_failed", url=url)
 
 
@@ -94,13 +134,13 @@ class FullClient:
 
     def fetch_html(self, url, cookie_header=""):
         if "Idtl10" in url:
-            body = ("<table><tr><th>現在値</th><td>2,150.5</td></tr></table>").encode("utf-8")
+            body = ("<table><tr><th>現在値</th><td>2,150.5<span>06/19 14:30</span></td></tr></table>").encode("utf-8")
         elif "Idtl20" in url:
             body = ("<table><tr><td>2026/06/19 14:30</td><td>IRニュース</td><td><a href='/news/123'>記事</a></td></tr></table>").encode("utf-8")
         elif "Idtl50" in url:
             body = ("<div>作成日: 2026年06月17日\n3932 (株)Test [ 情報・通信 ]\n【特色】IT企業\n【業種】 通信サービス 時価総額順位 18/103社</div>").encode("utf-8")
         elif "Idtl70" in url:
-            body = ("""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=synthetic&sym=3932.T"></iframe>
+            body = ("""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?pid=123&sym=3932.T"></iframe>
 <a onclick="window.open('/ETGate/?sw_param1=report_summary&stock_sec_code_mul=3932','report_summary')">業績</a>
 <a onclick="window.open('/ETGate/?sw_param1=report_disclose&stock_sec_code_mul=3932','report_disclose')">適時開示</a>""").encode("utf-8")
         elif "graph.sbisec.co.jp" in url:
@@ -321,6 +361,22 @@ def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):
     fsi.main(["3932", "--cache-dir", str(tmp_path)])
     captured = capsys.readouterr()
     parsed = json.loads(captured.out)
-    assert parsed["schema_version"] == "1.0"
-    assert parsed["ticker"] == "3932"
+    assert_valid_stock_info(parsed)
     assert "ERROR" not in captured.out
+
+
+def test_main_outputs_json_when_cookie_store_raises(monkeypatch, capsys):
+    """When cookie_store throws, stdout must still be valid internal_error JSON."""
+    fake = SimpleNamespace(
+        read_cookie_bundle=lambda: (_ for _ in ()).throw(RuntimeError("broken"))
+    )
+    monkeypatch.setitem(sys.modules, "cookie_store", fake)
+    from fetch_stock_info import main
+    with pytest.raises(SystemExit) as exc:
+        main(["3932", "--refresh"])
+    assert exc.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"][0]["code"] == "internal_error"
+    # Error message must not leak to stdout or contain internal details
+    assert "RuntimeError" not in capsys.readouterr().out
+    assert "broken" not in capsys.readouterr().out

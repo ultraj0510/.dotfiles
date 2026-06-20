@@ -35,9 +35,12 @@ class FetchResult:
 
 class SafeRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        host = urlparse(newurl).hostname
+        parsed = urlparse(newurl)
+        host = parsed.hostname
         if host in AUTH_REDIRECT_HOSTS:
             raise URLError("auth_expired")
+        if parsed.scheme != "https":
+            raise URLError("insecure_url")
         if host not in ALLOWED_HOSTS:
             raise URLError("unexpected_host")
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -51,7 +54,10 @@ class SafeHttpClient:
         self.transport = transport or build_opener(SafeRedirectHandler())
 
     def _request(self, url: str, cookie_header: str) -> FetchResult:
-        host = urlparse(url).hostname
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if parsed.scheme != "https":
+            return FetchResult(None, "insecure_url", clean_url(url), "")
         if host not in ALLOWED_HOSTS:
             return FetchResult(None, "unexpected_host", clean_url(url), "")
         headers = {"User-Agent": USER_AGENT, "Accept-Language": "ja"}

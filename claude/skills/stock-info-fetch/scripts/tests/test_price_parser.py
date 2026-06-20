@@ -85,3 +85,17 @@ def test_parse_price_structure_changed():
 def test_parse_price_empty_html():
     result = parse_price("")
     assert result["status"] == "source_changed"
+
+
+def test_price_requires_quote_timestamp():
+    """Has current_price but no timestamp → source_changed."""
+    result = parse_price("<div>現在値 2150.5 円</div>")
+    assert result["status"] == "source_changed"
+
+
+def test_price_ok_with_all_mandatory_fields():
+    """Existing fixture has timestamp, must return ok with quote_timestamp."""
+    result = parse_price(_PRICE_HTML)
+    assert result["status"] == "ok"
+    assert "quote_timestamp" in result["data"]
+    assert result["data"]["quote_timestamp"] == "2026-06-19T14:30:00+09:00"
