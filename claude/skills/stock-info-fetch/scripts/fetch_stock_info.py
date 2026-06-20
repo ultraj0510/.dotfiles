@@ -10,6 +10,7 @@ import re
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 PORTFOLIO_CORE = Path.home() / ".dotfiles" / "portfolio-core"
 if str(PORTFOLIO_CORE) not in sys.path:
@@ -301,16 +302,23 @@ def _has_not_available_marker(html: str, *markers: str) -> bool:
 
 
 def _classify_global_error(html: str, url: str) -> str | None:
-    if "login" in url.lower():
+    # Check redirect host (not arbitrary URL substring).
+    host = urlparse(url).hostname
+    if host and host.endswith("login.sbisec.co.jp"):
         return "auth_expired"
-    # Login page: must have login form terms, not just "ログイン" in isolation.
-    # A single "ログイン履歴" link on a stock page should not trigger auth_expired.
-    visible = _visible_text(html)
-    if "ログイン" in visible[:3000] and "パスワード" in visible[:3000]:
+    # Check for login form structure (password input field).
+    if _has_login_form(html):
         return "auth_expired"
-    if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
+    if "該当する銘柄はありません" in html or "銘柄コードが正しくありません" in html:
         return "ticker_not_found"
     return None
+
+
+def _has_login_form(html: str) -> bool:
+    """Check DOM for login form indicators (password input)."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    return soup.find("input", type="password") is not None
 
 
 def _decode_html(body: bytes | None) -> str:
