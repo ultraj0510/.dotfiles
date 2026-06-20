@@ -37,13 +37,25 @@ def _within_window(value: datetime, as_of: datetime | None, days: int) -> bool:
     return ref - timedelta(days=days) <= value <= ref
 
 
-def _find_exact_price_row(soup):
-    """Find <tr> whose first cell text is exactly '現在値'."""
+def _find_price_cell(soup):
+    """Find a <td> or <th> whose visible text is exactly '現在値'.
+    Returns (row, cell_index) or (None, -1). Prefers the main price row
+    that also contains '前日比', skipping PTS/auxiliary rows."""
+    best = (None, -1)
     for row in soup.find_all("tr"):
         cells = row.find_all(["th", "td"])
-        if cells and cells[0].get_text(strip=True) == "現在値":
-            return row
-    return None
+        row_text = " ".join(c.get_text(" ", strip=True) for c in cells)
+        has_price = "現在値" in row_text
+        has_aux_labels = "前日比" in row_text or "始値" in row_text
+        for ci, cell in enumerate(cells):
+            if cell.get_text(strip=True) == "現在値":
+                # Main price row has auxiliary labels nearby
+                if has_aux_labels:
+                    return row, ci
+                # PTS / auxiliary rows: keep as fallback
+                if best[0] is None:
+                    best = (row, ci)
+    return best
 
 
 def parse_price(html: str, as_of: datetime | None = None) -> dict:
@@ -65,14 +77,20 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
     data = {}
     extracted = 0
 
-    # Exact price row: extract current_price and quote_timestamp from this row only
-    price_row = _find_exact_price_row(soup)
-    if price_row is not None:
-        value_cells = price_row.find_all("td")
-        row_text = " ".join(c.get_text(" ", strip=True) for c in value_cells)
+    # Find the cell labeled '現在値' and extract price + timestamp from cells
+    # following it within the same row.
+    price_row, cell_idx = _find_price_cell(soup)
+    if price_row is not None and cell_idx >= 0:
+        cells = price_row.find_all(["th", "td"])
+        # Collect text from the label cell and the next few cells
+        context_cells = cells[cell_idx:cell_idx + 3]
+        row_text = " ".join(c.get_text(" ", strip=True) for c in context_cells)
 
-        # Parse current_price from this row only — match number+円 to
-        # distinguish price from date/time components (MM/DD HH:MM).
+        # Market-closed marker: "--" or "－" in the value position
+        if re.search(r"現在値\s*[-－]+", row_text):
+            return {"status": "not_available", "data": data}
+
+        # Parse current_price — match number+円
         price_match = re.search(r"([\d,]+\.?\d*)\s*円", row_text)
         if price_match:
             try:
@@ -81,7 +99,7 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
             except ValueError:
                 pass
 
-        # Parse quote_timestamp from this row only
+        # Parse quote_timestamp from the same row context
         ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", row_text)
         if ts_match:
             month, day, hour, minute = int(ts_match.group(1)), int(ts_match.group(2)), int(ts_match.group(3)), int(ts_match.group(4))
@@ -195,7 +213,8 @@ def parse_company_profile(html: str) -> dict:
     block_map = {label.strip(): content.strip() for label, content in blocks}
 
     patterns = [
-        (r"\d{4}\s+\(株\)(.+?)\s+［", "company_name", lambda s: s.strip()),
+        # Company name: text immediately preceding （4-digit code）
+        (r"(\S+)\s*[（(]\d{4}[）)]", "company_name", lambda s: s.strip()),
         (r"作成日[：:]\s*(\d{4}年\d{1,2}月\d{1,2}日)", "report_date", _normalize_date),
         (r"【ＵＲＬ】\s*(https?://[^\s]+)", "company_url", lambda s: s.rstrip("/")),
         (r"【決算】\s*(\d{1,2}月)", "fiscal_month", str),

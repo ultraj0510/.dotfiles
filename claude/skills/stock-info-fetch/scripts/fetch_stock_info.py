@@ -6,6 +6,7 @@ Usage:
 Output: JSON to stdout. Logs/warnings to stderr.
 """
 import json
+import re
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -174,7 +175,14 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                            "Score iframe not found in analysis page", analysis_fetch.url)
         elif score_fetch_ok:
             # Score page was fetched, check for explicit not-available marker
+            # or for JS-rendered SPA (graph.sbisec.co.jp is a React app — links
+            # are rendered by JS, not available via static fetch).
             if _has_not_available_marker(score_html, "STOCK REPORTSはありません", "レポートはありません"):
+                result["sections"]["stock_reports"] = {
+                    "status": "not_available", "data": {},
+                    "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+                }
+            elif _is_js_rendered_page(score_html):
                 result["sections"]["stock_reports"] = {
                     "status": "not_available", "data": {},
                     "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
@@ -277,6 +285,14 @@ def _global_error_result(ticker: str, code: str) -> dict:
         "ticker_not_found": f"Ticker {ticker} not found",
     }
     return _error_result(ticker, code, messages.get(code, code))
+
+
+def _is_js_rendered_page(html: str) -> bool:
+    """Detect pages that require JavaScript to render content (React SPA etc)."""
+    return bool(re.search(
+        r'(?:<div\s+id="root">|webpackJsonp|enable\s+JavaScript)',
+        html[:2000],
+    ))
 
 
 def _has_not_available_marker(html: str, *markers: str) -> bool:

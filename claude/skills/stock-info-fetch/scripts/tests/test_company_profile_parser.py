@@ -10,7 +10,7 @@ from sbi_stock_parser import parse_company_profile
 _PROFILE_HTML = """
 <div class="shikiho">
   <div>作成日：2026年06月17日</div>
-  <div>3932 (株)アカツキ ［ 情報・通信業 ］</div>
+  <div>アカツキ （3932） ［ 情報・通信業 ］</div>
   <div>【ＵＲＬ】https://www.example.co.jp/</div>
   <div>【決算】3月</div>
   <div>【設立】2010.6</div>
@@ -32,7 +32,7 @@ _PROFILE_HTML_CHANGED = "<div>unrecognizable structure</div>"
 _PROFILE_HTML_ALT_LABELS = """
 <div class="shikiho">
   <div>作成日：2026年06月17日</div>
-  <div>7203 (株)トヨタ自動車 ［ 輸送用機器 ］</div>
+  <div>トヨタ自動車 （7203） ［ 輸送用機器 ］</div>
   <div>【特色】自動車製造販売を主力とする世界的企業。</div>
   <div>【連結事業】自動車90、金融8、その他2</div>
   <div>【業績回復】北米販売が好調で営業益は増加。</div>

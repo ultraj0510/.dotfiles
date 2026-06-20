@@ -102,7 +102,7 @@ class FullClient:
         elif "Idtl20" in url:
             body = ("<table><tr><td>2026/06/19 14:30</td><td>IRニュース</td><td><a href='/news/123'>記事</a></td></tr></table>").encode("utf-8")
         elif "Idtl50" in url:
-            body = ("<div>作成日: 2026年06月17日\n3932 (株)Test [ 情報・通信 ]\n【特色】IT企業\n【業種】 通信サービス 時価総額順位 18/103社</div>").encode("utf-8")
+            body = ("<div>作成日: 2026年06月17日\nTest （3932） [ 情報・通信 ]\n【特色】IT企業\n【業種】 通信サービス 時価総額順位 18/103社</div>").encode("utf-8")
         elif "Idtl70" in url:
             body = ("""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?pid=123&sym=3932.T"></iframe>
 <a onclick="window.open('/ETGate/?sw_param1=report_summary&stock_sec_code_mul=3932','report_summary')">業績</a>
@@ -263,7 +263,7 @@ class ScorePageNoPdfClient:
         if "Idtl20" in url:
             return SimpleNamespace(body="<table><tr><td>2026/06/19 14:30</td><td>IR</td><td><a href='/news/123'>x</a></td></tr></table>".encode(), status="ok", url=url)
         if "Idtl50" in url:
-            return SimpleNamespace(body="<div>作成日: 2026年06月17日\n3932 (株)Test ［ 情報・通信 ］\n【特色】IT企業\n【連結事業】game 85\n【業種】 通信サービス 時価総額順位 18/103社</div>".encode(), status="ok", url=url)
+            return SimpleNamespace(body="<div>作成日: 2026年06月17日\nTest （3932） ［ 情報・通信 ］\n【特色】IT企業\n【連結事業】game 85\n【業種】 通信サービス 時価総額順位 18/103社</div>".encode(), status="ok", url=url)
         if "Idtl70" in url:
             return SimpleNamespace(body="""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=x"></iframe>
 <a onclick="window.open('/ETGate/?sw_param1=report_summary','report_summary')">業績</a>
