@@ -154,6 +154,20 @@ def test_sub_100_yen_price():
     assert result["data"]["current_price"] == 98.5
 
 
+def test_header_price_ignores_company_name_cell():
+    """First td.tdL has company name (with ticker code), must be skipped."""
+    html = """
+    <td class="tdL">アカツキ（3932）</td>
+    <td class="tdL">現在値 2,827</td>
+    <td class="tdL">前日比 +12（+0.43％）</td>
+    """
+    from sbi_stock_parser import _parse_header_price
+    result = _parse_header_price(html)
+    assert result is not None
+    assert result["current_price"] == 2827.0
+    assert result["source_kind"] == "detail_header"
+
+
 def test_strict_7_day_boundary():
     """7 days + 1 hour must be rejected (not rounded to 7 days)."""
     from datetime import timedelta

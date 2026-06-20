@@ -81,8 +81,8 @@ def select_price_source(price_tab_result, api_target_price, api_last_update,
         section["data"]["source_kind"] = "price_tab"
         return section
 
-    # Priority 2: API targetprice with timestamp
-    if api_target_price is not None:
+    # Priority 2: API targetprice (only with valid timestamp)
+    if api_target_price is not None and api_last_update is not None:
         return {
             "status": "ok",
             "data": {
