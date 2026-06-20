@@ -24,6 +24,7 @@ from source_urls import (
     build_detail_url,
     extract_analysis_sources,
 )
+from url_cleaner import clean_url
 from sbi_stock_parser import (
     ticker_is_valid,
     parse_price,
@@ -249,6 +250,18 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
     profile = result["sections"].get("company_profile", {})
     if profile.get("status") == "ok":
         result["company_name"] = profile.get("data", {}).get("company_name", "")
+
+    # Compute summary
+    status_counts = {"ok": 0, "not_available": 0, "error": 0}
+    for s in result["sections"].values():
+        st = s.get("status", "error")
+        status_counts[st] = status_counts.get(st, 0) + 1
+    result["summary"] = {
+        "ok": status_counts["ok"],
+        "not_available": status_counts["not_available"],
+        "error": status_counts["error"],
+        "usable": status_counts["error"] == 0,
+    }
 
     # Save to cache (even partial results)
     cm.save(ticker, result)

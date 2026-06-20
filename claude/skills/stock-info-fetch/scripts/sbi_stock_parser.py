@@ -90,8 +90,10 @@ def select_price_source(price_tab_result, api_target_price, api_last_update, fet
             },
         }
 
-    # If price tab gave us partial data, return it as source_changed
-    if price_tab_result and price_tab_result["data"]:
+    # If price tab gave us partial data or explicit not_available, return it
+    if price_tab_result and price_tab_result.get("data"):
+        return price_tab_result
+    if price_tab_result and price_tab_result.get("status") == "not_available":
         return price_tab_result
 
     return {"status": "source_changed", "data": {}}

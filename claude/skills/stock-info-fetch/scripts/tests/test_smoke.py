@@ -22,12 +22,12 @@ def _run_smoke(ticker, cache_dir):
     )
     assert run1.returncode == 0, f"stderr: {run1.stderr}"
     result1 = json.loads(run1.stdout)
-    assert_stock_info_contract(result1, require_useful=True, require_stock_reports=True)
+    assert_stock_info_contract(result1, expected_ticker=ticker, require_useful=True, require_stock_reports=True)
 
     cache_file = Path(cache_dir) / f"{ticker}.json"
     assert cache_file.exists(), f"cache file not created for {ticker}"
     cache_payload = json.loads(cache_file.read_text())
-    assert_stock_info_contract(cache_payload, require_useful=True, require_stock_reports=True)
+    assert_stock_info_contract(cache_payload, expected_ticker=ticker, require_useful=True, require_stock_reports=True)
     cache_str = json.dumps(cache_payload, ensure_ascii=False)
     for param in SENSITIVE_PARAMS:
         assert f"{param}=" not in cache_str.lower(), f"secret {param} in cache file"

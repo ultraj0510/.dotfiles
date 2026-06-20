@@ -38,19 +38,30 @@ Cookie切れの場合は `auth_expired` エラーを返す。
 ~/.dotfiles/claude/skills/stock-info-fetch/scripts/fetch_stock_info 3932
 ```
 
+## 対応銘柄コード
+
+4文字の国内株式コード。`\d{4}`（3932）または `\d{3}[A-Z]`（285A）。
+
+## データソース
+
+- 株価: 価格タブ（市場時間内）→ analysis API targetprice（24時間）
+- 企業スコア・PDFリンク: graph.sbisec.co.jp JSON API（/sbiscrapi/data/analysisinfo）
+- 業績・適時開示: 分析タブ内popup
+- 企業概要・ニュース: SBI銘柄画面タブ
+
 ## 完了証拠
 
-2026-06-20実接続検証完了。
+2026-06-20 実接続検証完了。
 
-- 自動テスト: 134 passed, 1 skipped
-- 認証付き実接続スモーク: PASS (ticker=3932)
-  - price: not_available（市場時間外）、company_profile: ok
-  - stock_reports: not_available（graph.sbisec.co.jpはReact SPAのため静的取得不可）
-  - 2回目実行: cache.hit=true、1回目とsections一致
-  - stdout、stderr、キャッシュに認証値・秘密パラメータ漏洩なし
+- 自動テスト: 169 passed, 4 skipped
+- 認証付き実接続スモーク: 3932, 285A 両対応
+- 価格: API経由で市場時間外も取得可能
+- STOCK REPORTS: APIのsrplus_linkからPDF取得
+- キャッシュ検証・秘密値非漏洩確認済み
 
 ## 実行
 
 ```bash
 ~/.dotfiles/claude/skills/stock-info-fetch/scripts/fetch_stock_info 3932
+~/.dotfiles/claude/skills/stock-info-fetch/scripts/fetch_stock_info 285A
 ```
