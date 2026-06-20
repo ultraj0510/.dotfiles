@@ -124,20 +124,21 @@ def select_price_source(price_tab_result, api_target_price, api_last_update,
 def _parse_header_price(html: str) -> dict | None:
     """Extract price from common page header as last-resort fallback."""
     soup = BeautifulSoup(html, "html.parser")
-    # Try td.tdL first (SBI common header class)
-    price_cell = soup.select_one("td.tdL")
-    cell_text = price_cell.get_text(strip=True) if price_cell else ""
-    m = re.search(r"([\d,]+\.?\d*)", cell_text)
-    if m:
-        val = _parse_float(m.group(1))
-        if val > 0:
-            return {
-                "current_price": val,
-                "quote_timestamp": None,
-                "observed_at": datetime.now(JST).isoformat(),
-                "timestamp_kind": "observed",
-                "source_kind": "detail_header",
-            }
+    # Find td.tdL whose visible text starts with '現在値' (not company name cell)
+    for cell in soup.select("td.tdL"):
+        cell_text = cell.get_text(strip=True)
+        if cell_text.startswith("現在値"):
+            m = re.search(r"([\d,]+\.?\d*)", cell_text)
+            if m:
+                val = _parse_float(m.group(1))
+                if val > 0:
+                    return {
+                        "current_price": val,
+                        "quote_timestamp": None,
+                        "observed_at": datetime.now(JST).isoformat(),
+                        "timestamp_kind": "observed",
+                        "source_kind": "detail_header",
+                    }
     # Fallback: search page text for number+円
     text = soup.get_text(" ", strip=True)
     m = re.search(r"([\d,]{3,}\.?\d*)\s*円", text[:3000])
