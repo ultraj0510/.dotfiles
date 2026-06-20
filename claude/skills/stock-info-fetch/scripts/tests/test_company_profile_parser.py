@@ -87,3 +87,34 @@ def test_profile_requires_core_fields():
     """Missing company_name, characteristics, business_segments → source_changed."""
     result = parse_company_profile("<div>作成日：2026年06月17日</div>")
     assert result["status"] == "source_changed"
+
+
+# Sanitized 285A profile structure
+_PROFILE_285A_HTML = """
+<div class="shikiho">
+  <div>作成日：2026年06月17日</div>
+  <div>キオクシアホールディングス （285A） ［ 電子部品・産業用電子機器 ］</div>
+  <div>【ＵＲＬ】https://www.example.com/</div>
+  <div>【決算】3月</div>
+  <div>【設立】2019.3</div>
+  <div>【上場】2024.12</div>
+  <div>【特色】半導体メモリー専業の世界大手</div>
+  <div>【連結事業】SSD&ストレージ58、スマートデバイス33</div>
+  <div>【海外】89</div>
+  <div>【爆　益】生成ＡＩ需要の活況が追い風</div>
+  <div>【台　湾】ＤＲＡＭメーカーに770億円出資</div>
+  <div>【業種】 電子部品・産業用電子機器 時価総額順位 1/220社</div>
+  <div>【比較会社】6723 ルネサスエ</div>
+</div>
+"""
+
+
+def test_285A_profile_company_name():
+    result = parse_company_profile(_PROFILE_285A_HTML)
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["company_name"] == "キオクシアホールディングス"
+    assert data["overseas_ratio"] == "89"
+    assert "生成ＡＩ需要" in data["performance_summary"]
+    assert "ＤＲＡＭ" in data["material_notes"]
+    assert data["sector"] == "電子部品・産業用電子機器"

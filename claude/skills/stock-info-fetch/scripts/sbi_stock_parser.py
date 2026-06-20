@@ -169,11 +169,10 @@ def _normalize_date(jp_date: str) -> str:
 
 
 def _extract_article_blocks(text: str) -> list[str]:
-    """Extract article content from 【...】 blocks positioned between 事業構成 and 業種.
+    """Extract article content from 【...】 blocks between 事業構成 and 業種.
 
-    SBI四季報 places two free-form article blocks (labels vary per company) between
-    the 事業構成/連結事業 block and the 業種 block. We identify them by position:
-    find all 【...】 blocks, locate the ones after 事業構成 and before 業種.
+    Skips 【海外】 (structural overseas ratio, not narrative).
+    Labels vary per company — identified by position, not name.
     """
     blocks = re.findall(r"【(.+?)】\s*(.+?)(?=\n?【|\Z)", text, re.DOTALL)
     in_range = False
@@ -185,7 +184,7 @@ def _extract_article_blocks(text: str) -> list[str]:
             continue
         if label in ("業種",):
             break
-        if in_range:
+        if in_range and label != "海外":
             articles.append(content.strip())
     return articles
 
@@ -213,8 +212,8 @@ def parse_company_profile(html: str) -> dict:
     block_map = {label.strip(): content.strip() for label, content in blocks}
 
     patterns = [
-        # Company name: text immediately preceding （4-digit code）
-        (r"(\S+)\s*[（(]\d{4}[）)]", "company_name", lambda s: s.strip()),
+        # Company name: text immediately preceding （code） — supports 4-digit and 3-digit+letter
+        (r"(\S+)\s*[（(]\d{3,4}[A-Z]?[）)]", "company_name", lambda s: s.strip()),
         (r"作成日[：:]\s*(\d{4}年\d{1,2}月\d{1,2}日)", "report_date", _normalize_date),
         (r"【ＵＲＬ】\s*(https?://[^\s]+)", "company_url", lambda s: s.rstrip("/")),
         (r"【決算】\s*(\d{1,2}月)", "fiscal_month", str),
@@ -235,9 +234,14 @@ def parse_company_profile(html: str) -> dict:
                 data[key] = val
                 extracted += 1
 
-    # performance_summary and material_notes: the two 【...】 blocks between
-    # 事業構成 and 業種, in document order. Labels vary per company
-    # (e.g. 【連続増配】【経営統合】 or 【業績回復】【海外展開】).
+    # 【海外】: structural overseas ratio, not narrative
+    m = re.search(r"【海外】\s*(.+?)(?:\n?【|\Z)", text, re.DOTALL)
+    if m:
+        data["overseas_ratio"] = m.group(1).strip()
+        extracted += 1
+
+    # performance_summary and material_notes: narrative blocks between
+    # 事業構成 and 業種 (excluding 【海外】).
     article_blocks = _extract_article_blocks(text)
     if len(article_blocks) >= 1:
         data["performance_summary"] = article_blocks[0]
