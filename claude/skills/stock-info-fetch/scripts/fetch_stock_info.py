@@ -323,24 +323,35 @@ def _classify_global_error(html: str, url: str) -> str | None:
 def _has_login_form(html: str) -> bool:
     """Check visible DOM for login form structure.
 
-    Requires a visible password input AND corroborating evidence
-    (user-id input or login action) within the SAME form element.
+    Requires: form action containing 'login', OR a password input
+    whose name does not suggest password-change (new/confirm/current/old),
+    paired with a login-specific user-id field in the same form.
     Hidden/invisible elements are excluded via _clean_soup.
     """
     soup = _clean_soup(html)
     for form in soup.find_all("form"):
-        pw = form.find("input", type="password")
-        if pw is None:
-            continue
-        # Check form action for login path.
+        # Form action is the strongest signal.
         action = (form.get("action") or "").lower()
         if "login" in action:
             return True
-        # Check for user-id input in the same form.
+        # Check for password input (not change-password).
+        pw = form.find("input", type="password")
+        if pw is None:
+            continue
+        pw_name = (pw.get("name") or "").lower()
+        pw_id = (pw.get("id") or "").lower()
+        if any(kw in pw_name or kw in pw_id
+               for kw in ("new", "confirm", "current", "old", "change")):
+            continue
+        # Check for login-specific user-id field in the same form.
         for inp in form.find_all("input"):
-            if inp.get("id") and "user" in inp["id"].lower():
+            if inp is pw:
+                continue
+            name = (inp.get("name") or "").lower()
+            f_id = (inp.get("id") or "").lower()
+            if name in ("userid", "user_id", "username", "login_id"):
                 return True
-            if inp.get("name") and "user" in inp["name"].lower():
+            if f_id in ("userid", "user_id", "username", "login_id"):
                 return True
     return False
 
