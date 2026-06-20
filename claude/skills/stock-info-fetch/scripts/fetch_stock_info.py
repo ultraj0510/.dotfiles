@@ -274,8 +274,8 @@ def _global_error_result(ticker: str, code: str) -> dict:
     return _error_result(ticker, code, messages.get(code, code))
 
 
-def _visible_text(html: str) -> str:
-    """Extract visible text, excluding scripts, styles, templates, and hidden elements."""
+def _clean_soup(html: str):
+    """Return BeautifulSoup with hidden/invisible elements removed."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup.find_all(True):
@@ -293,7 +293,12 @@ def _visible_text(html: str) -> str:
         if aria == "true":
             tag.extract()
             continue
-    return soup.get_text(" ", strip=True)
+    return soup
+
+
+def _visible_text(html: str) -> str:
+    """Extract visible text, excluding hidden elements."""
+    return _clean_soup(html).get_text(" ", strip=True)
 
 
 def _has_not_available_marker(html: str, *markers: str) -> bool:
@@ -316,27 +321,28 @@ def _classify_global_error(html: str, url: str) -> str | None:
 
 
 def _has_login_form(html: str) -> bool:
-    """Check visible DOM for login form indicators.
+    """Check visible DOM for login form structure.
 
-    Requires a visible password input AND at least one corroborating element
-    (user ID input or login form action). Hidden/template elements are excluded.
+    Requires a visible password input AND corroborating evidence
+    (user-id input or login action) within the SAME form element.
+    Hidden/invisible elements are excluded via _clean_soup.
     """
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.select("script, style, template, [hidden]"):
-        tag.extract()
-    # Find a visible password input (not inside removed elements).
-    pw = soup.find("input", type="password")
-    if pw is None:
-        return False
-    # Check for user ID input or login form action as corroboration.
-    for inp in soup.find_all("input"):
-        if inp.get("id") and "user" in inp["id"].lower():
+    soup = _clean_soup(html)
+    for form in soup.find_all("form"):
+        pw = form.find("input", type="password")
+        if pw is None:
+            continue
+        # Check form action for login path.
+        action = (form.get("action") or "").lower()
+        if "login" in action:
             return True
-        if inp.get("name") and "user" in inp["name"].lower():
-            return True
-    form = soup.find("form", action=lambda v: v and "login" in v.lower())
-    return form is not None
+        # Check for user-id input in the same form.
+        for inp in form.find_all("input"):
+            if inp.get("id") and "user" in inp["id"].lower():
+                return True
+            if inp.get("name") and "user" in inp["name"].lower():
+                return True
+    return False
 
 
 def _decode_html(body: bytes | None) -> str:
