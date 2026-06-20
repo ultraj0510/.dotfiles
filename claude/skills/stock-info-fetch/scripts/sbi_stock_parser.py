@@ -58,6 +58,45 @@ def _find_price_cell(soup):
     return best
 
 
+def _normalize_number_text(s: str) -> str:
+    """Remove spaces around numbers and % signs for parsing."""
+    s = re.sub(r"\(\s+", "(", s)
+    s = re.sub(r"\s+\)", ")", s)
+    s = re.sub(r"(\d)\s+(\d)", r"\1\2", s)
+    s = re.sub(r"\s+%", "%", s)
+    s = re.sub(r"(\d)\s+人", r"\1人", s)
+    return s
+
+
+def select_price_source(price_tab_result, api_target_price, api_last_update, fetched_at):
+    """Arbitrate between price sources. Returns final price section dict.
+
+    Priority: 1) complete price tab quote  2) API targetprice  3) header observation
+    """
+    # Priority 1: price tab has a complete quote
+    if price_tab_result and price_tab_result["status"] == "ok":
+        section = price_tab_result
+        section["data"]["source_kind"] = "price_tab"
+        return section
+
+    # Priority 2: API targetprice with timestamp
+    if api_target_price is not None:
+        return {
+            "status": "ok",
+            "data": {
+                "current_price": api_target_price,
+                "quote_timestamp": api_last_update,
+                "source_kind": "analysis_api",
+            },
+        }
+
+    # If price tab gave us partial data, return it as source_changed
+    if price_tab_result and price_tab_result["data"]:
+        return price_tab_result
+
+    return {"status": "source_changed", "data": {}}
+
+
 def parse_price(html: str, as_of: datetime | None = None) -> dict:
     """Parse SBI price tab HTML into structured data.
 
@@ -472,6 +511,7 @@ def parse_performance(html: str) -> dict:
     unknown_rows = 0
 
     def parse_value(cell: str) -> dict:
+        cell = _normalize_number_text(cell)
         match = re.search(r"(-?[\d,]+)(?:\s*\(([-\d.]+)%\))?", cell)
         return {
             "value": _parse_float(match.group(1)) if match else None,
@@ -529,10 +569,11 @@ def parse_performance(html: str) -> dict:
         if len(cells) >= 2:
             for label, key in labels.items():
                 if cells[0].startswith(label):
-                    count = re.search(r"(\d+)人", cells[1])
+                    cell_text = _normalize_number_text(cells[1])
+                    count = re.search(r"(\d+)人", cell_text)
                     if count:
                         data["rating_distribution"][key] = int(count.group(1))
-                    elif cells[1].strip() == "0人":
+                    elif cell_text.strip() == "0人":
                         data["rating_distribution"][key] = 0
                     else:
                         unknown_rows += 1
@@ -548,8 +589,6 @@ def parse_performance(html: str) -> dict:
         data["target_price_vs_market_pct"] = float(target.group(3))
         extracted += 1
 
-    if extracted == 0 and unknown_rows == 0:
+    if extracted == 0:
         return {"status": "source_changed", "data": data}  # preserve dist/target if any
-    if unknown_rows > 0:
-        return {"status": "source_changed", "data": data}
     return {"status": "ok", "data": data}

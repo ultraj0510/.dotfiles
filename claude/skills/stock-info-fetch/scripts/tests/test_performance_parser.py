@@ -76,8 +76,8 @@ def test_unknown_row_type_not_counted_as_extracted():
     assert result["status"] == "source_changed"
 
 
-def test_unknown_row_alongside_known_row_is_source_changed():
-    """Mixed: known row + unknown row (市場予想) → source_changed with partial data."""
+def test_unknown_row_alongside_known_row_is_ok():
+    """Mixed: known row + unknown row (市場予想) → ok with partial data (at least one useful row)."""
     html = """
     <table>
     <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
@@ -86,7 +86,7 @@ def test_unknown_row_alongside_known_row_is_source_changed():
     </table>
     """
     result = parse_performance(html)
-    assert result["status"] == "source_changed"
+    assert result["status"] == "ok"
     # Known row data is preserved
     assert len(result["data"]["actual_results"]) == 1
     assert result["data"]["actual_results"][0]["values"]["通期"]["value"] == 7618.0
@@ -128,10 +128,32 @@ def test_rating_distro_no_fabricated_zero():
     assert "strong" not in result["data"].get("rating_distribution", {})
 
 
-def test_unparseable_rating_distribution_is_source_changed():
-    """Rating row matched but count is unparseable — must flag source_changed."""
+def test_unparseable_rating_distribution_is_ok():
+    """Rating row matched but count is unparseable — optional table shouldn't fail section."""
     html = """
     <table><tr><th>強気</th><td>不明</td></tr></table>
     <table><tr><td>3.5</td><td>1週間前</td><td>3ヶ月前</td></tr></table>
     """
-    assert parse_performance(html)["status"] == "source_changed"
+    result = parse_performance(html)
+    assert result["status"] == "ok"
+    assert result["data"]["rating_current"] == 3.5
+
+
+def test_spaced_rating_count():
+    """9 人 should parse as 9, not unknown."""
+    html = "<table><tr><th>強気 (5点)</th><td>9 人</td></tr></table>"
+    result = parse_performance(html)
+    assert result["data"]["rating_distribution"]["strong"] == 9
+
+
+def test_spaced_progress_pct():
+    """27,294 ( 4.3 % ) should parse progress as 4.3."""
+    html = """
+    <table>
+    <tr><th></th><th>1Q</th><th>2Q</th><th>3Q</th><th>通期</th></tr>
+    <tr><th>2026/03 会社実績（前期進捗率）</th><td>27,294 ( 4.3 % )</td><td>--</td><td>--</td><td>--</td></tr>
+    </table>
+    """
+    result = parse_performance(html)
+    assert result["status"] == "ok"
+    assert result["data"]["actual_results"][0]["values"]["1Q"]["progress_pct"] == 4.3

@@ -27,6 +27,7 @@ from source_urls import (
 from sbi_stock_parser import (
     ticker_is_valid,
     parse_price,
+    select_price_source,
     parse_company_profile,
     parse_news,
     parse_disclosures,
@@ -74,9 +75,17 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
     }
     client = SafeHttpClient()
 
-    # 4. Fetch direct tab sections
+    # 4. Fetch price tab (processed after analysis for source arbitration)
+    price_fetched = client.fetch_html(build_detail_url(ticker, "price"), cookie_header)
+    if price_fetched.status == "auth_expired":
+        return _global_error_result(ticker, "auth_expired")
+    price_url = price_fetched.url
+    price_html = _decode_html(price_fetched.body) if price_fetched.status == "ok" else ""
+    if price_fetched.status != "ok":
+        _add_error(result, "price", price_fetched.status, "Failed to fetch price", price_url)
+
+    # 5. Fetch remaining direct tab sections
     tab_sections = {
-        "price": ("price", parse_price),
         "company_profile": ("company_profile", parse_company_profile),
         "news": ("news", parse_news),
     }
@@ -96,7 +105,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         parsed = parser(html)
         _set_section(result, section_key, parsed, fetched.url, now_iso)
 
-    # 5. Analysis tab -> scores + performance + disclosures
+    api_result = None  # hoisted for price source arbitration
+
+    # 6. Analysis tab -> scores + performance + disclosures
     analysis_fetch = client.fetch_html(build_detail_url(ticker, "analysis"), cookie_header)
     if analysis_fetch.status == "auth_expired":
         return _global_error_result(ticker, "auth_expired")
@@ -107,8 +118,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             return _global_error_result(ticker, global_code)
         sources = extract_analysis_sources(html, analysis_fetch.url)
 
-        # 5a. Company scores, price fallback, PDF link via JSON API (NO cookie!)
-        api_result = None
+        # 6a. Company scores, price fallback, PDF link via JSON API (NO cookie!)
         if sources.score_url:
             api_url = build_analysis_api_url(sources.score_url)
             if api_url:
@@ -134,7 +144,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             _add_error(result, "company_scores", "source_changed",
                        "Score iframe URL is missing", analysis_fetch.url)
 
-        # 5b. Performance via onclick popup url (cookie IS sent -- sbisec host)
+        # 6b. Performance via onclick popup url (cookie IS sent -- sbisec host)
         if sources.performance_entry_url:
             perf_fetch = client.fetch_html(sources.performance_entry_url, cookie_header)
             if perf_fetch.status == "auth_expired":
@@ -158,7 +168,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             _add_error(result, "performance", "source_changed",
                        "Performance popup URL is missing", analysis_fetch.url)
 
-        # 5c. Stock Reports PDF from API-derived link (NO cookie!)
+        # 6c. Stock Reports PDF from API-derived link (NO cookie!)
         if api_result is not None and api_result.srplus_pdf_url:
             pdf_result = _fetch_and_parse_pdf(client, api_result.srplus_pdf_url)
             _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
@@ -176,7 +186,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                        "PDF link not available via analysis API",
                        analysis_fetch.url)
 
-        # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
+        # 6d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
         if sources.disclosures_entry_url:
             disc_fetch = client.fetch_html(sources.disclosures_entry_url, cookie_header)
             if disc_fetch.status == "auth_expired":
@@ -205,6 +215,35 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         for sec in ["company_scores", "performance", "stock_reports", "disclosures"]:
             _add_error(result, sec, analysis_fetch.status,
                        f"Analysis tab unavailable: {analysis_fetch.status}", analysis_fetch.url)
+
+    # 7. Price source arbitration (prefer price tab, fall back to analysis API)
+    price_tab_result = parse_price(price_html) if price_html else {"status": "source_changed", "data": {}}
+    price_section = select_price_source(
+        price_tab_result,
+        api_result.target_price if api_result else None,
+        api_result.target_last_update if api_result else None,
+        now_iso,
+    )
+    # Merge supplemental fields from price tab (open, high, low, volume, etc.)
+    for key, val in price_tab_result.get("data", {}).items():
+        if key not in ("current_price", "quote_timestamp", "source_kind"):
+            price_section["data"][key] = val
+    price_status = price_section["status"]
+    if price_status not in ("ok", "not_available"):
+        price_status = "error"
+    result["sections"]["price"] = {
+        "status": price_status,
+        "data": price_section["data"],
+        "source": {"url": price_url, "fetched_at": now_iso},
+    }
+    if price_section["status"] == "source_changed":
+        _add_error(result, "price", "source_changed",
+                   "No valid price source available", price_url)
+    elif price_section["status"] == "error":
+        _add_error(result, "price",
+                   price_section.get("error_code", "price_unavailable"),
+                   price_section.get("message", "Price section unavailable"),
+                   price_url)
 
     # Extract company_name from profile if available
     profile = result["sections"].get("company_profile", {})

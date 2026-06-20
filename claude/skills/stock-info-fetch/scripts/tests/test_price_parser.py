@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sbi_stock_parser import parse_price
+from sbi_stock_parser import parse_price, select_price_source
 
 JST = timezone(timedelta(hours=9))
 
@@ -164,3 +164,19 @@ def test_strict_7_day_boundary():
     html = f"<table><tr><th>現在値</th><td>1,000円 {ts}</td></tr></table>"
     result = parse_price(html, as_of=ref)
     assert result["status"] == "source_changed"
+
+
+def test_price_source_arbitration_prefers_tab():
+    tab = {"status": "ok", "data": {"current_price": 1000.0, "quote_timestamp": "2026-06-20T14:30:00+09:00"}}
+    result = select_price_source(tab, 1100.0, "2026-06-20T15:00:00+09:00", "2026-06-20T15:00:00+09:00")
+    assert result["status"] == "ok"
+    assert result["data"]["current_price"] == 1000.0
+    assert result["data"]["source_kind"] == "price_tab"
+
+
+def test_price_source_falls_back_to_api():
+    tab = {"status": "source_changed", "data": {"high": 3390.0}}
+    result = select_price_source(tab, 108600.0, "2026-06-20T10:00:00+09:00", "2026-06-20T15:00:00+09:00")
+    assert result["status"] == "ok"
+    assert result["data"]["current_price"] == 108600.0
+    assert result["data"]["source_kind"] == "analysis_api"
