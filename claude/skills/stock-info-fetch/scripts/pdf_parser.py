@@ -17,19 +17,27 @@ def _parse_number_and_unit(value: str, fallback_unit: str = "") -> tuple | None:
     Longest units first to avoid partial matches (万株 before 株).
     Returns (float_value, unit_str) or None."""
     normalized = _normalize_cell(value)
+    # Detect negative: ▲, △, or (123) format
+    is_negative = bool(re.search(r"[▲△]", normalized)) or bool(re.match(r"\([\d,]+\)", normalized))
+    cleaned = re.sub(r"[▲△()（）]", "", normalized)
     # Try with unit suffix (longer units first)
     for unit in ("百万円", "億円", "千円", "万株", "株", "円", "％", "%", "倍"):
-        if unit in normalized:
-            num_part = normalized.replace(unit, "").replace(",", "").strip()
+        if unit in cleaned:
+            num_part = cleaned.replace(unit, "").replace(",", "").strip()
             try:
-                return float(num_part), "%" if unit == "％" else unit
+                val = float(num_part)
+                return -val if is_negative else val, "%" if unit == "％" else unit
             except ValueError:
                 pass
     # Try plain number
-    try:
-        return float(normalized.replace(",", "")), fallback_unit
-    except ValueError:
-        return None
+    match = re.search(r"[-+]?\d[\d,]*(?:\.\d+)?", cleaned)
+    if match:
+        try:
+            val = float(match.group().replace(",", ""))
+            return -val if is_negative else val, fallback_unit
+        except ValueError:
+            pass
+    return None
 
 
 def _parse_value_only(value: str) -> float | None:
@@ -71,16 +79,16 @@ def parse_stock_report_pdf(pdf_path: str) -> dict:
 
     try:
         full_text = ""
-        tables_data = []
+        tables_data = []  # list of tables, each table is list of rows
         for page in pdf.pages:
             text = page.extract_text()
             if text:
                 full_text += text + "\n"
             tables = page.extract_tables()
             for table in tables:
-                for row in table:
-                    if row:
-                        tables_data.append([c or "" for c in row])
+                normalized = [[c or "" for c in row] for row in table if row]
+                if normalized:
+                    tables_data.append(normalized)
 
         if not full_text.strip() and not tables_data:
             return {"status": "error", "data": {}, "error_code": "pdf_parse_failed",
@@ -149,30 +157,36 @@ def _extract_company_overview(text: str) -> str:
     return ""
 
 
-def _extract_key_metrics(text: str, tables: list[list[str]]) -> dict:
+def _extract_key_metrics(text: str, tables: list[list[list[str]]]) -> dict:
     metrics = {}
 
     TABLE_KEYS = {
         "per": ("per",), "pbr": ("pbr",), "eps": ("eps",), "bps": ("bps",),
         "roe": ("roe",), "roa": ("roa",),
     }
-    for row in tables:
-        if len(row) < 2:
-            continue
-        label = _normalize_cell(row[0]).lower()
-        for key, aliases in TABLE_KEYS.items():
-            if any(a in label for a in aliases):
-                parsed = _parse_number_and_unit(row[1])
-                if parsed:
-                    val, unit = parsed
-                    metrics[key] = {"value": val, "unit": unit}
-                elif len(row) >= 3:
-                    # Value and unit in separate cells
-                    val = _parse_value_only(row[1])
-                    if val is not None:
-                        unit = _normalize_cell(row[2]) if len(row) >= 3 else ""
+    for table in tables:
+        for row in table:
+            if len(row) < 2:
+                continue
+            label = _normalize_cell(row[0]).lower()
+            for key, aliases in TABLE_KEYS.items():
+                if any(a in label for a in aliases):
+                    parsed = _parse_number_and_unit(row[1])
+                    if parsed:
+                        val, unit = parsed
+                        if not unit and len(row) >= 3:
+                            unit = _normalize_cell(row[2])
+                            # Filter to known units only
+                            if unit not in ("百万円", "億円", "千円", "万株", "株", "円", "%", "倍"):
+                                unit = ""
                         metrics[key] = {"value": val, "unit": unit}
-                break
+                    elif len(row) >= 3:
+                        # Value and unit in separate cells
+                        val = _parse_value_only(row[1])
+                        if val is not None:
+                            unit = _normalize_cell(row[2]) if len(row) >= 3 else ""
+                            metrics[key] = {"value": val, "unit": unit}
+                    break
 
     # Fall back to text patterns if tables yielded < 2 metrics
     if len(metrics) < 2:
@@ -196,77 +210,86 @@ def _extract_key_metrics(text: str, tables: list[list[str]]) -> dict:
     return metrics
 
 
-def _extract_performance_data(text: str, tables: list[list[str]]) -> dict:
+def _extract_performance_data(text: str, tables: list[list[list[str]]]) -> dict:
     result = {"actual": [], "forecast": []}
 
     if not tables:
         return _extract_performance_text_fallback(text)
 
-    # Merge multi-row headers: scan first 3 rows for period/kind/unit info
-    period_row = []
-    kind_row = []
-    unit_row = []
-    data_start = 0
-
-    for ri, row in enumerate(tables[:4]):
-        row = [_normalize_cell(c) for c in row]
-        has_periods = any(re.match(r"\d{4}/\d{2}", c) for c in row)
-        has_kinds = any(kw in c for c in row for kw in ("実績", "予想", "会社予想", "コンセンサス"))
-        has_units = all(c in ("百万円", "億円", "千円", "円", "%", "倍", "") or c == "" for c in row[1:] if c)
-
-        if has_periods:
-            period_row = row
-            data_start = ri + 1
-        elif has_kinds and not has_periods:
-            kind_row = row
-        elif has_units and ri > 0:
-            unit_row = row
-
-    # Merge: for each column index, determine period, kind, unit
-    col_count = max((len(r) for r in tables if r), default=0)
-    col_headers = {}
-    for ci in range(1, col_count):
-        period = ""
-        kind = "actual"
-        unit = ""
-        if ci < len(period_row):
-            m = re.search(r"(\d{4}/\d{2})", period_row[ci])
-            if m:
-                period = m.group(1)
-            if "実績" in period_row[ci]:
-                kind = "actual"
-            elif "予想" in period_row[ci]:
-                kind = "forecast"
-        if ci < len(kind_row):
-            if "実績" in kind_row[ci]:
-                kind = "actual"
-            elif "予想" in kind_row[ci]:
-                kind = "forecast"
-        if ci < len(unit_row):
-            for u in ("百万円", "億円", "千円", "円", "%", "倍"):
-                if u in unit_row[ci]:
-                    unit = u
-                    break
-        if period:
-            col_headers[ci] = {"period": period, "kind": kind, "unit": unit}
-
-    # Parse data rows
     KNOWN_METRICS = ("売上高", "営業利益", "経常利益", "当期純利益", "親会社株主に帰属する当期純利益")
-    for row in tables[data_start:]:
-        row = [_normalize_cell(c) for c in row]
-        if not row or row[0] not in KNOWN_METRICS:
+
+    for table in tables:
+        if len(table) < 2:
             continue
-        metric = row[0]
-        for ci, hdr in col_headers.items():
-            if ci >= len(row):
+        # Build header model from this table only (first 5 rows max)
+        period_row = [""] * 20
+        kind_row = [""] * 20
+        unit_row = [""] * 20
+        data_start = 0
+        for ri, row in enumerate(table[:5]):
+            row = [_normalize_cell(c) for c in row]
+            has_periods = any(re.match(r"\d{4}/\d{2}", c) for c in row)
+            has_kinds = any(kw in c for c in row for kw in ("実績", "予想", "会社予想", "コンセンサス"))
+            if has_periods:
+                for ci, c in enumerate(row):
+                    if ci < len(period_row):
+                        period_row[ci] = c
+                data_start = ri + 1
+            elif has_kinds and not has_periods:
+                for ci, c in enumerate(row):
+                    if ci < len(kind_row):
+                        kind_row[ci] = c
+            elif ri > 0 and all(
+                c in ("百万円", "億円", "千円", "円", "%", "倍", "株", "") or not c
+                for c in row[1:] if c
+            ):
+                for ci, c in enumerate(row):
+                    if ci < len(unit_row):
+                        unit_row[ci] = c
+
+        # Build column headers
+        col_headers = {}
+        for ci in range(1, min(20, max(len(r) for r in table))):
+            period = ""
+            kind = "actual"
+            unit = ""
+            if ci < len(period_row):
+                m = re.search(r"(\d{4}/\d{2})", period_row[ci])
+                if m:
+                    period = m.group(1)
+                if "実績" in period_row[ci]:
+                    kind = "actual"
+                elif "予想" in period_row[ci]:
+                    kind = "forecast"
+            if ci < len(kind_row):
+                if "実績" in kind_row[ci]:
+                    kind = "actual"
+                elif "予想" in kind_row[ci]:
+                    kind = "forecast"
+            if ci < len(unit_row):
+                for u in ("百万円", "億円", "千円", "円", "%", "倍"):
+                    if u in unit_row[ci]:
+                        unit = u
+                        break
+            if period:
+                col_headers[ci] = {"period": period, "kind": kind, "unit": unit}
+
+        # Parse data rows in this table
+        for row in table[data_start:]:
+            row = [_normalize_cell(c) for c in row]
+            if not row or row[0] not in KNOWN_METRICS:
                 continue
-            parsed = _parse_number_and_unit(row[ci], hdr["unit"])
-            if parsed:
-                val, unit = parsed
-                result[hdr["kind"]].append({
-                    "metric": metric, "period": hdr["period"],
-                    "value": val, "unit": unit or hdr["unit"],
-                })
+            metric = row[0]
+            for ci, hdr in col_headers.items():
+                if ci >= len(row):
+                    continue
+                parsed = _parse_number_and_unit(row[ci], hdr["unit"])
+                if parsed:
+                    val, unit = parsed
+                    result[hdr["kind"]].append({
+                        "metric": metric, "period": hdr["period"],
+                        "value": val, "unit": unit or hdr["unit"],
+                    })
 
     if not result["actual"] and not result["forecast"]:
         return _extract_performance_text_fallback(text)

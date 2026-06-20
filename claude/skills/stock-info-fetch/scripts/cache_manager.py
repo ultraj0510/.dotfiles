@@ -7,8 +7,6 @@ import os
 import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
-
 from url_cleaner import SENSITIVE_PARAMS
 
 DEFAULT_CACHE_DIR = Path.home() / ".claude" / "cache" / "stock-info-fetch"
@@ -19,6 +17,39 @@ EXPECTED_SECTIONS = {
     "price", "company_profile", "company_scores",
     "performance", "news", "disclosures", "stock_reports",
 }
+
+
+def _contains_sensitive(value, seen=None):
+    """Recursively scan dict/list/str for sensitive query parameters.
+    The SENSITIVE_PARAMS set from url_cleaner is case-insensitive matched.
+    """
+    if seen is None:
+        seen = set()
+    obj_id = id(value)
+    if obj_id in seen:
+        return False
+    seen.add(obj_id)
+
+    if isinstance(value, dict):
+        for v in value.values():
+            if _contains_sensitive(v, seen):
+                return True
+    elif isinstance(value, list):
+        for item in value:
+            if _contains_sensitive(item, seen):
+                return True
+    elif isinstance(value, str):
+        from urllib.parse import parse_qs, urlparse
+        lower = value.lower()
+        # Check both as URL query params and as plain text key=value
+        if any(f"{p}=" in lower for p in SENSITIVE_PARAMS):
+            return True
+        parsed = urlparse(value)
+        if parsed.query:
+            params = parse_qs(parsed.query)
+            if any(p.lower() in SENSITIVE_PARAMS for p in params):
+                return True
+    return False
 
 
 def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
@@ -44,12 +75,8 @@ def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
             return False
         if not isinstance(source.get("url"), str):
             return False
-        url_str = section["source"].get("url", "")
-        parsed = urlparse(url_str)
-        if parsed.query:
-            params = parse_qs(parsed.query)
-            if any(p.lower() in SENSITIVE_PARAMS for p in params):
-                return False
+    if _contains_sensitive(data):
+        return False
     return True
 
 

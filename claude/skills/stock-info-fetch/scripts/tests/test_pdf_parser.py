@@ -88,7 +88,7 @@ def test_parse_stock_report_pdf_insufficient_data(tmp_path):
 def test_extract_key_metrics_uses_table_data():
     """When text has no metric patterns, table data must be used."""
     from pdf_parser import _extract_key_metrics
-    tables = [["指標", "値", "単位"], ["PER", "15.2", "倍"], ["PBR", "1.85", "倍"]]
+    tables = [[["指標", "値", "単位"], ["PER", "15.2", "倍"], ["PBR", "1.85", "倍"]]]
     result = _extract_key_metrics("no regex matches here", tables)
     assert result["per"]["value"] == 15.2
     assert result["pbr"]["value"] == 1.85
@@ -96,12 +96,12 @@ def test_extract_key_metrics_uses_table_data():
 
 def test_extracts_periodized_performance_from_tables():
     from pdf_parser import _extract_performance_data
-    tables = [
+    tables = [[
         ["", "2026/03 実績", "2027/03 予想"],
         ["売上高", "100,000", "120,000"],
         ["営業利益", "10,000", "12,500"],
         ["", "百万円", "百万円"],
-    ]
+    ]]
     result = _extract_performance_data("", tables)
     assert len(result["actual"]) == 2
     assert result["actual"][0] == {"metric": "売上高", "period": "2026/03", "value": 100000.0, "unit": "百万円"}
@@ -109,8 +109,8 @@ def test_extracts_periodized_performance_from_tables():
 
 
 @pytest.mark.parametrize(("tables", "expected"), [
-    ([["PER", "15.2倍"]], {"value": 15.2, "unit": "倍"}),
-    ([["PER\n（予想）", "15.2\n倍"]], {"value": 15.2, "unit": "倍"}),
+    ([[["PER", "15.2倍"]]], {"value": 15.2, "unit": "倍"}),
+    ([[["PER\n（予想）", "15.2\n倍"]]], {"value": 15.2, "unit": "倍"}),
 ])
 def test_metric_value_and_unit_can_share_cell(tables, expected):
     from pdf_parser import _extract_key_metrics
@@ -119,12 +119,12 @@ def test_metric_value_and_unit_can_share_cell(tables, expected):
 
 def test_split_period_and_kind_headers_are_combined():
     from pdf_parser import _extract_performance_data
-    tables = [
+    tables = [[
         ["", "2026/03", "2027/03"],
         ["", "実績", "予想"],
         ["売上高", "100,000", "120,000"],
         ["単位", "百万円", "百万円"],
-    ]
+    ]]
     result = _extract_performance_data("", tables)
     assert result["actual"][0] == {
         "metric": "売上高",
@@ -146,3 +146,37 @@ def test_text_fallback_uses_complete_schema():
     assert "period" in result["actual"][0]
     assert "value" in result["actual"][0]
     assert "unit" in result["actual"][0]
+
+
+def test_performance_table_can_follow_unrelated_tables():
+    from pdf_parser import _extract_performance_data
+    tables = [
+        [["企業概要", "説明"]],
+        [["PER", "15.2倍"], ["PBR", "1.2倍"]],
+        [
+            ["", "2026/03 実績", "2027/03 予想"],
+            ["売上高", "100百万円", "120百万円"],
+        ],
+    ]
+    result = _extract_performance_data("", tables)
+    assert result["actual"][0]["value"] == 100.0
+    assert result["forecast"][0]["value"] == 120.0
+
+
+def test_metric_unit_in_separate_cell_is_preserved():
+    from pdf_parser import _extract_key_metrics
+    result = _extract_key_metrics("", [[["PER", "15.2", "倍"]]])
+    assert result["per"] == {"value": 15.2, "unit": "倍"}
+
+
+@pytest.mark.parametrize(("raw", "expected_val", "expected_unit"), [
+    ("▲1,234百万円", -1234.0, "百万円"),
+    ("△1,234百万円", -1234.0, "百万円"),
+    ("(1,234)百万円", -1234.0, "百万円"),
+])
+def test_financial_negative_notation(raw, expected_val, expected_unit):
+    from pdf_parser import _parse_number_and_unit
+    result = _parse_number_and_unit(raw)
+    assert result is not None
+    assert result[0] == expected_val
+    assert result[1] == expected_unit

@@ -382,6 +382,18 @@ def test_invalid_ticker_does_not_echo_input(capsys):
     assert "secret" not in payload["errors"][0]["message"]
 
 
+def test_invalid_ticker_is_not_reflected_anywhere(capsys):
+    """Invalid ticker must NOT appear anywhere in output JSON."""
+    from fetch_stock_info import main
+    with pytest.raises(SystemExit) as exc:
+        main(["bad?token=secret"])
+    output = capsys.readouterr().out
+    assert "secret" not in output
+    payload = json.loads(output)
+    assert payload["ticker"] == ""
+    assert payload["errors"][0]["code"] == "ticker_invalid"
+
+
 def test_main_outputs_json_when_cookie_store_raises(monkeypatch, capsys):
     """When cookie_store throws, stdout must still be valid internal_error JSON."""
     fake = SimpleNamespace(

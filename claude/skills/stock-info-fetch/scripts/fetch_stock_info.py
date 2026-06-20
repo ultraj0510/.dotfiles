@@ -44,7 +44,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     # 1. Validate ticker
     if not ticker_is_valid(ticker):
-        return _error_result(ticker, "ticker_invalid", "Invalid ticker format")
+        return _error_result("", "ticker_invalid", "Invalid ticker format")
 
     # 2. Check cache
     cm = CacheManager(cache_dir)

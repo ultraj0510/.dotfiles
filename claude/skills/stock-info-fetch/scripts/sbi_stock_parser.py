@@ -37,6 +37,15 @@ def _within_window(value: datetime, as_of: datetime | None, days: int) -> bool:
     return ref - timedelta(days=days) <= value <= ref
 
 
+def _find_exact_price_row(soup):
+    """Find <tr> whose first cell text is exactly '現在値'."""
+    for row in soup.find_all("tr"):
+        cells = row.find_all(["th", "td"])
+        if cells and cells[0].get_text(strip=True) == "現在値":
+            return row
+    return None
+
+
 def parse_price(html: str, as_of: datetime | None = None) -> dict:
     """Parse SBI price tab HTML into structured data.
 
@@ -53,19 +62,49 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
     if not text or len(text) < 10:
         return {"status": "source_changed", "data": {}}
 
-    # Find the row containing "現在値" — only extract timestamp from this row
-    current_price_row = None
-    for row in soup.find_all("tr"):
-        if "現在値" in row.get_text(" ", strip=True):
-            current_price_row = row
-            break
-    row_text = current_price_row.get_text(" ", strip=True) if current_price_row else text
-
     data = {}
     extracted = 0
 
+    # Exact price row: extract current_price and quote_timestamp from this row only
+    price_row = _find_exact_price_row(soup)
+    if price_row is not None:
+        value_cells = price_row.find_all("td")
+        row_text = " ".join(c.get_text(" ", strip=True) for c in value_cells)
+
+        # Parse current_price from this row only
+        # Require 3+ digits to avoid matching date/time components (MM/DD HH:MM)
+        price_match = re.search(r"(\d[\d,]*\.?\d*)", row_text)
+        if price_match:
+            clean = price_match.group(1).replace(",", "")
+            if not re.search(r"\d{3,}", clean):
+                price_match = None
+        if price_match:
+            try:
+                data["current_price"] = _parse_float(price_match.group(1))
+                extracted += 1
+            except ValueError:
+                pass
+
+        # Parse quote_timestamp from this row only
+        ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", row_text)
+        if ts_match:
+            month, day, hour, minute = int(ts_match.group(1)), int(ts_match.group(2)), int(ts_match.group(3)), int(ts_match.group(4))
+            ref = as_of or datetime.now(JST)
+            for candidate_year in (ref.year, ref.year - 1):
+                try:
+                    dt = datetime(candidate_year, month, day, hour, minute, tzinfo=JST)
+                    if dt <= ref:
+                        # 7-day freshness check
+                        if (ref - dt).days > 7:
+                            return {"status": "source_changed", "data": data}
+                        data["quote_timestamp"] = dt.isoformat()
+                        extracted += 1
+                        break
+                except ValueError:
+                    continue
+
+    # Extract other fields from full page text (safe as labels are unique)
     fields = [
-        (r"現在値\s*([\d,]+\.?\d*)", "current_price", _parse_float),
         (r"前日比\s*([+-][\d,]+\.?\d*)", "price_change", _parse_float),
         (r"前日比[^)]*?([+-][\d.]+)%", "price_change_percent", _parse_float),
         (r"始値\s*([\d,]+\.?\d*)", "open", _parse_float),
@@ -98,21 +137,6 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
                 extracted += 1
             except ValueError:
                 pass
-
-    # Extract quote_timestamp ONLY from the current price row
-    ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", row_text)
-    if ts_match:
-        month, day, hour, minute = int(ts_match.group(1)), int(ts_match.group(2)), int(ts_match.group(3)), int(ts_match.group(4))
-        ref = as_of or datetime.now(JST)
-        for candidate_year in (ref.year, ref.year - 1):
-            try:
-                dt = datetime(candidate_year, month, day, hour, minute, tzinfo=JST)
-                if dt <= ref:
-                    data["quote_timestamp"] = dt.isoformat()
-                    extracted += 1
-                    break
-            except ValueError:
-                continue
 
     if extracted == 0:
         return {"status": "source_changed", "data": {}}

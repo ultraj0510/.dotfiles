@@ -27,6 +27,16 @@ def test_authenticated_smoke_useful_data_and_cache():
         result1 = json.loads(run1.stdout)
         assert_stock_info_contract(result1, require_useful=True, require_stock_reports=True)
 
+        # Verify cache file was created and has valid contract
+        cache_file = Path(cache_dir) / "3932.json"
+        assert cache_file.exists(), "cache file not created"
+        cache_payload = json.loads(cache_file.read_text())
+        assert_stock_info_contract(cache_payload, require_useful=True, require_stock_reports=True)
+        # Cache file must not contain secrets
+        cache_str = json.dumps(cache_payload, ensure_ascii=False)
+        for param in SENSITIVE_PARAMS:
+            assert f"{param}=" not in cache_str.lower(), f"secret {param} in cache file"
+
         # Second run: should hit cache
         run2 = subprocess.run(
             [str(SCRIPT), "3932", "--cache-dir", cache_dir],
@@ -43,4 +53,4 @@ def test_authenticated_smoke_useful_data_and_cache():
         for run in (run1, run2):
             combined = run.stdout + run.stderr
             for param in SENSITIVE_PARAMS:
-                assert f"{param}=" not in combined, f"secret {param} leaked"
+                assert f"{param}=" not in combined.lower(), f"secret {param} leaked"

@@ -113,3 +113,34 @@ def test_unrelated_page_timestamp_does_not_complete_price():
     result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
     assert result["status"] == "source_changed"
     assert "quote_timestamp" not in result["data"]
+
+
+def test_price_and_timestamp_must_share_exact_current_price_row():
+    """Price value outside price row must not be used as current_price."""
+    html = """
+    <table><tr><th>現在値</th><td>06/19 14:30</td></tr></table>
+    <div>現在値 1,000円</div>
+    """
+    result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
+    assert result["status"] == "source_changed"
+
+
+def test_current_price_label_must_be_exact():
+    """'現在値について' must NOT match; only exact '現在値' should."""
+    html = """
+    <table>
+      <tr><th>現在値について</th><td>06/19 14:30</td></tr>
+      <tr><th>現在値</th><td>1,000円 06/19 14:31</td></tr>
+    </table>
+    """
+    result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
+    assert result["status"] == "ok"
+    assert result["data"]["current_price"] == 1000.0
+    assert "14:31" in result["data"]["quote_timestamp"]
+
+
+def test_stale_quote_timestamp_is_source_changed():
+    """Quote timestamp older than 7 days should return source_changed."""
+    html = "<table><tr><th>現在値</th><td>1,000円 05/01 14:30</td></tr></table>"
+    result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
+    assert result["status"] == "source_changed"

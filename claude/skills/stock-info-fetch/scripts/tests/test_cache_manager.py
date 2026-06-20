@@ -248,6 +248,17 @@ def test_cache_with_sensitive_source_url_is_miss(tmp_path, valid_cache_data):
     assert CacheManager(tmp_path).get("3932") is None
 
 
+def test_nested_data_url_with_secret_is_cache_miss(tmp_path, valid_cache_data):
+    """Cache with secret URL in nested section data must be rejected."""
+    valid_cache_data["sections"]["news"]["data"] = [
+        {"url": "https://example.test/news?token=secret"}
+    ]
+    (tmp_path / "3932.json").write_text(
+        json.dumps(valid_cache_data, ensure_ascii=False), encoding="utf-8",
+    )
+    assert CacheManager(tmp_path).get("3932") is None
+
+
 @pytest.mark.parametrize("mutate", [
     lambda d: d.update(ticker="7203"),
     lambda d: d.update(cache=[]),
