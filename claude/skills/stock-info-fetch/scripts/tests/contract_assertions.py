@@ -44,11 +44,8 @@ def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=F
         assert "message" in err
 
     if require_useful:
-        price_status = payload["sections"]["price"]["status"]
-        assert price_status in ("ok", "not_available"), f"price status={price_status}"
-        if price_status == "ok":
-            assert payload["sections"]["price"]["data"].get("current_price", 0) > 0
-            assert payload["sections"]["price"]["data"].get("quote_timestamp")
+        assert payload["sections"]["price"]["status"] == "ok", f"price status={payload['sections']['price']['status']}"
+        assert payload["sections"]["price"]["data"].get("current_price", 0) > 0
         assert payload["sections"]["company_profile"]["status"] == "ok", "profile not ok"
         assert payload["sections"]["company_profile"]["data"].get("company_name")
         # Error sections must have corresponding error entries

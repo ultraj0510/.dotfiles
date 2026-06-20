@@ -33,7 +33,7 @@ def test_cache_hit_same_day(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    data = {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
+    data = {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections, "summary": {"ok": 7, "not_available": 0, "error": 0, "usable": True}}
     cm.save("3932", data)
 
     result = cm.get("3932")
@@ -123,8 +123,9 @@ def test_cache_key_includes_ticker(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    cm.save("3932", {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
-    cm.save("7203", {"schema_version": "1.1", "ticker": "7203", "cache": {"hit": False, "date": today}, "sections": sections})
+    base = {"cache": {"hit": False, "date": today}, "sections": sections, "summary": {"ok": 7, "not_available": 0, "error": 0, "usable": True}}
+    cm.save("3932", {"schema_version": "1.1", "ticker": "3932", **base})
+    cm.save("7203", {"schema_version": "1.1", "ticker": "7203", **base})
 
     r1 = cm.get("3932")
     r2 = cm.get("7203")
@@ -173,6 +174,7 @@ def test_valid_cache_with_all_sections_hits(tmp_path):
             "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
             "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
         },
+        "summary": {"ok": 7, "not_available": 0, "error": 0, "usable": True},
     }
     cm = CacheManager(cache_dir=tmp_path)
     cm.save("3932", data)
@@ -202,6 +204,7 @@ def test_concurrent_save_does_not_corrupt_cache(tmp_path):
                     "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
                     "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
                 },
+                "summary": {"ok": 7, "not_available": 0, "error": 0, "usable": True},
             }
             cm.save("3932", data)
         except Exception as e:
@@ -234,6 +237,7 @@ def valid_cache_data():
             "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
             "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
         },
+        "summary": {"ok": 7, "not_available": 0, "error": 0, "usable": True},
     }
 
 

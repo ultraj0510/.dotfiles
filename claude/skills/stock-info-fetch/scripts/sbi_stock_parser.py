@@ -98,6 +98,20 @@ def select_price_source(price_tab_result, api_target_price, api_last_update,
         if header_price:
             return {"status": "ok", "data": header_price}
 
+    # Priority 3.5: price tab not_available but has previous_close
+    if (price_tab_result and price_tab_result.get("status") == "not_available"
+            and price_tab_result.get("data", {}).get("previous_close")):
+        return {
+            "status": "ok",
+            "data": {
+                "current_price": price_tab_result["data"]["previous_close"],
+                "quote_timestamp": None,
+                "observed_at": datetime.now(JST).isoformat(),
+                "timestamp_kind": "observed",
+                "source_kind": "previous_close",
+            },
+        }
+
     # If price tab gave us partial data or explicit not_available, return it
     if price_tab_result and price_tab_result.get("data"):
         return price_tab_result
@@ -519,10 +533,11 @@ def parse_disclosure_cards(html: str, as_of: datetime | None = None) -> dict:
         if js_match:
             url = (f"https://site1.sbisec.co.jp/ETGate/?"
                    f"_ControlID=WPLETsmR001Control&"
-                   f"_PageID=WPLETsmR001Sdtl12&"
+                   f"_PageID=WPLETsmR001Sdtl20&"
                    f"_DataStoreID=DSWPLETsmR001Control&"
-                   f"pdf_id={js_match.group(1)}&"
-                   f"pdf_type={js_match.group(2)}")
+                   f"sw_page=pdf&"
+                   f"sw_param2={js_match.group(1)}&"
+                   f"sw_param3={js_match.group(2)}")
         elif raw_href and not raw_href.startswith("javascript"):
             url = raw_href
 

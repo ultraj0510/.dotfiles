@@ -75,6 +75,9 @@ def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
             return False
         if not isinstance(source.get("url"), str):
             return False
+    summary = data.get("summary")
+    if not isinstance(summary, dict) or "usable" not in summary:
+        return False
     if _contains_sensitive(data):
         return False
     return True
