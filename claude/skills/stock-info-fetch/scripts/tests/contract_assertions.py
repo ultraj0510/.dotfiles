@@ -60,11 +60,7 @@ def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=F
 
     if require_stock_reports:
         section = payload["sections"]["stock_reports"]
-        # graph.sbisec.co.jp is a React SPA — PDF links are rendered by JS,
-        # not available via static urllib fetch. not_available is expected.
-        assert section["status"] in ("ok", "not_available"), (
-            f"stock_reports unexpected status: {section['status']}"
-        )
+        assert section["status"] == "ok", f"stock_reports not ok: {section['status']}"
         if section["status"] == "ok":
             data = section["data"]
             assert data.get("report_date"), "stock_reports missing report_date"
