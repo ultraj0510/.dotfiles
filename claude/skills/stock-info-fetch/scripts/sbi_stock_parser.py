@@ -441,6 +441,103 @@ def parse_disclosures(html: str, as_of: datetime | None = None) -> dict:
     return {"status": "ok", "data": items}
 
 
+def parse_disclosure_cards(html: str, as_of: datetime | None = None) -> dict:
+    """Parse disclosure cards from #disclo_report .line divs.
+
+    Real SBI disclosure pages use card-style divs (.line) rather than
+    <tr>/<td> tables, and document links may use nriWhitePageToPdf(...)
+    JavaScript calls instead of direct hrefs.
+
+    Returns: same schema as parse_disclosures().
+    Falls back to parse_disclosures() when the HTML uses tables.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    text = soup.get_text(" ", strip=True)
+    if "適時開示はありません" in text or "該当する開示はありません" in text:
+        return {"status": "not_available", "data": []}
+
+    if not text or len(text) < 10:
+        return {"status": "source_changed", "data": []}
+
+    items = []
+    recognized = 0
+
+    # Try div cards first (#disclo_report .line)
+    cards = soup.select("#disclo_report .line") or soup.select(".line")
+    if not cards:
+        return parse_disclosures(html, as_of)
+
+    for card in cards:
+        # Date: .date element
+        date_el = card.select_one(".date") or card.find(
+            class_=lambda c: c and "date" in c
+        )
+        date_text = date_el.get_text(strip=True) if date_el else ""
+
+        # Title and link: <a> element
+        link = card.find("a")
+        title = link.get_text(strip=True) if link else ""
+        url = link.get("href", "") if link else ""
+
+        # Category: .category element or <span>
+        cat_el = card.select_one(".category") or card.find("span")
+        category = cat_el.get_text(strip=True) if cat_el else ""
+
+        # Extract PDF params from nriWhitePageToPdf JS call
+        if not url:
+            onclick = link.get("onclick", "") if link else ""
+            js_match = re.search(
+                r"nriWhitePageToPdf\('([^']+)','([^']+)'", onclick
+            )
+            if js_match:
+                url = (
+                    "https://site1.sbisec.co.jp/ETGate/"
+                    + "?"
+                    + f"pdf_id={js_match.group(1)}&pdf_type={js_match.group(2)}"
+                )
+
+        if not date_text or not title:
+            continue
+
+        # Parse date
+        try:
+            dt = datetime.strptime(date_text, "%Y/%m/%d %H:%M")
+            dt_jst = dt.replace(tzinfo=JST)
+        except ValueError:
+            try:
+                dt = datetime.strptime(date_text, "%Y/%m/%d")
+                dt_jst = dt.replace(tzinfo=JST)
+            except ValueError:
+                continue
+
+        if not _within_window(dt_jst, as_of, 365):
+            recognized += 1
+            continue
+        recognized += 1
+
+        if url and not url.startswith("http"):
+            url = (
+                f"https://site1.sbisec.co.jp{url}"
+                if url.startswith("/")
+                else f"https://site1.sbisec.co.jp/{url}"
+            )
+
+        items.append({
+            "published_at": dt_jst.isoformat(),
+            "category": category,
+            "title": title,
+            "url": clean_url(url),
+        })
+
+    if not items:
+        return {
+            "status": "not_available" if recognized else "source_changed",
+            "data": [],
+        }
+    return {"status": "ok", "data": items}
+
+
 def parse_company_scores(html: str) -> dict:
     """Parse SBI company scores (企業スコア) iframe HTML.
 

@@ -30,7 +30,7 @@ from sbi_stock_parser import (
     select_price_source,
     parse_company_profile,
     parse_news,
-    parse_disclosures,
+    parse_disclosure_cards,
     parse_performance,
 )
 from pdf_parser import parse_stock_report_pdf
@@ -196,7 +196,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                 global_code = classify_page_state(disc_html, disc_fetch.url)
                 if global_code:
                     return _global_error_result(ticker, global_code)
-                parsed = parse_disclosures(disc_html)
+                parsed = parse_disclosure_cards(disc_html)
                 _set_section(result, "disclosures", parsed, disc_fetch.url, now_iso)
             else:
                 _add_error(result, "disclosures", disc_fetch.status,

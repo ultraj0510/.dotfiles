@@ -121,13 +121,12 @@ def _has_minimum_data(data: dict) -> bool:
     metrics = data.get("key_metrics", {})
     if isinstance(metrics, dict):
         for v in metrics.values():
-            if isinstance(v, dict) and v.get("value") is not None and v.get("unit"):
+            if isinstance(v, dict) and v.get("value") is not None:
                 return True
     af = data.get("actual_and_forecast", {})
     for key in ("actual", "forecast"):
         for item in af.get(key, []):
-            if (isinstance(item, dict) and item.get("value") is not None
-                    and item.get("unit") and item.get("period")):
+            if isinstance(item, dict) and item.get("value") is not None:
                 return True
     return False
 
