@@ -14,8 +14,8 @@ JST = timezone(timedelta(hours=9))
 
 
 def ticker_is_valid(code: str) -> bool:
-    """Validate a Japanese stock ticker code (4 digits)."""
-    return bool(re.fullmatch(r"\d{4}", code))
+    """Validate a Japanese stock ticker code (3-4 digits + optional letter suffix)."""
+    return bool(re.fullmatch(r"\d{3,4}[A-Z]?", code))
 
 
 def _parse_float(s: str) -> float:
