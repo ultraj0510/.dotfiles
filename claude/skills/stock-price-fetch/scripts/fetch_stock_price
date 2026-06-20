@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$SCRIPT_DIR/.venv/bin/python"
 
 if [ ! -x "$PYTHON" ]; then
-  echo "ERROR: Run: python3.12 -m venv $SCRIPT_DIR/.venv && $SCRIPT_DIR/.venv/bin/pip install -r $SCRIPT_DIR/requirements.txt" >&2
+  echo "ERROR: Run: python3 -m venv $SCRIPT_DIR/.venv && $SCRIPT_DIR/.venv/bin/pip install -r $SCRIPT_DIR/requirements.txt" >&2
   exit 1
 fi
 
