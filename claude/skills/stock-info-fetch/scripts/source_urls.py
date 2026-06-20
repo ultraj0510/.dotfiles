@@ -47,11 +47,20 @@ def _popup_url(anchor, base_url: str) -> str | None:
     return urljoin(base_url, match.group(1)) if match else None
 
 
+def _find_anchor_by_text(soup, text):
+    """Find an <a> element by its visible text. Uses get_text() instead of
+    .string because anchors may contain child elements (SVG, spans)."""
+    for a in soup.find_all("a"):
+        if a.get_text(" ", strip=True) == text:
+            return a
+    return None
+
+
 def extract_analysis_sources(html: str, base_url: str) -> AnalysisSources:
     soup = BeautifulSoup(html, "html.parser")
     iframe = soup.find("iframe", src=lambda value: value and "/sbiscreener/analysis" in value)
-    performance = soup.find("a", string=lambda value: value and value.strip() == "業績")
-    disclosures = soup.find("a", string=lambda value: value and value.strip() == "適時開示")
+    performance = _find_anchor_by_text(soup, "業績")
+    disclosures = _find_anchor_by_text(soup, "適時開示")
     return AnalysisSources(
         score_url=urljoin(base_url, iframe["src"]) if iframe else None,
         performance_entry_url=_popup_url(performance, base_url) if performance else None,

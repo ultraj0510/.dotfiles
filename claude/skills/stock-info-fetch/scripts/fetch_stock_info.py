@@ -19,10 +19,10 @@ if str(PORTFOLIO_CORE) not in sys.path:
 
 from cache_manager import CacheManager
 from http_client import SafeHttpClient
+from analysis_api import build_analysis_api_url, parse_analysis_api_response
 from source_urls import (
     build_detail_url,
     extract_analysis_sources,
-    extract_stock_report_pdf_url,
 )
 from sbi_stock_parser import (
     ticker_is_valid,
@@ -30,7 +30,6 @@ from sbi_stock_parser import (
     parse_company_profile,
     parse_news,
     parse_disclosures,
-    parse_company_scores,
     parse_performance,
 )
 from pdf_parser import parse_stock_report_pdf
@@ -107,20 +106,25 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         if global_code:
             return _global_error_result(ticker, global_code)
         sources = extract_analysis_sources(html, analysis_fetch.url)
-        score_html = ""
-        score_fetch_ok = False
 
-        # 5a. Company scores via iframe (NO cookie!)
+        # 5a. Company scores, price fallback, PDF link via JSON API (NO cookie!)
+        api_result = None
         if sources.score_url:
-            score_fetch = client.fetch_html(sources.score_url)  # no cookie_header!
-            if score_fetch.status == "ok":
-                score_html = _decode_html(score_fetch.body)
-                score_fetch_ok = True
-                parsed = parse_company_scores(score_html)
-                _set_section(result, "company_scores", parsed, score_fetch.url, now_iso)
-            else:
-                _add_error(result, "company_scores", score_fetch.status,
-                           "Failed to fetch company scores iframe", score_fetch.url)
+            api_url = build_analysis_api_url(sources.score_url)
+            if api_url:
+                api_fetch = client.fetch_html(api_url)  # no cookie_header!
+                if api_fetch.status == "ok" and api_fetch.body:
+                    api_result = parse_analysis_api_response(api_fetch.body)
+        if api_result is not None and api_result.scores:
+            result["sections"]["company_scores"] = {
+                "status": "ok" if api_result.status == "ok" else "error",
+                "data": api_result.scores,
+                "source": {"url": clean_url(sources.score_url), "fetched_at": now_iso},
+            }
+            if api_result.status != "ok":
+                _add_error(result, "company_scores", api_result.status,
+                           api_result.error_message or "Score extraction incomplete",
+                           clean_url(sources.score_url or ""))
         elif _has_not_available_marker(html, "スコア情報はありません", "企業スコアはありません"):
             result["sections"]["company_scores"] = {
                 "status": "not_available", "data": {},
@@ -154,17 +158,11 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             _add_error(result, "performance", "source_changed",
                        "Performance popup URL is missing", analysis_fetch.url)
 
-        # 5c. Stock Reports PDF from score iframe HTML (NO cookie!)
-        pdf_url = (
-            extract_stock_report_pdf_url(score_html, sources.score_url)
-            if sources.score_url and score_html
-            else None
-        )
-        if pdf_url:
-            pdf_result = _fetch_and_parse_pdf(client, pdf_url)
+        # 5c. Stock Reports PDF from API-derived link (NO cookie!)
+        if api_result is not None and api_result.srplus_pdf_url:
+            pdf_result = _fetch_and_parse_pdf(client, api_result.srplus_pdf_url)
             _set_section(result, "stock_reports", pdf_result, pdf_result.get("url", ""), now_iso)
         elif sources.score_url is None:
-            # Score iframe missing — check for explicit marker before calling it changed.
             if _has_not_available_marker(html, "スコア情報はありません", "企業スコアはありません"):
                 result["sections"]["stock_reports"] = {
                     "status": "not_available", "data": {},
@@ -173,28 +171,10 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             else:
                 _add_error(result, "stock_reports", "source_changed",
                            "Score iframe not found in analysis page", analysis_fetch.url)
-        elif score_fetch_ok:
-            # Score page was fetched, check for explicit not-available marker
-            # or for JS-rendered SPA (graph.sbisec.co.jp is a React app — links
-            # are rendered by JS, not available via static fetch).
-            if _has_not_available_marker(score_html, "STOCK REPORTSはありません", "レポートはありません"):
-                result["sections"]["stock_reports"] = {
-                    "status": "not_available", "data": {},
-                    "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-                }
-            elif _is_js_rendered_page(score_html):
-                result["sections"]["stock_reports"] = {
-                    "status": "not_available", "data": {},
-                    "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-                }
-            else:
-                _add_error(result, "stock_reports", "source_changed",
-                           "PDF link not found in score page", score_fetch.url)
         else:
-            _add_error(result, "stock_reports",
-                       "fetch_failed",
-                       "Cannot check STOCK REPORTS PDF: score page unavailable",
-                       "")
+            _add_error(result, "stock_reports", "source_changed",
+                       "PDF link not available via analysis API",
+                       analysis_fetch.url)
 
         # 5d. Disclosures via onclick popup url (cookie IS sent -- sbisec host)
         if sources.disclosures_entry_url:
