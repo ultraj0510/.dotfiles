@@ -231,3 +231,32 @@ def fetch_stock_price(
     if received_new_data:
         store.save(normalized, payload)
     return payload
+
+
+import argparse
+import json
+import sys
+
+
+def _parser():
+    parser = argparse.ArgumentParser(prog="stock-price-fetch")
+    parser.add_argument("ticker")
+    parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    return parser
+
+
+def main(argv=None):
+    args = _parser().parse_args(argv)
+    result = fetch_stock_price(
+        args.ticker,
+        args.data_dir,
+        refresh=args.refresh,
+    )
+    json.dump(result, sys.stdout, ensure_ascii=False, indent=2, allow_nan=False)
+    sys.stdout.write("\n")
+    return 1 if result["status"] == "failed" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
