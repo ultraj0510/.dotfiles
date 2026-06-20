@@ -330,11 +330,7 @@ def _has_login_form(html: str) -> bool:
     """
     soup = _clean_soup(html)
     for form in soup.find_all("form"):
-        # Form action is the strongest signal.
-        action = (form.get("action") or "").lower()
-        if "login" in action:
-            return True
-        # Check for password input (not change-password).
+        # Find a non-change password input — required for any login detection.
         pw = form.find("input", type="password")
         if pw is None:
             continue
@@ -343,6 +339,7 @@ def _has_login_form(html: str) -> bool:
         if any(kw in pw_name or kw in pw_id
                for kw in ("new", "confirm", "current", "old", "change")):
             continue
+
         # Check for login-specific user-id field in the same form.
         for inp in form.find_all("input"):
             if inp is pw:
@@ -353,6 +350,11 @@ def _has_login_form(html: str) -> bool:
                 return True
             if f_id in ("userid", "user_id", "username", "login_id"):
                 return True
+
+        # Corroborating action (login in path) with a password field present.
+        action = (form.get("action") or "").lower()
+        if "login" in action:
+            return True
     return False
 
 
