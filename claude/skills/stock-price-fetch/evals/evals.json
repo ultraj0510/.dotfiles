@@ -1,0 +1,23 @@
+{
+  "skill_name": "stock-price-fetch",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "stock-price-fetchで285Aの株価履歴を取得して",
+      "expected_output": "stock-price-fetchを実行し、285Aの日足と1時間足の構造化JSONを返す",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "stock-price-fetchで3932を全期間再取得して",
+      "expected_output": "--refreshを付けて3932を取得する",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "3932を買うべきか判断して",
+      "expected_output": "stock-price-fetch単独では売買判断を行わない",
+      "files": []
+    }
+  ]
+}
