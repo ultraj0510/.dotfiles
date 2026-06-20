@@ -68,14 +68,16 @@ def _normalize_number_text(s: str) -> str:
     return s
 
 
-def select_price_source(price_tab_result, api_target_price, api_last_update, fetched_at):
+def select_price_source(price_tab_result, api_target_price, api_last_update,
+                       header_price_html=""):
     """Arbitrate between price sources. Returns final price section dict.
 
-    Priority: 1) complete price tab quote  2) API targetprice  3) header observation
+    Priority: 1) complete price tab quote  2) API targetprice  3) common header
     """
     # Priority 1: price tab has a complete quote
     if price_tab_result and price_tab_result["status"] == "ok":
-        section = price_tab_result
+        section = dict(price_tab_result)
+        section["data"] = dict(section.get("data", {}))
         section["data"]["source_kind"] = "price_tab"
         return section
 
@@ -90,6 +92,12 @@ def select_price_source(price_tab_result, api_target_price, api_last_update, fet
             },
         }
 
+    # Priority 3: common header price (last resort, no timestamp)
+    if header_price_html:
+        header_price = _parse_header_price(header_price_html)
+        if header_price:
+            return {"status": "ok", "data": header_price}
+
     # If price tab gave us partial data or explicit not_available, return it
     if price_tab_result and price_tab_result.get("data"):
         return price_tab_result
@@ -97,6 +105,20 @@ def select_price_source(price_tab_result, api_target_price, api_last_update, fet
         return price_tab_result
 
     return {"status": "source_changed", "data": {}}
+
+
+def _parse_header_price(html: str) -> dict | None:
+    """Extract price from common page header as last-resort fallback."""
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(" ", strip=True)
+    m = re.search(r"([\d,]+\.?\d*)\s*円", text[:2000])
+    if m:
+        return {
+            "current_price": _parse_float(m.group(1)),
+            "quote_timestamp": None,
+            "source_kind": "detail_header",
+        }
+    return None
 
 
 def parse_price(html: str, as_of: datetime | None = None) -> dict:
@@ -480,24 +502,25 @@ def parse_disclosure_cards(html: str, as_of: datetime | None = None) -> dict:
         # Title and link: <a> element
         link = card.find("a")
         title = link.get_text(strip=True) if link else ""
-        url = link.get("href", "") if link else ""
+        raw_href = link.get("href", "") if link else ""
 
-        # Category: .category element or <span>
-        cat_el = card.select_one(".category") or card.find("span")
+        # Category: .category or .type element (not just any span)
+        cat_el = card.select_one(".category") or card.select_one(".type")
         category = cat_el.get_text(strip=True) if cat_el else ""
 
-        # Extract PDF params from nriWhitePageToPdf JS call
-        if not url:
-            onclick = link.get("onclick", "") if link else ""
-            js_match = re.search(
-                r"nriWhitePageToPdf\('([^']+)','([^']+)'", onclick
-            )
-            if js_match:
-                url = (
-                    "https://site1.sbisec.co.jp/ETGate/"
-                    + "?"
-                    + f"pdf_id={js_match.group(1)}&pdf_type={js_match.group(2)}"
-                )
+        # Build URL: prefer nriWhitePageToPdf, fall back to plain href
+        url = ""
+        onclick = link.get("onclick", "") if link else ""
+        js_match = re.search(
+            r"nriWhitePageToPdf\('([^']+)','([^']+)'", onclick
+        )
+        if js_match:
+            from urllib.parse import urlencode
+            url = ("https://site1.sbisec.co.jp/ETGate/?" +
+                   urlencode({"_pdf_id": js_match.group(1),
+                              "_pdf_type": js_match.group(2)}))
+        elif raw_href and not raw_href.startswith("javascript"):
+            url = raw_href
 
         if not date_text or not title:
             continue

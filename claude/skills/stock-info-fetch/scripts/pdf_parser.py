@@ -116,17 +116,23 @@ def parse_stock_report_pdf(pdf_path: str) -> dict:
 
 
 def _has_minimum_data(data: dict) -> bool:
+    """Require report_date AND at least one complete structured fact.
+
+    A metric must have value+unit; a performance row must have value+period+unit.
+    This prevents empty/partial data from being treated as useful.
+    """
     if not data["report_date"]:
         return False
     metrics = data.get("key_metrics", {})
     if isinstance(metrics, dict):
         for v in metrics.values():
-            if isinstance(v, dict) and v.get("value") is not None:
+            if isinstance(v, dict) and v.get("value") is not None and v.get("unit"):
                 return True
     af = data.get("actual_and_forecast", {})
     for key in ("actual", "forecast"):
         for item in af.get(key, []):
-            if isinstance(item, dict) and item.get("value") is not None:
+            if (isinstance(item, dict) and item.get("value") is not None
+                    and item.get("unit") and item.get("period")):
                 return True
     return False
 

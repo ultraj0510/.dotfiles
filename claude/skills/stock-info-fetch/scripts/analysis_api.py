@@ -46,12 +46,22 @@ def build_analysis_api_url(iframe_src: str) -> str | None:
     Output: https://graph.sbisec.co.jp/sbiscrapi/data/analysisinfo?ric=285A.T&token=XXX
     """
     parsed = urlparse(iframe_src)
+    if parsed.hostname not in ("graph.sbisec.co.jp",):
+        return None
     params = parse_qs(parsed.query)
     token = params.get("token", [None])[0]
     sym = params.get("sym", [None])[0]
     if not token or not sym:
         return None
-    return f"https://graph.sbisec.co.jp/sbiscrapi/data/analysisinfo?ric={sym}&token={token}"
+    # Validate RIC format: digits+optional letter followed by .T
+    if not re.match(r"^\d{3,4}[A-Z]?\.T$", sym):
+        return None
+    # Validate token: hex string only
+    if not re.match(r"^[0-9A-Fa-f]+$", token):
+        return None
+    safe_ric = sym
+    safe_token = token
+    return f"https://graph.sbisec.co.jp/sbiscrapi/data/analysisinfo?ric={safe_ric}&token={safe_token}"
 
 
 def parse_analysis_api_response(body: bytes) -> AnalysisApiResult:
@@ -117,7 +127,7 @@ def parse_analysis_api_response(body: bytes) -> AnalysisApiResult:
     if isinstance(asset, dict):
         pdf = asset.get("srplus_link", "")
         if pdf and isinstance(pdf, str) and pdf.startswith("https://app.stockreportsplus.com/"):
-            result.srplus_pdf_url = clean_url(pdf)
+            result.srplus_pdf_url = pdf  # raw URL with enc — clean_url only on output
 
     return result
 

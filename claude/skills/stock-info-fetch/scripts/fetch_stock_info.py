@@ -66,7 +66,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     now_iso = datetime.now(JST).isoformat()
     result = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "ticker": ticker,
         "company_name": "",
         "fetched_at": now_iso,
@@ -223,7 +223,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         price_tab_result,
         api_result.target_price if api_result else None,
         api_result.target_last_update if api_result else None,
-        now_iso,
+        price_html,
     )
     # Merge supplemental fields from price tab (open, high, low, volume, etc.)
     for key, val in price_tab_result.get("data", {}).items():
@@ -256,11 +256,17 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
     for s in result["sections"].values():
         st = s.get("status", "error")
         status_counts[st] = status_counts.get(st, 0) + 1
+    # Usable: no errors AND essential sections are ok or not_available (not missing)
+    essential = {"price", "company_profile", "company_scores"}
+    usable = status_counts["error"] == 0 and all(
+        result["sections"].get(s, {}).get("status") in ("ok", "not_available")
+        for s in essential
+    )
     result["summary"] = {
         "ok": status_counts["ok"],
         "not_available": status_counts["not_available"],
         "error": status_counts["error"],
-        "usable": status_counts["error"] == 0,
+        "usable": usable,
     }
 
     # Save to cache (even partial results)
@@ -301,7 +307,7 @@ def _set_section(result: dict, section_key: str, parsed: dict, url: str, now_iso
 def _error_result(ticker: str, code: str, message: str) -> dict:
     now_iso = datetime.now(JST).isoformat()
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "ticker": ticker,
         "company_name": "",
         "fetched_at": now_iso,

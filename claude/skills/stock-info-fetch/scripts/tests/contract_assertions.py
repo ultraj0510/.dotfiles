@@ -15,7 +15,7 @@ def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=F
     price and company_profile have real data. When
     require_stock_reports=True, assert stock_reports section has useful
     metric or performance data."""
-    assert payload["schema_version"] == "1.0"
+    assert payload["schema_version"] in ("1.0", "1.1")
     assert payload["ticker"] == expected_ticker
     assert isinstance(payload["company_name"], str)
     sections = payload["sections"]
