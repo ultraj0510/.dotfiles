@@ -46,7 +46,11 @@ def build_analysis_api_url(iframe_src: str) -> str | None:
     Output: https://graph.sbisec.co.jp/sbiscrapi/data/analysisinfo?ric=285A.T&token=XXX
     """
     parsed = urlparse(iframe_src)
+    if parsed.scheme != "https":
+        return None
     if parsed.hostname not in ("graph.sbisec.co.jp",):
+        return None
+    if not parsed.path.startswith("/sbiscreener/analysis"):
         return None
     params = parse_qs(parsed.query)
     token = params.get("token", [None])[0]
@@ -57,7 +61,7 @@ def build_analysis_api_url(iframe_src: str) -> str | None:
     if not re.match(r"^\d{3,4}[A-Z]?\.T$", sym):
         return None
     # Validate token: hex string only
-    if not re.match(r"^[0-9A-Fa-f]+$", token):
+    if not re.match(r"^[0-9A-Fa-f]{32,}$", token):
         return None
     safe_ric = sym
     safe_token = token

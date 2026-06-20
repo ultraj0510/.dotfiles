@@ -55,7 +55,7 @@ def _contains_sensitive(value, seen=None):
 def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
     if not isinstance(data, dict):
         return False
-    if data.get("schema_version") not in ("1.0", "1.1") or data.get("ticker") != ticker:
+    if data.get("schema_version") != "1.1" or data.get("ticker") != ticker:
         return False
     cache = data.get("cache")
     if not isinstance(cache, dict) or cache.get("date") != today:

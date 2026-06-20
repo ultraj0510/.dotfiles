@@ -219,11 +219,13 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     # 7. Price source arbitration (prefer price tab, fall back to analysis API)
     price_tab_result = parse_price(price_html) if price_html else {"status": "source_changed", "data": {}}
+    # Common header HTML for fallback (analysis tab has header with price)
+    header_html = html if analysis_fetch.status == "ok" else ""
     price_section = select_price_source(
         price_tab_result,
         api_result.target_price if api_result else None,
         api_result.target_last_update if api_result else None,
-        price_html,
+        header_html,
     )
     # Merge supplemental fields from price tab (open, high, low, volume, etc.)
     for key, val in price_tab_result.get("data", {}).items():
@@ -258,8 +260,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         status_counts[st] = status_counts.get(st, 0) + 1
     # Usable: no errors AND essential sections are ok or not_available (not missing)
     essential = {"price", "company_profile", "company_scores"}
+    # Usable: no errors, essential sections ok, performance/disclosures useful
     usable = status_counts["error"] == 0 and all(
-        result["sections"].get(s, {}).get("status") in ("ok", "not_available")
+        result["sections"].get(s, {}).get("status") == "ok"
         for s in essential
     )
     result["summary"] = {

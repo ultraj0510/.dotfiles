@@ -33,7 +33,7 @@ def test_cache_hit_same_day(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    data = {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
+    data = {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
     cm.save("3932", data)
 
     result = cm.get("3932")
@@ -70,7 +70,7 @@ def test_refresh_bypasses_cache(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    data = {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
+    data = {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
     cm.save("3932", data)
 
     result = cm.get("3932", refresh=True)
@@ -89,7 +89,7 @@ def test_atomic_write_does_not_leave_temp_file(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
+    cm.save("3932", {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
 
     tmp_files = list(tmp_path.glob("*.tmp"))
     assert len(tmp_files) == 0
@@ -107,7 +107,7 @@ def test_cache_file_is_owner_only(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
+    cm.save("3932", {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
     assert (tmp_path / "3932.json").stat().st_mode & 0o777 == 0o600
 
 
@@ -123,8 +123,8 @@ def test_cache_key_includes_ticker(tmp_path):
         "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
         "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
-    cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
-    cm.save("7203", {"schema_version": "1.0", "ticker": "7203", "cache": {"hit": False, "date": today}, "sections": sections})
+    cm.save("3932", {"schema_version": "1.1", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
+    cm.save("7203", {"schema_version": "1.1", "ticker": "7203", "cache": {"hit": False, "date": today}, "sections": sections})
 
     r1 = cm.get("3932")
     r2 = cm.get("7203")
@@ -159,19 +159,19 @@ def test_invalid_cache_contract_is_miss(tmp_path, data):
 
 
 def test_valid_cache_with_all_sections_hits(tmp_path):
-    """Valid schema 1.0 with 7 sections and valid statuses must hit."""
+    """Valid schema 1.1 with 7 sections and valid statuses must hit."""
     data = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "ticker": "3932",
         "cache": {"hit": False, "date": TODAY},
         "sections": {
             "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
             "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
-            "company_scores": {"status": "not_available", "data": {}, "source": {"url": "https://x"}},
+            "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
             "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
-            "news": {"status": "error", "data": [], "source": {"url": "https://x"}},
+            "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
             "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
-            "stock_reports": {"status": "not_available", "data": {}, "source": {"url": "https://x"}},
+            "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
         },
     }
     cm = CacheManager(cache_dir=tmp_path)
@@ -190,7 +190,7 @@ def test_concurrent_save_does_not_corrupt_cache(tmp_path):
     def save_data(n):
         try:
             data = {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "ticker": "3932",
                 "cache": {"hit": False, "date": TODAY},
                 "sections": {
@@ -222,7 +222,7 @@ def test_concurrent_save_does_not_corrupt_cache(tmp_path):
 @pytest.fixture
 def valid_cache_data():
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "ticker": "3932",
         "cache": {"hit": False, "date": TODAY_STR},
         "sections": {

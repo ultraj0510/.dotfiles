@@ -2,7 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Venv discovery — cascading search matching portfolio-fetch pattern
+# Venv discovery — prefer skill's own venv (has pdfplumber)
 PYTHON=""
 for candidate in \
     "${MORNING_CHECK_PYTHON:-}" \

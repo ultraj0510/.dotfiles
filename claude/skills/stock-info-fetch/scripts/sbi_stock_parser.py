@@ -111,11 +111,13 @@ def _parse_header_price(html: str) -> dict | None:
     """Extract price from common page header as last-resort fallback."""
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
-    m = re.search(r"([\d,]+\.?\d*)\s*円", text[:2000])
+    m = re.search(r"([\d,]+\.?\d*)\s*円", text[:3000])
     if m:
         return {
             "current_price": _parse_float(m.group(1)),
             "quote_timestamp": None,
+            "observed_at": datetime.now(JST).isoformat(),
+            "timestamp_kind": "observed",
             "source_kind": "detail_header",
         }
     return None
@@ -512,13 +514,15 @@ def parse_disclosure_cards(html: str, as_of: datetime | None = None) -> dict:
         url = ""
         onclick = link.get("onclick", "") if link else ""
         js_match = re.search(
-            r"nriWhitePageToPdf\('([^']+)','([^']+)'", onclick
+            r"nriWhitePageToPdf\('([^']+)',\s*'([^']+)'", onclick
         )
         if js_match:
-            from urllib.parse import urlencode
-            url = ("https://site1.sbisec.co.jp/ETGate/?" +
-                   urlencode({"_pdf_id": js_match.group(1),
-                              "_pdf_type": js_match.group(2)}))
+            url = (f"https://site1.sbisec.co.jp/ETGate/?"
+                   f"_ControlID=WPLETsmR001Control&"
+                   f"_PageID=WPLETsmR001Sdtl12&"
+                   f"_DataStoreID=DSWPLETsmR001Control&"
+                   f"pdf_id={js_match.group(1)}&"
+                   f"pdf_type={js_match.group(2)}")
         elif raw_href and not raw_href.startswith("javascript"):
             url = raw_href
 

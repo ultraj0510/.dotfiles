@@ -138,6 +138,11 @@ def _has_minimum_data(data: dict) -> bool:
 
 
 def _extract_report_date(text: str) -> str:
+    # Real PDFs use "レポート日: YYYY年M月D日"
+    m = re.search(r"レポート日[：:]?\s*(\d{4})年(\d{1,2})月(\d{1,2})日", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # Fallback: "更新日: YYYY年M月D日"
     m = re.search(r"更新日[：:]?\s*(\d{4})年(\d{1,2})月(\d{1,2})日", text)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
