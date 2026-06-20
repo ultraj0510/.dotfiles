@@ -63,7 +63,7 @@ class OkPriceOnlyClient:
 
 class AuthExpiredClient:
     def fetch_html(self, url, cookie_header=""):
-        return SimpleNamespace(body="<form><input type='password'></form>".encode("utf-8"), status="ok", url="https://site1.sbisec.co.jp/ETGate/")
+        return SimpleNamespace(body="<form action='/login'><input type='password'><input name='userid'></form>".encode("utf-8"), status="ok", url="https://site1.sbisec.co.jp/ETGate/")
 
 
 class TickerNotFoundClient:
@@ -73,7 +73,7 @@ class TickerNotFoundClient:
 
 class AuthExpiredJPClient:
     def fetch_html(self, url, cookie_header=""):
-        return SimpleNamespace(body="<form><input type='password'></form>".encode("utf-8"), status="ok", url="https://site1.sbisec.co.jp/ETGate/")
+        return SimpleNamespace(body="<form action='/login'><input type='password'><input id='user_id'></form>".encode("utf-8"), status="ok", url="https://site1.sbisec.co.jp/ETGate/")
 
 
 class TickerNotFoundJPClient:
@@ -233,7 +233,7 @@ class AuthExpiredHtmlOnPerformanceClient:
     """Performance popup returns 200 OK but body contains login page."""
     def fetch_html(self, url, cookie_header=""):
         if "report_summary" in url:
-            return SimpleNamespace(body="<form><input type='password'></form>".encode(), status="ok", url=url)
+            return SimpleNamespace(body="<form action='/login'><input type='password'><input name='userid'></form>".encode(), status="ok", url=url)
         if "Idtl70" in url:
             return SimpleNamespace(body="""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=synthetic&sym=3932.T"></iframe>
 <a onclick="window.open('/ETGate/?sw_param1=report_summary&stock_sec_code_mul=3932','report_summary')">業績</a>""".encode(), status="ok", url=url)

@@ -306,19 +306,37 @@ def _classify_global_error(html: str, url: str) -> str | None:
     host = urlparse(url).hostname
     if host and host.endswith("login.sbisec.co.jp"):
         return "auth_expired"
-    # Check for login form structure (password input field).
+    # Check for login form structure (only in visible DOM, not hidden/template).
     if _has_login_form(html):
         return "auth_expired"
-    if "該当する銘柄はありません" in html or "銘柄コードが正しくありません" in html:
+    visible = _visible_text(html)
+    if "該当する銘柄はありません" in visible or "銘柄コードが正しくありません" in visible:
         return "ticker_not_found"
     return None
 
 
 def _has_login_form(html: str) -> bool:
-    """Check DOM for login form indicators (password input)."""
+    """Check visible DOM for login form indicators.
+
+    Requires a visible password input AND at least one corroborating element
+    (user ID input or login form action). Hidden/template elements are excluded.
+    """
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
-    return soup.find("input", type="password") is not None
+    for tag in soup.select("script, style, template, [hidden]"):
+        tag.extract()
+    # Find a visible password input (not inside removed elements).
+    pw = soup.find("input", type="password")
+    if pw is None:
+        return False
+    # Check for user ID input or login form action as corroboration.
+    for inp in soup.find_all("input"):
+        if inp.get("id") and "user" in inp["id"].lower():
+            return True
+        if inp.get("name") and "user" in inp["name"].lower():
+            return True
+    form = soup.find("form", action=lambda v: v and "login" in v.lower())
+    return form is not None
 
 
 def _decode_html(body: bytes | None) -> str:
