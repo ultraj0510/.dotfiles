@@ -90,6 +90,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         "company_profile": ("company_profile", parse_company_profile),
         "news": ("news", parse_news),
     }
+    first_tab_html = ""  # saved for price header fallback
 
     for section_key, (tab_name, parser) in tab_sections.items():
         fetched = client.fetch_html(build_detail_url(ticker, tab_name), cookie_header)
@@ -99,6 +100,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
             _add_error(result, section_key, fetched.status, f"Failed to fetch {tab_name}", fetched.url)
             continue
         html = _decode_html(fetched.body)
+        if not first_tab_html:
+            first_tab_html = html
         global_code = classify_page_state(html, fetched.url)
         if global_code:
             return _global_error_result(ticker, global_code)
@@ -219,8 +222,8 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     # 7. Price source arbitration (prefer price tab, fall back to analysis API)
     price_tab_result = parse_price(price_html) if price_html else {"status": "source_changed", "data": {}}
-    # Common header HTML for fallback (analysis tab has header with price)
-    header_html = html if analysis_fetch.status == "ok" else ""
+    # Common header HTML for fallback: company_profile/news tab has price in td.tdL
+    header_html = first_tab_html if first_tab_html else ""
     price_section = select_price_source(
         price_tab_result,
         api_result.target_price if api_result else None,
@@ -260,11 +263,12 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         status_counts[st] = status_counts.get(st, 0) + 1
     # Usable: no errors AND essential sections are ok or not_available (not missing)
     essential = {"price", "company_profile", "company_scores"}
-    # Usable: no errors, all sections ok (price may be not_available when market closed)
+    # Usable: no errors, all sections ok. price may be not_available when market closed.
     usable = status_counts["error"] == 0 and all(
-        result["sections"].get(s, {}).get("status") in ("ok", "not_available")
+        result["sections"].get(s, {}).get("status") == "ok"
         for s in result["sections"]
-    )
+        if s != "price"
+    ) and result["sections"].get("price", {}).get("status") in ("ok", "not_available")
     result["summary"] = {
         "ok": status_counts["ok"],
         "not_available": status_counts["not_available"],

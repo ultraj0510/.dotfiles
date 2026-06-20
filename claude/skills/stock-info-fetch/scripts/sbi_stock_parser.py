@@ -124,8 +124,23 @@ def select_price_source(price_tab_result, api_target_price, api_last_update,
 def _parse_header_price(html: str) -> dict | None:
     """Extract price from common page header as last-resort fallback."""
     soup = BeautifulSoup(html, "html.parser")
+    # Try td.tdL first (SBI common header class)
+    price_cell = soup.select_one("td.tdL")
+    cell_text = price_cell.get_text(strip=True) if price_cell else ""
+    m = re.search(r"([\d,]+\.?\d*)", cell_text)
+    if m:
+        val = _parse_float(m.group(1))
+        if val > 0:
+            return {
+                "current_price": val,
+                "quote_timestamp": None,
+                "observed_at": datetime.now(JST).isoformat(),
+                "timestamp_kind": "observed",
+                "source_kind": "detail_header",
+            }
+    # Fallback: search page text for number+円
     text = soup.get_text(" ", strip=True)
-    m = re.search(r"([\d,]+\.?\d*)\s*円", text[:3000])
+    m = re.search(r"([\d,]{3,}\.?\d*)\s*円", text[:3000])
     if m:
         return {
             "current_price": _parse_float(m.group(1)),
@@ -527,13 +542,20 @@ def parse_disclosure_cards(html: str, as_of: datetime | None = None) -> dict:
             r"nriWhitePageToPdf\('([^']+)',\s*'([^']+)'", onclick
         )
         if js_match:
-            url = (f"https://site1.sbisec.co.jp/ETGate/?"
-                   f"_ControlID=WPLETsmR001Control&"
-                   f"_PageID=WPLETsmR001Sdtl20&"
-                   f"_DataStoreID=DSWPLETsmR001Control&"
-                   f"sw_page=pdf&"
-                   f"sw_param2={js_match.group(1)}&"
-                   f"sw_param3={js_match.group(2)}")
+            from urllib.parse import urlencode
+            params = {
+                "_ControlID": "WPLETsmR001Control",
+                "_PageID": "WPLETsmR001Sdtl12",
+                "_DataStoreID": "DSWPLETsmR001Control",
+                "_ActionID": "NoActionID",
+                "sw_page": "ifs",
+                "sw_param1": "discloseDetail",
+                "sw_param2": js_match.group(1),
+                "sw_param3": js_match.group(2),
+                "getFlg": "on",
+                "OutSide": "on",
+            }
+            url = f"https://site1.sbisec.co.jp/ETGate/?{urlencode(params)}"
         elif raw_href and not raw_href.startswith("javascript"):
             url = raw_href
 
