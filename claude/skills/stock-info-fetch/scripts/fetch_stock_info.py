@@ -340,7 +340,13 @@ def _has_login_form(html: str) -> bool:
                for kw in ("new", "confirm", "current", "old", "change")):
             continue
 
-        # Check for login-specific user-id field in the same form.
+        # User-id field only counts if the action is not a known non-login path.
+        action = (form.get("action") or "").lower()
+        if action and any(kw in action for kw in (
+            "change", "history", "help", "reset", "forgot", "register", "signup",
+        )):
+            continue
+
         for inp in form.find_all("input"):
             if inp is pw:
                 continue
@@ -351,9 +357,8 @@ def _has_login_form(html: str) -> bool:
             if f_id in ("userid", "user_id", "username", "login_id"):
                 return True
 
-        # Corroborating action (login in path) with a password field present.
-        action = (form.get("action") or "").lower()
-        if "login" in action:
+        # Action path containing /login or ending in /login.
+        if action and ("/login" in action or action.endswith("login")):
             return True
     return False
 
