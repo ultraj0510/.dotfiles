@@ -343,9 +343,10 @@ def _has_login_form(html: str) -> bool:
         if not has_login_pw:
             continue
 
-        # User-id field only counts if the action is not a known non-login path.
+        # User-id field only counts if the action path is not a known non-login path.
         action = (form.get("action") or "").lower()
-        if action and any(kw in action for kw in (
+        action_path = _action_path(action)
+        if action_path and any(kw in action_path for kw in (
             "change", "history", "help", "reset", "forgot", "register", "signup",
         )):
             continue
@@ -358,20 +359,16 @@ def _has_login_form(html: str) -> bool:
             if f_id in ("userid", "user_id", "username", "login_id"):
                 return True
 
-        # Action path: check segments for exact "login" path component.
-        if _action_is_login(action):
+        # Action path segments contain "login" as a complete component.
+        if action_path and "login" in [s for s in action_path.split("/") if s]:
             return True
     return False
 
 
-def _action_is_login(action: str) -> bool:
-    """Check if the form action path contains 'login' as a complete segment."""
-    if not action:
-        return False
+def _action_path(action: str) -> str:
+    """Extract URL path from a form action, without query string."""
     from urllib.parse import urlparse as _urlparse
-    path = _urlparse(action).path
-    segments = [s for s in path.split("/") if s]
-    return "login" in segments
+    return _urlparse(action).path
 
 
 def _decode_html(body: bytes | None) -> str:
