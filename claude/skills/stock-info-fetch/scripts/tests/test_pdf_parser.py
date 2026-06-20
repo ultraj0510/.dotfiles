@@ -90,18 +90,59 @@ def test_extract_key_metrics_uses_table_data():
     from pdf_parser import _extract_key_metrics
     tables = [["指標", "値", "単位"], ["PER", "15.2", "倍"], ["PBR", "1.85", "倍"]]
     result = _extract_key_metrics("no regex matches here", tables)
-    assert result["per"] == {"value": 15.2, "unit": "倍"}
-    assert result["pbr"] == {"value": 1.85, "unit": "倍"}
+    assert result["per"]["value"] == 15.2
+    assert result["pbr"]["value"] == 1.85
 
 
 def test_extracts_periodized_performance_from_tables():
     from pdf_parser import _extract_performance_data
     tables = [
-        ["", "2026/03 実績", "2027/03 予想", "単位"],
-        ["売上高", "100,000", "120,000", "百万円"],
-        ["営業利益", "10,000", "12,500", "百万円"],
+        ["", "2026/03 実績", "2027/03 予想"],
+        ["売上高", "100,000", "120,000"],
+        ["営業利益", "10,000", "12,500"],
+        ["", "百万円", "百万円"],
     ]
     result = _extract_performance_data("", tables)
     assert len(result["actual"]) == 2
     assert result["actual"][0] == {"metric": "売上高", "period": "2026/03", "value": 100000.0, "unit": "百万円"}
     assert result["forecast"][1]["period"] == "2027/03"
+
+
+@pytest.mark.parametrize(("tables", "expected"), [
+    ([["PER", "15.2倍"]], {"value": 15.2, "unit": "倍"}),
+    ([["PER\n（予想）", "15.2\n倍"]], {"value": 15.2, "unit": "倍"}),
+])
+def test_metric_value_and_unit_can_share_cell(tables, expected):
+    from pdf_parser import _extract_key_metrics
+    assert _extract_key_metrics("", tables)["per"] == expected
+
+
+def test_split_period_and_kind_headers_are_combined():
+    from pdf_parser import _extract_performance_data
+    tables = [
+        ["", "2026/03", "2027/03"],
+        ["", "実績", "予想"],
+        ["売上高", "100,000", "120,000"],
+        ["単位", "百万円", "百万円"],
+    ]
+    result = _extract_performance_data("", tables)
+    assert result["actual"][0] == {
+        "metric": "売上高",
+        "period": "2026/03",
+        "value": 100000.0,
+        "unit": "百万円",
+    }
+    assert result["forecast"][0]["period"] == "2027/03"
+
+
+def test_text_fallback_uses_complete_schema():
+    from pdf_parser import _extract_performance_data
+    result = _extract_performance_data(
+        "売上高 100000 120000",
+        [],
+    )
+    # Fallback may have empty period/unit since text has no structured headers
+    assert "metric" in result["actual"][0]
+    assert "period" in result["actual"][0]
+    assert "value" in result["actual"][0]
+    assert "unit" in result["actual"][0]

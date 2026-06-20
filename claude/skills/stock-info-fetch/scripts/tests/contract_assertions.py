@@ -9,9 +9,12 @@ VALID_STATUSES = {"ok", "not_available", "error"}
 SENSITIVE_PARAMS = {"token", "enc", "ahash", "hhash", "ihash"}
 
 
-def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=False):
+def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=False,
+                               require_stock_reports=False):
     """Verify JSON output contract. When require_useful=True, assert
-    price and company_profile have real data."""
+    price and company_profile have real data. When
+    require_stock_reports=True, assert stock_reports section has useful
+    metric or performance data."""
     assert payload["schema_version"] == "1.0"
     assert payload["ticker"] == expected_ticker
     assert isinstance(payload["company_name"], str)
@@ -52,3 +55,21 @@ def assert_stock_info_contract(payload, expected_ticker="3932", require_useful=F
                 assert any(e["section"] == name for e in payload["errors"]), (
                     f"{name} is error but no matching error entry"
                 )
+
+    if require_stock_reports:
+        section = payload["sections"]["stock_reports"]
+        assert section["status"] == "ok", f"stock_reports not ok: {section['status']}"
+        data = section["data"]
+        assert data.get("report_date"), "stock_reports missing report_date"
+        metrics = data.get("key_metrics", {})
+        performance = data.get("actual_and_forecast", {})
+        has_metric = any(
+            isinstance(item, dict) and item.get("value") is not None and item.get("unit")
+            for item in metrics.values()
+        )
+        has_performance = any(
+            isinstance(item, dict) and item.get("value") is not None and item.get("period") and item.get("unit")
+            for key in ("actual", "forecast")
+            for item in performance.get(key, [])
+        )
+        assert has_metric or has_performance, "stock_reports has no useful metric or performance data"

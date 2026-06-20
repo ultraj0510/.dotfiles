@@ -372,6 +372,16 @@ def test_cli_usage_error_is_json(capsys):
     assert payload["errors"][0]["code"] == "usage_error"
 
 
+def test_invalid_ticker_does_not_echo_input(capsys):
+    """ticker_invalid must use fixed message, not echo the input value."""
+    from fetch_stock_info import main
+    with pytest.raises(SystemExit) as exc:
+        main(["bad?token=secret"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"][0]["code"] == "ticker_invalid"
+    assert "secret" not in payload["errors"][0]["message"]
+
+
 def test_main_outputs_json_when_cookie_store_raises(monkeypatch, capsys):
     """When cookie_store throws, stdout must still be valid internal_error JSON."""
     fake = SimpleNamespace(

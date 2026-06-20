@@ -237,6 +237,17 @@ def valid_cache_data():
     }
 
 
+def test_cache_with_sensitive_source_url_is_miss(tmp_path, valid_cache_data):
+    """Cache with token=secret in source URL must be rejected."""
+    valid_cache_data["sections"]["price"]["source"]["url"] = (
+        "https://graph.sbisec.co.jp/x?token=secret"
+    )
+    (tmp_path / "3932.json").write_text(
+        json.dumps(valid_cache_data, ensure_ascii=False), encoding="utf-8",
+    )
+    assert CacheManager(tmp_path).get("3932") is None
+
+
 @pytest.mark.parametrize("mutate", [
     lambda d: d.update(ticker="7203"),
     lambda d: d.update(cache=[]),

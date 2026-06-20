@@ -44,7 +44,7 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
 
     # 1. Validate ticker
     if not ticker_is_valid(ticker):
-        return _error_result(ticker, "ticker_invalid", f"Invalid ticker: {ticker}")
+        return _error_result(ticker, "ticker_invalid", "Invalid ticker format")
 
     # 2. Check cache
     cm = CacheManager(cache_dir)
@@ -328,7 +328,7 @@ def main(cli_args: list[str] | None = None):
 
     class _JsonErrorParser(argparse.ArgumentParser):
         def error(self, message):
-            result = _error_result("unknown", "usage_error", message)
+            result = _error_result("unknown", "usage_error", "Invalid command arguments")
             json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
             sys.stdout.write("\n")
             sys.exit(1)

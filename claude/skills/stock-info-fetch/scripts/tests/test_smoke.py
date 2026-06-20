@@ -25,7 +25,7 @@ def test_authenticated_smoke_useful_data_and_cache():
         )
         assert run1.returncode == 0, f"stderr: {run1.stderr}"
         result1 = json.loads(run1.stdout)
-        assert_stock_info_contract(result1, require_useful=True)
+        assert_stock_info_contract(result1, require_useful=True, require_stock_reports=True)
 
         # Second run: should hit cache
         run2 = subprocess.run(
@@ -36,7 +36,8 @@ def test_authenticated_smoke_useful_data_and_cache():
         result2 = json.loads(run2.stdout)
         assert result2["cache"]["hit"] is True, "second run must hit cache"
         assert result2["ticker"] == result1["ticker"]
-        assert set(result2["sections"].keys()) == set(result1["sections"].keys())
+        assert_stock_info_contract(result2, require_useful=True, require_stock_reports=True)
+        assert result2["sections"] == result1["sections"]
 
         # No secrets in any output
         for run in (run1, run2):

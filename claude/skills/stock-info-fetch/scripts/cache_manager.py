@@ -7,6 +7,9 @@ import os
 import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from url_cleaner import SENSITIVE_PARAMS
 
 DEFAULT_CACHE_DIR = Path.home() / ".claude" / "cache" / "stock-info-fetch"
 JST = timezone(timedelta(hours=9))
@@ -41,6 +44,12 @@ def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
             return False
         if not isinstance(source.get("url"), str):
             return False
+        url_str = section["source"].get("url", "")
+        parsed = urlparse(url_str)
+        if parsed.query:
+            params = parse_qs(parsed.query)
+            if any(p.lower() in SENSITIVE_PARAMS for p in params):
+                return False
     return True
 
 

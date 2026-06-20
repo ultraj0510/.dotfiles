@@ -53,6 +53,14 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
     if not text or len(text) < 10:
         return {"status": "source_changed", "data": {}}
 
+    # Find the row containing "現在値" — only extract timestamp from this row
+    current_price_row = None
+    for row in soup.find_all("tr"):
+        if "現在値" in row.get_text(" ", strip=True):
+            current_price_row = row
+            break
+    row_text = current_price_row.get_text(" ", strip=True) if current_price_row else text
+
     data = {}
     extracted = 0
 
@@ -91,8 +99,8 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
             except ValueError:
                 pass
 
-    # Extract quote_timestamp from MM/DD HH:MM pattern
-    ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", text)
+    # Extract quote_timestamp ONLY from the current price row
+    ts_match = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", row_text)
     if ts_match:
         month, day, hour, minute = int(ts_match.group(1)), int(ts_match.group(2)), int(ts_match.group(3)), int(ts_match.group(4))
         ref = as_of or datetime.now(JST)

@@ -1,10 +1,13 @@
 """Tests for price tab parser."""
 import sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sbi_stock_parser import parse_price
+
+JST = timezone(timedelta(hours=9))
 
 
 _PRICE_HTML = """
@@ -99,3 +102,14 @@ def test_price_ok_with_all_mandatory_fields():
     assert result["status"] == "ok"
     assert "quote_timestamp" in result["data"]
     assert result["data"]["quote_timestamp"] == "2026-06-19T14:30:00+09:00"
+
+
+def test_unrelated_page_timestamp_does_not_complete_price():
+    """Timestamp in news section must NOT satisfy quote_timestamp requirement."""
+    html = """
+    <table><tr><th>現在値</th><td>1,000円</td></tr></table>
+    <div>ニュース更新 06/19 14:30</div>
+    """
+    result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
+    assert result["status"] == "source_changed"
+    assert "quote_timestamp" not in result["data"]
