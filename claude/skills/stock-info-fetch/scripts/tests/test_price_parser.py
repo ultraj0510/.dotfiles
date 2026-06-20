@@ -144,3 +144,23 @@ def test_stale_quote_timestamp_is_source_changed():
     html = "<table><tr><th>現在値</th><td>1,000円 05/01 14:30</td></tr></table>"
     result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
     assert result["status"] == "source_changed"
+
+
+def test_sub_100_yen_price():
+    """Prices below 100 yen must be extractable (e.g., 98円, 98.5円)."""
+    html = "<table><tr><th>現在値</th><td>98.5円 06/19 14:30</td></tr></table>"
+    result = parse_price(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
+    assert result["status"] == "ok"
+    assert result["data"]["current_price"] == 98.5
+
+
+def test_strict_7_day_boundary():
+    """7 days + 1 hour must be rejected (not rounded to 7 days)."""
+    from datetime import timedelta
+    ref = datetime(2026, 6, 20, 12, 0, tzinfo=JST)
+    # 7 days 1 hour ago
+    stale_dt = ref - timedelta(days=7, hours=1)
+    ts = stale_dt.strftime("%m/%d %H:%M")
+    html = f"<table><tr><th>現在値</th><td>1,000円 {ts}</td></tr></table>"
+    result = parse_price(html, as_of=ref)
+    assert result["status"] == "source_changed"

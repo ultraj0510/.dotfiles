@@ -88,7 +88,7 @@ class TickerNotFoundJPClient:
 class PartialClient:
     def fetch_html(self, url, cookie_header=""):
         if "Idtl10" in url:
-            return SimpleNamespace(body=("<table><tr><th>現在値</th><td>2,150.5<span>06/19 14:30</span></td></tr></table>").encode("utf-8"), status="ok", url=url)
+            return SimpleNamespace(body=("<table><tr><th>現在値</th><td>2,150.5円<span>06/19 14:30</span></td></tr></table>").encode("utf-8"), status="ok", url=url)
         return SimpleNamespace(body=None, status="fetch_failed", url=url)
 
 
@@ -98,7 +98,7 @@ class FullClient:
 
     def fetch_html(self, url, cookie_header=""):
         if "Idtl10" in url:
-            body = ("<table><tr><th>現在値</th><td>2,150.5<span>06/19 14:30</span></td></tr></table>").encode("utf-8")
+            body = ("<table><tr><th>現在値</th><td>2,150.5円<span>06/19 14:30</span></td></tr></table>").encode("utf-8")
         elif "Idtl20" in url:
             body = ("<table><tr><td>2026/06/19 14:30</td><td>IRニュース</td><td><a href='/news/123'>記事</a></td></tr></table>").encode("utf-8")
         elif "Idtl50" in url:

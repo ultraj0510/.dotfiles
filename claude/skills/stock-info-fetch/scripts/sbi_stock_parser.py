@@ -71,13 +71,9 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
         value_cells = price_row.find_all("td")
         row_text = " ".join(c.get_text(" ", strip=True) for c in value_cells)
 
-        # Parse current_price from this row only
-        # Require 3+ digits to avoid matching date/time components (MM/DD HH:MM)
-        price_match = re.search(r"(\d[\d,]*\.?\d*)", row_text)
-        if price_match:
-            clean = price_match.group(1).replace(",", "")
-            if not re.search(r"\d{3,}", clean):
-                price_match = None
+        # Parse current_price from this row only — match number+円 to
+        # distinguish price from date/time components (MM/DD HH:MM).
+        price_match = re.search(r"([\d,]+\.?\d*)\s*円", row_text)
         if price_match:
             try:
                 data["current_price"] = _parse_float(price_match.group(1))
@@ -94,8 +90,8 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
                 try:
                     dt = datetime(candidate_year, month, day, hour, minute, tzinfo=JST)
                     if dt <= ref:
-                        # 7-day freshness check
-                        if (ref - dt).days > 7:
+                        # Strict 7-day freshness
+                        if ref - dt > timedelta(days=7):
                             return {"status": "source_changed", "data": data}
                         data["quote_timestamp"] = dt.isoformat()
                         extracted += 1
