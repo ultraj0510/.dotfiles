@@ -126,3 +126,12 @@ def test_rating_distro_no_fabricated_zero():
     html = "<table><tr><th>強気 (5点)</th><td>不明</td></tr></table>"
     result = parse_performance(html)
     assert "strong" not in result["data"].get("rating_distribution", {})
+
+
+def test_unparseable_rating_distribution_is_source_changed():
+    """Rating row matched but count is unparseable — must flag source_changed."""
+    html = """
+    <table><tr><th>強気</th><td>不明</td></tr></table>
+    <table><tr><td>3.5</td><td>1週間前</td><td>3ヶ月前</td></tr></table>
+    """
+    assert parse_performance(html)["status"] == "source_changed"

@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cache_manager import CacheManager
 
 JST = timezone(timedelta(hours=9))
+JST_FOR_TESTS = timezone(timedelta(hours=9))
+TODAY_STR = datetime.now(JST_FOR_TESTS).strftime("%Y-%m-%d")
 
 
 def test_cache_miss_on_empty_dir(tmp_path):
@@ -23,13 +25,13 @@ def test_cache_hit_same_day(tmp_path):
     cm = CacheManager(cache_dir=tmp_path)
     today = datetime.now(JST).strftime("%Y-%m-%d")
     sections = {
-        "price": {"status": "ok", "data": {}},
-        "company_profile": {"status": "ok", "data": {}},
-        "company_scores": {"status": "ok", "data": {}},
-        "performance": {"status": "ok", "data": {}},
-        "news": {"status": "ok", "data": []},
-        "disclosures": {"status": "ok", "data": []},
-        "stock_reports": {"status": "ok", "data": {}},
+        "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
     data = {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
     cm.save("3932", data)
@@ -59,7 +61,16 @@ def test_cache_miss_different_day(tmp_path):
 def test_refresh_bypasses_cache(tmp_path):
     cm = CacheManager(cache_dir=tmp_path)
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    data = {"ticker": "3932", "cache": {"hit": False, "date": today}}
+    sections = {
+        "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+    }
+    data = {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections}
     cm.save("3932", data)
 
     result = cm.get("3932", refresh=True)
@@ -69,7 +80,16 @@ def test_refresh_bypasses_cache(tmp_path):
 def test_atomic_write_does_not_leave_temp_file(tmp_path):
     cm = CacheManager(cache_dir=tmp_path)
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    cm.save("3932", {"ticker": "3932", "cache": {"hit": False, "date": today}})
+    sections = {
+        "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+    }
+    cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
 
     tmp_files = list(tmp_path.glob("*.tmp"))
     assert len(tmp_files) == 0
@@ -78,7 +98,16 @@ def test_atomic_write_does_not_leave_temp_file(tmp_path):
 def test_cache_file_is_owner_only(tmp_path):
     cm = CacheManager(cache_dir=tmp_path)
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    cm.save("3932", {"ticker": "3932", "cache": {"hit": False, "date": today}})
+    sections = {
+        "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+    }
+    cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
     assert (tmp_path / "3932.json").stat().st_mode & 0o777 == 0o600
 
 
@@ -86,13 +115,13 @@ def test_cache_key_includes_ticker(tmp_path):
     cm = CacheManager(cache_dir=tmp_path)
     today = datetime.now(JST).strftime("%Y-%m-%d")
     sections = {
-        "price": {"status": "ok", "data": {}},
-        "company_profile": {"status": "ok", "data": {}},
-        "company_scores": {"status": "ok", "data": {}},
-        "performance": {"status": "ok", "data": {}},
-        "news": {"status": "ok", "data": []},
-        "disclosures": {"status": "ok", "data": []},
-        "stock_reports": {"status": "ok", "data": {}},
+        "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+        "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
     }
     cm.save("3932", {"schema_version": "1.0", "ticker": "3932", "cache": {"hit": False, "date": today}, "sections": sections})
     cm.save("7203", {"schema_version": "1.0", "ticker": "7203", "cache": {"hit": False, "date": today}, "sections": sections})
@@ -136,13 +165,13 @@ def test_valid_cache_with_all_sections_hits(tmp_path):
         "ticker": "3932",
         "cache": {"hit": False, "date": TODAY},
         "sections": {
-            "price": {"status": "ok", "data": {}},
-            "company_profile": {"status": "ok", "data": {}},
-            "company_scores": {"status": "not_available", "data": {}},
-            "performance": {"status": "ok", "data": {}},
-            "news": {"status": "error", "data": []},
-            "disclosures": {"status": "ok", "data": []},
-            "stock_reports": {"status": "not_available", "data": {}},
+            "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "company_scores": {"status": "not_available", "data": {}, "source": {"url": "https://x"}},
+            "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "news": {"status": "error", "data": [], "source": {"url": "https://x"}},
+            "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+            "stock_reports": {"status": "not_available", "data": {}, "source": {"url": "https://x"}},
         },
     }
     cm = CacheManager(cache_dir=tmp_path)
@@ -165,13 +194,13 @@ def test_concurrent_save_does_not_corrupt_cache(tmp_path):
                 "ticker": "3932",
                 "cache": {"hit": False, "date": TODAY},
                 "sections": {
-                    "price": {"status": "ok", "data": {"n": n}},
-                    "company_profile": {"status": "ok", "data": {}},
-                    "company_scores": {"status": "ok", "data": {}},
-                    "performance": {"status": "ok", "data": {}},
-                    "news": {"status": "ok", "data": []},
-                    "disclosures": {"status": "ok", "data": []},
-                    "stock_reports": {"status": "ok", "data": {}},
+                    "price": {"status": "ok", "data": {"n": n}, "source": {"url": "https://x"}},
+                    "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+                    "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+                    "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+                    "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+                    "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+                    "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
                 },
             }
             cm.save("3932", data)
@@ -188,3 +217,38 @@ def test_concurrent_save_does_not_corrupt_cache(tmp_path):
     assert result is not None
     # No leftover tmp files
     assert len(list(tmp_path.glob("*.tmp"))) == 0
+
+
+@pytest.fixture
+def valid_cache_data():
+    return {
+        "schema_version": "1.0",
+        "ticker": "3932",
+        "cache": {"hit": False, "date": TODAY_STR},
+        "sections": {
+            "price": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "company_profile": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "company_scores": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "performance": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+            "news": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+            "disclosures": {"status": "ok", "data": [], "source": {"url": "https://x"}},
+            "stock_reports": {"status": "ok", "data": {}, "source": {"url": "https://x"}},
+        },
+    }
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d.update(ticker="7203"),
+    lambda d: d.update(cache=[]),
+    lambda d: d["sections"]["price"].pop("data"),
+    lambda d: d["sections"]["price"].update(source=[]),
+    lambda d: d.update(schema_version="0.9"),
+    lambda d: d["sections"].pop("stock_reports"),
+])
+def test_cache_contract_violation_is_miss(tmp_path, valid_cache_data, mutate):
+    mutate(valid_cache_data)
+    (tmp_path / "3932.json").write_text(
+        json.dumps(valid_cache_data, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert CacheManager(tmp_path).get("3932") is None

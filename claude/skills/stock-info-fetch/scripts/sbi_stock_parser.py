@@ -32,14 +32,9 @@ def _count_numeric_values(text: str) -> int:
 
 
 def _within_window(value: datetime, as_of: datetime | None, days: int) -> bool:
-    """Check if value is within [as_of-days, as_of] window inclusive.
-
-    Upper bound uses end of as_of day to include items on the same
-    calendar day as as_of regardless of time.
-    """
+    """Check if value is within [as_of-days, as_of] window inclusive."""
     ref = as_of if as_of is not None else datetime.now(JST)
-    end_of_day = ref.replace(hour=23, minute=59, second=59)
-    return ref - timedelta(days=days) <= value <= end_of_day
+    return ref - timedelta(days=days) <= value <= ref
 
 
 def parse_price(html: str, as_of: datetime | None = None) -> dict:
@@ -478,7 +473,6 @@ def parse_performance(html: str) -> dict:
     # Rating distribution
     labels = {"強気": "strong", "やや強気": "moderately_strong",
               "中立": "neutral", "やや弱気": "moderately_weak", "弱気": "weak"}
-    dist_extracted = 0
     for row in soup.find_all("tr"):
         cells = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"])]
         if len(cells) >= 2:
@@ -487,7 +481,10 @@ def parse_performance(html: str) -> dict:
                     count = re.search(r"(\d+)人", cells[1])
                     if count:
                         data["rating_distribution"][key] = int(count.group(1))
-                    dist_extracted += 1
+                    elif cells[1].strip() == "0人":
+                        data["rating_distribution"][key] = 0
+                    else:
+                        unknown_rows += 1
 
     # Target price
     target = re.search(

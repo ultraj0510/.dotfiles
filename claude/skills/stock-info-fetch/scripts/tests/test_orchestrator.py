@@ -6,45 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from contract_assertions import assert_stock_info_contract, SENSITIVE_PARAMS
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-
-EXPECTED_SECTIONS = {
-    "price", "company_profile", "company_scores",
-    "performance", "news", "disclosures", "stock_reports",
-}
-VALID_STATUSES = {"ok", "not_available", "error"}
-SENSITIVE_PARAMS = {"token", "enc", "ahash", "hhash", "ihash"}
-
-
-def assert_valid_stock_info(payload, expected_ticker="3932"):
-    """Verify JSON output contract."""
-    assert payload["schema_version"] == "1.0"
-    assert payload["ticker"] == expected_ticker
-    assert isinstance(payload["company_name"], str)
-    sections = payload["sections"]
-    assert isinstance(sections, dict)
-    assert set(sections.keys()) == EXPECTED_SECTIONS
-    for name, section in sections.items():
-        assert isinstance(section, dict), f"{name} section is not a dict"
-        assert section["status"] in VALID_STATUSES, f"{name} status={section['status']}"
-        assert "data" in section
-        assert "source" in section
-        assert "url" in section["source"]
-        for param in SENSITIVE_PARAMS:
-            assert param not in section["source"]["url"], f"{param} in {name} url"
-
-    # Secret values must not appear in entire payload
-    payload_str = json.dumps(payload, ensure_ascii=False)
-    for param in SENSITIVE_PARAMS:
-        assert f"{param}=" not in payload_str, f"{param} leaked in output"
-
-    errors = payload.get("errors", [])
-    assert isinstance(errors, list)
-    for err in errors:
-        assert "section" in err
-        assert "code" in err
-        assert "message" in err
 
 
 def _set_fake_cookie(monkeypatch):
@@ -292,6 +256,39 @@ def test_auth_expired_html_on_performance_is_global(monkeypatch, tmp_path):
     assert saved == []
 
 
+class ScorePageNoPdfClient:
+    def fetch_html(self, url, cookie_header=""):
+        if "Idtl10" in url:
+            return SimpleNamespace(body="<table><tr><th>current</th><td>2150.5</td><td>06/20 14:30</td></tr></table>".encode(), status="ok", url=url)
+        if "Idtl20" in url:
+            return SimpleNamespace(body="<table><tr><td>2026/06/19 14:30</td><td>IR</td><td><a href='/news/123'>x</a></td></tr></table>".encode(), status="ok", url=url)
+        if "Idtl50" in url:
+            return SimpleNamespace(body="<div>作成日: 2026年06月17日\n3932 (株)Test ［ 情報・通信 ］\n【特色】IT企業\n【連結事業】game 85\n【業種】 通信サービス 時価総額順位 18/103社</div>".encode(), status="ok", url=url)
+        if "Idtl70" in url:
+            return SimpleNamespace(body="""<iframe src="https://graph.sbisec.co.jp/sbiscreener/analysis?token=x"></iframe>
+<a onclick="window.open('/ETGate/?sw_param1=report_summary','report_summary')">業績</a>
+<a onclick="window.open('/ETGate/?sw_param1=report_disclose','report_disclose')">適時開示</a>""".encode(), status="ok", url=url)
+        if "graph.sbisec.co.jp" in url:
+            return SimpleNamespace(body="<div>企業スコア総合 6.0 財務健全性 7.0 収益性 5.0 割安性 8.0 安定性 3.0 株価モメンタム 6.0</div>".encode(), status="ok", url=url)
+        if "report_summary" in url:
+            return SimpleNamespace(body="<table></table>".encode(), status="ok", url=url)
+        if "report_disclose" in url:
+            return SimpleNamespace(body="<table></table>".encode(), status="ok", url=url)
+        return SimpleNamespace(body=b"", status="ok", url=url)
+
+
+def test_missing_pdf_link_without_marker_is_source_changed(monkeypatch, tmp_path):
+    _set_fake_cookie(monkeypatch)
+    _set_mocks(monkeypatch, ScorePageNoPdfClient)
+    import fetch_stock_info as fsi
+    result = fsi.fetch_stock_info("3932", cache_dir=tmp_path)
+    assert result["sections"]["stock_reports"]["status"] == "error"
+    assert any(
+        e["section"] == "stock_reports" and e["code"] == "source_changed"
+        for e in result["errors"]
+    )
+
+
 class InfoNotAvailableClient:
     """Analysis tab has no iframe/popup links, but explicit per-section markers."""
     def fetch_html(self, url, cookie_header=""):
@@ -361,8 +358,18 @@ def test_json_output_only_to_stdout(monkeypatch, tmp_path, capsys):
     fsi.main(["3932", "--cache-dir", str(tmp_path)])
     captured = capsys.readouterr()
     parsed = json.loads(captured.out)
-    assert_valid_stock_info(parsed)
+    assert_stock_info_contract(parsed)
     assert "ERROR" not in captured.out
+
+
+def test_cli_usage_error_is_json(capsys):
+    """No arguments -> valid usage_error JSON, not argparse traceback."""
+    from fetch_stock_info import main
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"][0]["code"] == "usage_error"
 
 
 def test_main_outputs_json_when_cookie_store_raises(monkeypatch, capsys):

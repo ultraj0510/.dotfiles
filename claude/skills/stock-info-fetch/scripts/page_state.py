@@ -63,11 +63,13 @@ def _has_login_form(html: str) -> bool:
     soup = visible_soup(html)
     for form in soup.find_all("form"):
         # Find at least one non-change password input (not just the first).
-        pw_inputs = form.find_all("input", type="password")
+        pw_inputs = form.find_all("input")
         has_login_pw = False
-        for pw in pw_inputs:
-            pw_name = (pw.get("name") or "").lower()
-            pw_id = (pw.get("id") or "").lower()
+        for inp in pw_inputs:
+            if (inp.get("type") or "").lower() != "password":
+                continue
+            pw_name = (inp.get("name") or "").lower()
+            pw_id = (inp.get("id") or "").lower()
             if not any(kw in pw_name or kw in pw_id
                        for kw in ("new", "confirm", "current", "old", "change")):
                 has_login_pw = True

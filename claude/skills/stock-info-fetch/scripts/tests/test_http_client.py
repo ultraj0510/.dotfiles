@@ -135,6 +135,19 @@ def test_fetch_html_decodes_body():
     assert result.body == "<html>テスト</html>".encode("utf-8")
 
 
+def test_rejects_plain_http_final_url():
+    """Final response URL is HTTP — must be rejected."""
+    transport = FakeTransport(
+        body=b"<html>ok</html>",
+        final_url="http://site1.sbisec.co.jp/ETGate/",
+    )
+    result = SafeHttpClient(transport).fetch_html(
+        "https://site1.sbisec.co.jp/ETGate/",
+        cookie_header="session=secret",
+    )
+    assert result.status == "insecure_url"
+
+
 def test_rejects_plain_http_before_cookie_attachment():
     transport = FakeTransport(final_url="http://site1.sbisec.co.jp/ETGate/")
     result = SafeHttpClient(transport).fetch_html(

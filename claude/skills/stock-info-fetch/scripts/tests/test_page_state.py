@@ -31,6 +31,12 @@ def test_classify_page_state(html, url, expected):
     assert classify_page_state(html, url) == expected
 
 
+def test_password_type_is_case_insensitive():
+    """type='PASSWORD' must be detected as login form."""
+    html = "<form action='/login'><input name='userid'><input type='PASSWORD'></form>"
+    assert classify_page_state(html, "https://site1.sbisec.co.jp/ETGate/") == "auth_expired"
+
+
 def test_visible_soup_strips_hidden_elements():
     html = """<div>visible</div><script>hidden</script>
     <div style="display:none">also hidden</div>

@@ -40,7 +40,9 @@ Cookie切れの場合は `auth_expired` エラーを返す。
 
 ## 完了証拠
 
-- stdoutがvalid JSONである
-- `ticker`、`schema_version`、7セクションが存在する
-- `errors`に失敗セクションが明示される
-- stdout、stderr、キャッシュに認証値や期限付きURLパラメータが含まれない
+- 自動テストが全件PASS（102+件）
+- 認証付き実接続スモーク (`RUN_SBI_SMOKE=1`) がPASS
+- `price`と`company_profile`が有用データを持つ
+- STOCK REPORTSの表構造が期間・単位付きで取得できる
+- 2回目実行が検証済みcache hitになる (`cache.hit=true`)
+- stdout、stderr、キャッシュに認証値・秘密パラメータが含まれない

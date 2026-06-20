@@ -65,7 +65,10 @@ class SafeHttpClient:
             headers["Cookie"] = cookie_header
         try:
             response = self.transport.open(Request(url, headers=headers), timeout=30)
-            final_host = urlparse(response.geturl()).hostname
+            final_parsed = urlparse(response.geturl())
+            if final_parsed.scheme != "https":
+                return FetchResult(None, "insecure_url", clean_url(response.geturl()), "")
+            final_host = final_parsed.hostname
             if final_host in AUTH_REDIRECT_HOSTS:
                 return FetchResult(None, "auth_expired", clean_url(response.geturl()), "")
             if final_host not in ALLOWED_HOSTS:
@@ -78,9 +81,12 @@ class SafeHttpClient:
                 response.headers.get_content_type(),
             )
         except URLError as exc:
-            if "auth_expired" in str(exc):
+            exc_msg = str(exc)
+            if "auth_expired" in exc_msg:
                 status = "auth_expired"
-            elif "unexpected_host" in str(exc):
+            elif "insecure_url" in exc_msg:
+                status = "insecure_url"
+            elif "unexpected_host" in exc_msg:
                 status = "unexpected_host"
             else:
                 status = "fetch_failed"

@@ -22,7 +22,7 @@ _DISCLOSURES_HTML_EMPTY = "<div>適時開示はありません</div>"
 
 
 def test_parse_disclosures_basic():
-    result = parse_disclosures(_DISCLOSURES_HTML, as_of=datetime(2026, 6, 19, tzinfo=JST))
+    result = parse_disclosures(_DISCLOSURES_HTML, as_of=datetime(2026, 6, 19, 15, 30, tzinfo=JST))
     assert result["status"] == "ok"
     data = result["data"]
     assert len(data) == 3
@@ -55,4 +55,12 @@ def test_disclosures_excludes_future_items():
     html = '<table><tr><td>2026/12/01 10:00</td><td>IR</td><td><a href="/future.pdf">未来の開示</a></td></tr></table>'
     result = parse_disclosures(html, as_of=datetime(2026, 6, 20, tzinfo=JST))
     assert result["status"] in ("not_available", "source_changed")
+    assert result["data"] == []
+
+
+def test_disclosures_excludes_same_day_future_time():
+    """Disclosure at 23:00 when as_of is 12:00 must be excluded."""
+    JST = timezone(timedelta(hours=9))
+    html = "<table><tr><td>2026/06/20 23:00</td><td>IR</td><td><a href='/x.pdf'>x</a></td></tr></table>"
+    result = parse_disclosures(html, as_of=datetime(2026, 6, 20, 12, 0, tzinfo=JST))
     assert result["data"] == []

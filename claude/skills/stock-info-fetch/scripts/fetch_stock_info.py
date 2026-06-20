@@ -173,10 +173,15 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                 _add_error(result, "stock_reports", "source_changed",
                            "Score iframe not found in analysis page", analysis_fetch.url)
         elif score_fetch_ok:
-            result["sections"]["stock_reports"] = {
-                "status": "not_available", "data": {},
-                "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
-            }
+            # Score page was fetched, check for explicit not-available marker
+            if _has_not_available_marker(score_html, "STOCK REPORTSはありません", "レポートはありません"):
+                result["sections"]["stock_reports"] = {
+                    "status": "not_available", "data": {},
+                    "source": {"url": analysis_fetch.url, "fetched_at": now_iso},
+                }
+            else:
+                _add_error(result, "stock_reports", "source_changed",
+                           "PDF link not found in score page", score_fetch.url)
         else:
             _add_error(result, "stock_reports",
                        "fetch_failed",
@@ -321,7 +326,14 @@ def _fetch_and_parse_pdf(client: SafeHttpClient, pdf_url: str) -> dict:
 def main(cli_args: list[str] | None = None):
     import argparse
 
-    parser = argparse.ArgumentParser(
+    class _JsonErrorParser(argparse.ArgumentParser):
+        def error(self, message):
+            result = _error_result("unknown", "usage_error", message)
+            json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+            sys.stdout.write("\n")
+            sys.exit(1)
+
+    parser = _JsonErrorParser(
         description="SBI securities from designated ticker investment fact data retrieval"
     )
     parser.add_argument("ticker", help="Domestic stock code (example: 3932)")

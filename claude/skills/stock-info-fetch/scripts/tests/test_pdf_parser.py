@@ -47,7 +47,7 @@ def test_parse_stock_report_pdf_basic(tmp_path):
     data = result["data"]
     assert "2026-06-15" in data.get("report_date", "")
     assert "ゲーム開発" in data.get("company_overview", "")
-    assert "per" in data.get("key_metrics", {})
+    assert data["key_metrics"].get("per", {}).get("value") == 15.2
     assert "上方修正" in data.get("changes", "")
     assert "為替" in data.get("risk_factors", "")
 
@@ -90,5 +90,18 @@ def test_extract_key_metrics_uses_table_data():
     from pdf_parser import _extract_key_metrics
     tables = [["指標", "値", "単位"], ["PER", "15.2", "倍"], ["PBR", "1.85", "倍"]]
     result = _extract_key_metrics("no regex matches here", tables)
-    assert result.get("per") == 15.2
-    assert result.get("pbr") == 1.85
+    assert result["per"] == {"value": 15.2, "unit": "倍"}
+    assert result["pbr"] == {"value": 1.85, "unit": "倍"}
+
+
+def test_extracts_periodized_performance_from_tables():
+    from pdf_parser import _extract_performance_data
+    tables = [
+        ["", "2026/03 実績", "2027/03 予想", "単位"],
+        ["売上高", "100,000", "120,000", "百万円"],
+        ["営業利益", "10,000", "12,500", "百万円"],
+    ]
+    result = _extract_performance_data("", tables)
+    assert len(result["actual"]) == 2
+    assert result["actual"][0] == {"metric": "売上高", "period": "2026/03", "value": 100000.0, "unit": "百万円"}
+    assert result["forecast"][1]["period"] == "2027/03"

@@ -18,6 +18,32 @@ EXPECTED_SECTIONS = {
 }
 
 
+def _is_valid_cache(data: object, ticker: str, today: str) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("schema_version") != "1.0" or data.get("ticker") != ticker:
+        return False
+    cache = data.get("cache")
+    if not isinstance(cache, dict) or cache.get("date") != today:
+        return False
+    sections = data.get("sections")
+    if not isinstance(sections, dict) or set(sections) != EXPECTED_SECTIONS:
+        return False
+    for section in sections.values():
+        if not isinstance(section, dict):
+            return False
+        if section.get("status") not in VALID_STATUSES:
+            return False
+        if "data" not in section:
+            return False
+        source = section.get("source")
+        if not isinstance(source, dict):
+            return False
+        if not isinstance(source.get("url"), str):
+            return False
+    return True
+
+
 class CacheManager:
     def __init__(self, cache_dir: Path | None = None):
         self.cache_dir = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
@@ -38,22 +64,10 @@ class CacheManager:
             return None
         try:
             data = json.loads(path.read_text())
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, Exception):
             return None
-        if data.get("schema_version") != "1.0":
+        if not _is_valid_cache(data, ticker, self._today()):
             return None
-        if not isinstance(data.get("ticker"), str):
-            return None
-        if data.get("cache", {}).get("date") != self._today():
-            return None
-        sections = data.get("sections")
-        if not isinstance(sections, dict) or set(sections.keys()) != EXPECTED_SECTIONS:
-            return None
-        for name, section in sections.items():
-            if not isinstance(section, dict):
-                return None
-            if section.get("status") not in VALID_STATUSES:
-                return None
         data["cache"]["hit"] = True
         return data
 
