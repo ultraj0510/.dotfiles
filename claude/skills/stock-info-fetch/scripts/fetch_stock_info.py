@@ -26,6 +26,7 @@ from source_urls import (
 )
 from url_cleaner import clean_url
 from sbi_stock_parser import (
+    normalize_ticker,
     ticker_is_valid,
     parse_price,
     select_price_source,
@@ -44,8 +45,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
                      cache_dir: Path | None = None) -> dict:
     """Main orchestrator. Fetches all 7 sections, returns assembled JSON dict."""
 
-    # 1. Validate ticker
-    if not ticker_is_valid(ticker):
+    # 1. Normalize and validate ticker
+    ticker = normalize_ticker(ticker)
+    if ticker is None:
         return _error_result("", "ticker_invalid", "Invalid ticker format")
 
     # 2. Check cache

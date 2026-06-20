@@ -50,15 +50,15 @@ def build_analysis_api_url(iframe_src: str) -> str | None:
         return None
     if parsed.hostname not in ("graph.sbisec.co.jp",):
         return None
-    if not parsed.path.startswith("/sbiscreener/analysis"):
+    if parsed.path != "/sbiscreener/analysis":
         return None
     params = parse_qs(parsed.query)
     token = params.get("token", [None])[0]
     sym = params.get("sym", [None])[0]
     if not token or not sym:
         return None
-    # Validate RIC format: digits+optional letter followed by .T
-    if not re.match(r"^\d{3,4}[A-Z]?\.T$", sym):
+    # Validate RIC: exactly \d{4}\.T or \d{3}[A-Z]\.T
+    if not re.match(r"^(\d{4}|\d{3}[A-Z])\.T$", sym):
         return None
     # Validate token: hex string only
     if not re.match(r"^[0-9A-Fa-f]{32,}$", token):
