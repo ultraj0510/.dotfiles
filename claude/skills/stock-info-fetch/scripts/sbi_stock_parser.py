@@ -98,9 +98,9 @@ def select_price_source(price_tab_result, api_target_price, api_last_update,
         if header_price:
             return {"status": "ok", "data": header_price}
 
-    # Priority 3.5: price tab not_available but has previous_close
-    if (price_tab_result and price_tab_result.get("status") == "not_available"
-            and price_tab_result.get("data", {}).get("previous_close")):
+    # Priority 3.5: price tab has no live quote but previous_close is available
+    if (price_tab_result and price_tab_result.get("data", {}).get("previous_close")
+            and not price_tab_result.get("data", {}).get("current_price")):
         return {
             "status": "ok",
             "data": {
@@ -164,10 +164,6 @@ def parse_price(html: str, as_of: datetime | None = None) -> dict:
         # Collect text from the label cell and the next few cells
         context_cells = cells[cell_idx:cell_idx + 3]
         row_text = " ".join(c.get_text(" ", strip=True) for c in context_cells)
-
-        # Market-closed marker: "--" or "－" in the value position
-        if re.search(r"現在値\s*[-－]+", row_text):
-            return {"status": "not_available", "data": data}
 
         # Parse current_price — match number+円
         price_match = re.search(r"([\d,]+\.?\d*)\s*円", row_text)

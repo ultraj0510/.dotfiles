@@ -260,9 +260,9 @@ def fetch_stock_info(ticker: str, refresh: bool = False,
         status_counts[st] = status_counts.get(st, 0) + 1
     # Usable: no errors AND essential sections are ok or not_available (not missing)
     essential = {"price", "company_profile", "company_scores"}
-    # Usable: no errors, all sections ok (not just essential)
+    # Usable: no errors, all sections ok (price may be not_available when market closed)
     usable = status_counts["error"] == 0 and all(
-        result["sections"].get(s, {}).get("status") == "ok"
+        result["sections"].get(s, {}).get("status") in ("ok", "not_available")
         for s in result["sections"]
     )
     result["summary"] = {
