@@ -330,14 +330,17 @@ def _has_login_form(html: str) -> bool:
     """
     soup = _clean_soup(html)
     for form in soup.find_all("form"):
-        # Find a non-change password input — required for any login detection.
-        pw = form.find("input", type="password")
-        if pw is None:
-            continue
-        pw_name = (pw.get("name") or "").lower()
-        pw_id = (pw.get("id") or "").lower()
-        if any(kw in pw_name or kw in pw_id
-               for kw in ("new", "confirm", "current", "old", "change")):
+        # Find at least one non-change password input (not just the first).
+        pw_inputs = form.find_all("input", type="password")
+        has_login_pw = False
+        for pw in pw_inputs:
+            pw_name = (pw.get("name") or "").lower()
+            pw_id = (pw.get("id") or "").lower()
+            if not any(kw in pw_name or kw in pw_id
+                       for kw in ("new", "confirm", "current", "old", "change")):
+                has_login_pw = True
+                break
+        if not has_login_pw:
             continue
 
         # User-id field only counts if the action is not a known non-login path.
@@ -348,8 +351,6 @@ def _has_login_form(html: str) -> bool:
             continue
 
         for inp in form.find_all("input"):
-            if inp is pw:
-                continue
             name = (inp.get("name") or "").lower()
             f_id = (inp.get("id") or "").lower()
             if name in ("userid", "user_id", "username", "login_id"):
@@ -357,10 +358,20 @@ def _has_login_form(html: str) -> bool:
             if f_id in ("userid", "user_id", "username", "login_id"):
                 return True
 
-        # Action path containing /login or ending in /login.
-        if action and ("/login" in action or action.endswith("login")):
+        # Action path: check segments for exact "login" path component.
+        if _action_is_login(action):
             return True
     return False
+
+
+def _action_is_login(action: str) -> bool:
+    """Check if the form action path contains 'login' as a complete segment."""
+    if not action:
+        return False
+    from urllib.parse import urlparse as _urlparse
+    path = _urlparse(action).path
+    segments = [s for s in path.split("/") if s]
+    return "login" in segments
 
 
 def _decode_html(body: bytes | None) -> str:
