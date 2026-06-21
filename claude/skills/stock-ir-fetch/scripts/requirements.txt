@@ -1,0 +1,9 @@
+beautifulsoup4>=4.12.3
+yfinance>=1.2.0
+pdfplumber>=0.11.4
+Pillow>=12.0.0
+pypdfium2>=4.30.0
+pytesseract>=0.3.13
+pytest>=9.0.0
+reportlab>=4.2.0
+tldextract>=5.1.0
