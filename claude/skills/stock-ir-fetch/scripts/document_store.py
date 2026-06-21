@@ -156,7 +156,19 @@ def _validate_manifest(payload, ticker):
     # status must be valid
     if payload.get("status") not in ("success", "partial", "failed", "unsupported"):
         return False
-    # documents must be a list of dicts with document_id and sha256
+    # sync must be a dict with required fields
+    sync = payload.get("sync")
+    if not isinstance(sync, dict):
+        return False
+    if not isinstance(sync.get("mode"), str):
+        return False
+    # summary must be a dict
+    if not isinstance(payload.get("summary"), dict):
+        return False
+    # errors must be a list
+    if not isinstance(payload.get("errors"), list):
+        return False
+    # documents must be a list of dicts with 24-char hex document_id and 64-char hex sha256
     docs = payload.get("documents")
     if not isinstance(docs, list):
         return False
@@ -167,6 +179,8 @@ def _validate_manifest(payload, ticker):
         did = doc.get("document_id")
         sha = doc.get("sha256")
         if not isinstance(did, str) or not isinstance(sha, str):
+            return False
+        if len(did) != 24 or not all(c in "0123456789abcdef" for c in did):
             return False
         if len(sha) != 64 or not all(c in "0123456789abcdef" for c in sha):
             return False

@@ -76,6 +76,10 @@ def test_live_sync(ticker, tmp_path):
     docs = initial.get("documents", [])
     assert len(docs) > 0, "No documents saved"
 
+    # Must be usable when scan is complete
+    if initial["sync"]["index_parse_status"] == "ok":
+        assert initial["summary"]["usable"] is True, "Complete scan must be usable"
+
     # At least one must have a standard IR category
     ir_cats = {"earnings_release", "earnings_presentation", "securities_report",
                "management_plan", "forecast_revision", "business_kpi", "material_disclosure"}
@@ -89,6 +93,15 @@ def test_live_sync(ticker, tmp_path):
     # Verify no duplicates in document_ids
     doc_ids = [d["document_id"] for d in docs]
     assert len(doc_ids) == len(set(doc_ids)), f"Duplicate document_ids: {len(doc_ids)} vs {len(set(doc_ids))}"
+
+    # All document_ids must be 24-char hex
+    for did in doc_ids:
+        assert len(did) == 24 and all(c in "0123456789abcdef" for c in did), f"Bad doc_id: {did}"
+
+    # No TDnet/EDINET URLs in documents
+    for d in docs:
+        for kw in ("tdnet", "edinet"):
+            assert kw not in str(d).lower(), f"TDnet/EDINET reference found: {d.get('title','')[:60]}"
 
     for marker in ("Cookie", "Authorization", "token=", "password", ".tmp"):
         assert marker not in first.stdout

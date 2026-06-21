@@ -112,6 +112,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
 
     scan = scan_index(index_url, window_start, window_end, domain, http)
     if scan["status"] == "error":
+        # Do not overwrite existing manifest on failed sync
         return _empty_manifest(normalized, now, "failed", [{"section": "index", "code": "index_fetch_failed", "message": "All index pages failed to fetch"}])
     if scan["status"] == "unsupported":
         result = _empty_manifest(normalized, now, "unsupported",
@@ -119,21 +120,24 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         result["sync"]["mode"] = mode
         result["sync"]["window_start"] = window_start.isoformat()
         result["sync"]["window_end"] = window_end.isoformat()
-        store.save_manifest(normalized, result)
+        # Preserve existing manifest — do not overwrite on unsupported
         registry.update_sync_times(normalized, now, None)
         return result
-    # Collect delivery domains from index entries (block TDnet/EDINET)
-    _TDNET_HOSTS = {"tdnet", "disclosure.edinet-fsa", "disclosure2.edinet-fsa", "eoldisclosure"}
+    # Collect delivery domains (block TDnet/EDINET by host AND path)
+    _TDNET_PATTERNS = ("tdnet", "disclosure.edinet-fsa", "disclosure2.edinet-fsa",
+                       "eoldisclosure", "edinet-fsa.go.jp")
     delivery_domains = set()
     for entry in scan["entries"]:
         parsed = urlparse(entry["url"])
         host = parsed.hostname or ""
         host_lower = host.lower()
+        path_lower = parsed.path.lower()
+        # Block known TDnet/EDINET hosts AND URL paths
+        if any(td in host_lower or f"/{td}/" in path_lower for td in _TDNET_PATTERNS):
+            continue
         entry_domain = registrable_domain(host)
         if entry_domain and entry_domain != domain:
-            # Block known TDnet/EDINET hosts
-            if not any(td in host_lower for td in _TDNET_HOSTS):
-                delivery_domains.add(entry_domain)
+            delivery_domains.add(entry_domain)
 
     # Merge with previous manifest
     prev_docs = {}
@@ -166,12 +170,14 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     }
 
     current_doc_ids = set()
+    discovered_ids = set()
     seen_entry_ids = set()
     for entry in scan["entries"]:
         entry_doc_id = document_id(entry["url"], entry["published_at"])
         if entry_doc_id in seen_entry_ids:
             continue
         seen_entry_ids.add(entry_doc_id)
+        discovered_ids.add(entry_doc_id)
 
         category = classify_document(entry["title"], entry.get("context", ""))
         if category is None:
@@ -220,7 +226,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
                     in_window = window_start <= pub_date <= window_end
                 except ValueError:
                     pass
-            if scan["complete"] and in_window:
+            if scan["complete"] and in_window and doc_id not in discovered_ids:
                 doc["listing_status"] = "no_longer_listed"
                 manifest["documents"].append(doc)
                 manifest["summary"]["no_longer_listed"] += 1

@@ -65,8 +65,8 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
 
         if depth < max_depth:
             for link_url in page_links:
-                if link_url not in visited and link_url not in scheduled:
-                    if len(visited) + len(scheduled) < max_pages:
+                if link_url not in scheduled:
+                    if len(scheduled) < max_pages:
                         scheduled.add(link_url)
                         to_visit.append((link_url, depth + 1))
                     else:
@@ -197,17 +197,24 @@ def _is_document_extension(href_lower):
 def _date_near_link(link_element, date_str):
     """Check that the date is in the link's immediate container."""
     for depth, parent in enumerate(link_element.parents):
-        if parent.name == "body":
+        if parent.name == "body" or depth > 4:
             return False
+        text = parent.get_text(" ", strip=True)
+        if _extract_date(text) != date_str:
+            continue
+        # Date found — verify it's close (not a distant heading)
         if parent.name in ("tr", "li", "article", "section"):
-            # Re-extract date from container to verify semantic association
-            parent_text = parent.get_text(" ", strip=True)
-            if _extract_date(parent_text) == date_str:
+            return True
+        if parent.name == "div":
+            # Check if this is a card/item container (not a page section)
+            classes = " ".join(parent.get("class", [])).lower() if parent.get("class") else ""
+            digit_count = sum(1 for c in text if c.isdigit())
+            if digit_count <= 30 or any(
+                kw in classes for kw in ("card", "item", "entry", "block", "post", "article", "result", "list")
+            ):
                 return True
-            # Continue climbing if date not in this container
-        if parent.name == "div" and depth <= 3:
-            parent_text = parent.get_text(" ", strip=True)
-            if _extract_date(parent_text) == date_str:
+            # Otherwise this might be a large container — require being close
+            if depth <= 2:
                 return True
     return False
 
