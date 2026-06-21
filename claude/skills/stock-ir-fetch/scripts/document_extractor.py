@@ -92,7 +92,7 @@ def _extract_pdf(body, ocr_engine):
                 "text": text,
                 "page_count": page_count,
                 "quality_warnings": ["ocr_unavailable", msg],
-                "error": None,
+                "error": {"code": "ocr_unavailable", "message": msg},
             }
 
     return {

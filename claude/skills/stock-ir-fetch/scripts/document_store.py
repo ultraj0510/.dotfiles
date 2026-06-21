@@ -52,9 +52,10 @@ class DocumentStore:
         doc_id = document_id(entry["url"], entry["published_at"])
         doc_dir = self.doc_path(ticker, doc_id)
         version_dir = doc_dir / "versions" / fetched["sha256"]
-        is_new = not version_dir.exists()
+        is_new_document = not doc_dir.exists()
+        is_new_version = not version_dir.exists()
 
-        if is_new:
+        if is_new_version:
             version_dir.mkdir(parents=True, exist_ok=True)
 
             # Save original
@@ -99,9 +100,10 @@ class DocumentStore:
         return {
             "document_id": doc_id,
             "sha256": fetched["sha256"],
-            "is_new_document": is_new,
+            "is_new_document": is_new_document,
+            "is_new_version": is_new_version,
             "local_path": str(version_dir.relative_to(self.root)),
-        }, is_new
+        }, is_new_version
 
     def save_manifest(self, ticker, manifest):
         path = self.manifest_path(ticker)

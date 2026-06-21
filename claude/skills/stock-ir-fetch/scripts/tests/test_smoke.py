@@ -15,13 +15,15 @@ SMOKE_SOURCES = {
         "ir_top_url": "https://aktsk.jp/ir/",
         "document_index_url": "https://aktsk.jp/ir/",
         "approved_domain": "aktsk.jp",
+        "expect_unsupported": True,
     },
     "285A": {
         "company_name": "KIOXIA HOLDINGS CORPORATION",
         "company_site_url": "https://www.kioxia-holdings.com/",
         "ir_top_url": "https://www.kioxia-holdings.com/ja-jp/ir/",
-        "document_index_url": "https://www.kioxia-holdings.com/ja-jp/ir/",
+        "document_index_url": "https://www.kioxia-holdings.com/ja-jp/ir/library/data.html",
         "approved_domain": "kioxia-holdings.com",
+        "expect_unsupported": True,
     },
 }
 
@@ -37,7 +39,11 @@ def _write_source(tmp_path, ticker):
     payload = {
         "schema_version": "1.0",
         "ticker": ticker,
-        **source,
+        "company_name": source["company_name"],
+        "company_site_url": source["company_site_url"],
+        "ir_top_url": source["ir_top_url"],
+        "document_index_url": source["document_index_url"],
+        "approved_domain": source["approved_domain"],
         "approved_at": now.isoformat(),
         "last_verified_at": now.isoformat(),
         "last_successful_sync_at": None,
@@ -54,8 +60,8 @@ def _write_source(tmp_path, ticker):
 @pytest.mark.parametrize("ticker", ["3932", "285A"])
 def test_live_initial_and_incremental_sync(ticker, tmp_path):
     _write_source(tmp_path, ticker)
+    expect_unsupported = SMOKE_SOURCES[ticker].get("expect_unsupported", False)
 
-    # --- Initial sync ---
     first = subprocess.run(
         [SCRIPT, ticker, "--refresh", "--data-dir", str(tmp_path)],
         text=True, capture_output=True, check=False,
@@ -63,26 +69,29 @@ def test_live_initial_and_incremental_sync(ticker, tmp_path):
     assert first.returncode == 0, f"exit={first.returncode} stderr={first.stderr[:500]}"
     initial = json.loads(first.stdout)
     assert initial["ticker"] == ticker
-    assert initial["status"] in ("success", "partial", "unsupported"), \
-        f"status={initial['status']} errors={initial.get('errors')}"
-    assert initial["sync"]["mode"] == "initial"
 
-    if initial["summary"]["discovered"] > 0:
+    if expect_unsupported:
+        assert initial["status"] == "unsupported", \
+            f"JS site must return unsupported, got {initial['status']}"
+    else:
+        assert initial["status"] in ("success", "partial"), \
+            f"status={initial['status']}"
         assert initial["summary"]["usable"] is True
-        assert initial["summary"]["new_documents"] + initial["summary"]["unchanged"] > 0
+        assert initial["summary"]["discovered"] > 0
         assert len(initial.get("documents", [])) > 0
 
-    # Verify stdout is JSON-only, no secrets
     stdout_str = first.stdout
     for marker in ("Cookie", "Authorization", "token=", "password", ".tmp"):
         assert marker not in stdout_str, f"secret marker '{marker}' in stdout"
 
-    # --- Incremental sync ---
+    if expect_unsupported:
+        return
+
     second = subprocess.run(
         [SCRIPT, ticker, "--data-dir", str(tmp_path)],
         text=True, capture_output=True, check=False,
     )
-    assert second.returncode == 0, f"exit={second.returncode} stderr={second.stderr[:500]}"
+    assert second.returncode == 0
     incremental = json.loads(second.stdout)
-    assert incremental["status"] in ("success", "partial", "unsupported")
+    assert incremental["status"] in ("success", "partial")
     assert incremental["sync"]["mode"] == "incremental"

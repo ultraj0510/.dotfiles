@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from document_classifier import classify_document
@@ -109,6 +110,23 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     scan = scan_index(index_url, window_start, window_end, domain, http)
     if scan["status"] == "unsupported":
         return _empty_manifest(normalized, now, "unsupported", [{"section": "index", "code": "unsupported", "message": "Static HTML index not supported"}])
+    if scan["status"] == "error":
+        return _empty_manifest(normalized, now, "failed", [{"section": "index", "code": "index_fetch_failed", "message": "All index pages failed to fetch"}])
+
+    # Collect delivery domains from index entries
+    delivery_domains = set()
+    for entry in scan["entries"]:
+        parsed = urlparse(entry["url"])
+        host = parsed.hostname or ""
+        entry_domain = registrable_domain(host)
+        if entry_domain and entry_domain != domain:
+            delivery_domains.add(entry_domain)
+
+    # Merge with previous manifest
+    prev_docs = {}
+    if prev_manifest:
+        for doc in prev_manifest.get("documents", []):
+            prev_docs[doc["document_id"]] = doc
 
     manifest = {
         "schema_version": "1.0",
@@ -125,7 +143,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
             "index_parse_status": scan["status"] if scan["complete"] else "incomplete",
         },
         "documents": [],
-        "errors": [],
+        "errors": list(prev_manifest.get("errors", [])) if prev_manifest else [],
         "summary": {
             "discovered": len(scan["entries"]),
             "new_documents": 0, "new_versions": 0, "unchanged": 0,
@@ -134,12 +152,13 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         },
     }
 
+    current_doc_ids = set()
     for entry in scan["entries"]:
         category = classify_document(entry["title"], entry.get("context", ""))
         if category is None:
             continue
 
-        fetched, fetch_err = fetch_document(entry["url"], allowed, set(), http)
+        fetched, fetch_err = fetch_document(entry["url"], allowed, delivery_domains, http)
         if fetch_err:
             manifest["errors"].append({"url": entry["url"], "code": fetch_err["code"], "message": fetch_err["message"]})
             manifest["summary"]["fetch_errors"] += 1
@@ -150,8 +169,11 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
             manifest["errors"].append({"url": entry["url"], "code": extraction["error"]["code"], "message": extraction["error"]["message"]})
             manifest["summary"]["extraction_errors"] += 1
 
-        version_info, is_new = store.save_version(normalized, entry, fetched, extraction, now)
-        if is_new:
+        version_info, is_new_version = store.save_version(normalized, entry, fetched, extraction, now)
+        doc_id = version_info["document_id"]
+        current_doc_ids.add(doc_id)
+
+        if is_new_version:
             if version_info["is_new_document"]:
                 manifest["summary"]["new_documents"] += 1
             else:
@@ -160,22 +182,35 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
             manifest["summary"]["unchanged"] += 1
 
         manifest["documents"].append({
-            "document_id": version_info["document_id"],
+            "document_id": doc_id,
             "sha256": fetched["sha256"],
             "category": category,
             "title": entry["title"],
             "published_at": entry["published_at"],
         })
 
+    # Carry forward unchanged documents from previous manifest
+    for doc_id, doc in prev_docs.items():
+        if doc_id not in current_doc_ids:
+            if scan["complete"]:
+                manifest["summary"]["no_longer_listed"] += 1
+            else:
+                # Incomplete scan — preserve old doc, don't count as unlisted
+                manifest["documents"].append(doc)
+                manifest["summary"]["unchanged"] += 1
+
+    if scan["errors"]:
+        manifest["status"] = "partial"
     if manifest["summary"]["fetch_errors"] > 0 or manifest["summary"]["extraction_errors"] > 0:
         manifest["status"] = "partial"
     manifest["summary"]["usable"] = (
-        manifest["summary"]["new_documents"] + manifest["summary"]["unchanged"] > 0
+        len(manifest["documents"]) > 0
         and scan["complete"]
     )
 
     store.save_manifest(normalized, manifest)
-    registry.update_sync_times(normalized, now, now if manifest["status"] in ("success", "partial") else None)
+    success_time = now if (manifest["status"] in ("success", "partial") and scan["complete"]) else None
+    registry.update_sync_times(normalized, now, success_time)
 
     return manifest
 

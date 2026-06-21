@@ -18,9 +18,10 @@ _ARCHIVE_LABELS = re.compile(
 )
 
 _JS_SHELL_MARKERS = re.compile(
-    r'<div\s+id="(?:root|app|ir-)',
+    r'<div\s+id="(?:root|app|ir-)'
+    r'|eir\.js|eir/'
+    r'|data-sly-|clientlib',
 )
-
 
 def scan_index(start_url, window_start, window_end, approved_domain, http_client,
                max_depth=2, max_pages=20):
@@ -46,10 +47,13 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
         result = http_client.fetch(url, {approved_domain}, 5 * 1024 * 1024)
         if result.status != "ok" or not result.body:
             errors.append({"url": url, "code": result.status, "message": "fetch failed"})
+            complete = False
             continue
 
         html = _decode(result.body)
         if not html:
+            errors.append({"url": url, "code": "decode_failed", "message": "Could not decode response"})
+            complete = False
             continue
 
         page_entries, page_links = _parse_index_page(html, url, window_start, window_end, approved_domain)
@@ -65,7 +69,6 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
 
     status = "ok"
     if not entries and not errors and visited:
-        # Check if pages look JS-only
         for u in list(visited)[:1]:
             r = http_client.fetch(u, {approved_domain}, 5 * 1024 * 1024)
             if r.body:
@@ -73,6 +76,8 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
                 if html and _JS_SHELL_MARKERS.search(html):
                     status = "unsupported"
                     break
+    if errors and not entries:
+        status = "error"
 
     return {
         "entries": entries,

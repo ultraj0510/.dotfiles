@@ -1,5 +1,6 @@
 import ipaddress
 import socket
+import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, build_opener
@@ -31,25 +32,26 @@ def resolve_addresses(host):
     return {item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
 
 
-def _safe_host(host):
-    try:
-        addresses = resolve_addresses(host)
-    except OSError:
-        return False
-    if not addresses:
-        return False
-    for value in addresses:
-        address = ipaddress.ip_address(value)
-        if not address.is_global:
-            return False
-    return True
-
-
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES_DEFAULT = 50 * 1024 * 1024
 CHUNK_SIZE = 65536
 TIMEOUT_SECONDS = 30
-CONNECT_TIMEOUT_SECONDS = 10
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Block automatic redirect following so _handle_redirect validates every hop."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+    def http_error_301(self, req, fp, code, msg, headers):
+        return fp
+    def http_error_302(self, req, fp, code, msg, headers):
+        return fp
+    def http_error_303(self, req, fp, code, msg, headers):
+        return fp
+    def http_error_307(self, req, fp, code, msg, headers):
+        return fp
+    def http_error_308(self, req, fp, code, msg, headers):
+        return fp
 
 
 def _sanitize_content_type(value):
@@ -90,7 +92,7 @@ class SafeHttpClient:
                 req = Request(url, method="GET")
                 req.add_header("User-Agent", "stock-ir-fetch/1.0")
                 req.add_header("Accept-Language", "ja,en;q=0.9")
-                opener = build_opener()
+                opener = build_opener(_NoRedirectHandler())
                 resp = opener.open(req, timeout=TIMEOUT_SECONDS)
             except Exception as e:
                 return FetchResult(None, "http_error", url, url, "", 0)
