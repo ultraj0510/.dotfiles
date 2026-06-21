@@ -3,7 +3,7 @@ import hashlib
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode
 
@@ -162,10 +162,20 @@ def _validate_manifest(payload, ticker):
         return False
     if sync.get("mode") not in ("none", "initial", "incremental", "full_reconcile"):
         return False
-    if not isinstance(sync.get("window_start"), (str, type(None))):
+    ws = sync.get("window_start")
+    we = sync.get("window_end")
+    if not isinstance(ws, (str, type(None))):
         return False
-    if not isinstance(sync.get("window_end"), (str, type(None))):
+    if not isinstance(we, (str, type(None))):
         return False
+    if ws and we:
+        try:
+            wsd = date.fromisoformat(ws)
+            wed = date.fromisoformat(we)
+        except (ValueError, TypeError):
+            return False
+        if wsd > wed:
+            return False
     # summary must be a dict with correct types
     summary = payload.get("summary")
     if not isinstance(summary, dict):
@@ -186,7 +196,7 @@ def _validate_manifest(payload, ticker):
     for e in errors:
         if not isinstance(e, dict):
             return False
-        if "section" not in e:
+        if not isinstance(e.get("section"), str):
             return False
         if not isinstance(e.get("code"), str):
             return False

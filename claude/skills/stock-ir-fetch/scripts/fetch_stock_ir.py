@@ -181,13 +181,13 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     discovered_ids = set()
     seen_entry_ids = set()
     for entry in scan["entries"]:
-        if _is_prohibited_url(entry["url"]):
-            continue
         entry_doc_id = document_id(entry["url"], entry["published_at"])
         if entry_doc_id in seen_entry_ids:
             continue
         seen_entry_ids.add(entry_doc_id)
         discovered_ids.add(entry_doc_id)
+        if _is_prohibited_url(entry["url"]):
+            continue
 
         category = classify_document(entry["title"], entry.get("context", ""))
         if category is None:
