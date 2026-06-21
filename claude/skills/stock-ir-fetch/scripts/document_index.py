@@ -142,14 +142,30 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
 
 
 def _nearest_block(element):
+    """Climb to a container that includes both date and link context.
+
+    Walk up ancestors and select the first block-level element whose text
+    contains at least two numeric tokens (typical for date + title) OR
+    the first <tr>/<li>/<article>/<section> encountered.
+    """
     for parent in element.parents:
         if parent.name == "td":
             row = parent.find_parent("tr")
             if row:
                 return row.get_text(" ", strip=True)
             return parent.get_text(" ", strip=True)
-        if parent.name in ("tr", "li", "article", "section", "div"):
+        if parent.name in ("tr", "li", "article", "section"):
             return parent.get_text(" ", strip=True)
+        if parent.name == "div":
+            text = parent.get_text(" ", strip=True)
+            digit_count = sum(1 for c in text if c.isdigit())
+            # Climb past thin wrappers; stop at card/article-like containers
+            classes = parent.get("class", [])
+            class_str = " ".join(classes).lower() if classes else ""
+            if digit_count >= 4 or any(
+                kw in class_str for kw in ("card", "item", "entry", "block", "post", "article")
+            ):
+                return text
         if parent.name == "body":
             break
     return element.get_text(" ", strip=True)

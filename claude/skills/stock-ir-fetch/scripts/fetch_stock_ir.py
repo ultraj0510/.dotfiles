@@ -108,10 +108,17 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     allowed = {domain}
 
     scan = scan_index(index_url, window_start, window_end, domain, http)
-    if scan["status"] == "unsupported":
-        return _empty_manifest(normalized, now, "unsupported", [{"section": "index", "code": "unsupported", "message": "Static HTML index not supported"}])
     if scan["status"] == "error":
         return _empty_manifest(normalized, now, "failed", [{"section": "index", "code": "index_fetch_failed", "message": "All index pages failed to fetch"}])
+    if scan["status"] == "unsupported":
+        result = _empty_manifest(normalized, now, "unsupported",
+            [{"section": "index", "code": "unsupported", "message": "Static HTML index not supported"}])
+        result["sync"]["mode"] = mode
+        result["sync"]["window_start"] = window_start.isoformat()
+        result["sync"]["window_end"] = window_end.isoformat()
+        store.save_manifest(normalized, result)
+        registry.update_sync_times(normalized, now, None)
+        return result
 
     # Collect delivery domains from index entries
     delivery_domains = set()
@@ -189,20 +196,35 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
             "published_at": entry["published_at"],
         })
 
-    # Carry forward unchanged documents from previous manifest
+    # Carry forward documents from previous manifest
     for doc_id, doc in prev_docs.items():
         if doc_id not in current_doc_ids:
             if scan["complete"]:
+                # Document no longer on index — keep with listing_status
+                doc["listing_status"] = "no_longer_listed"
+                manifest["documents"].append(doc)
                 manifest["summary"]["no_longer_listed"] += 1
             else:
-                # Incomplete scan — preserve old doc, don't count as unlisted
+                # Incomplete scan — preserve old doc unchanged
+                doc["listing_status"] = doc.get("listing_status", "listed")
                 manifest["documents"].append(doc)
                 manifest["summary"]["unchanged"] += 1
+        else:
+            # Still listed — ensure status
+            old = prev_docs[doc_id]
+            if old.get("listing_status") == "no_longer_listed":
+                # Previously unlisted doc reappeared
+                pass  # current version already added
 
+# unsupported handled before manifest build
     if scan["errors"]:
         manifest["status"] = "partial"
     if manifest["summary"]["fetch_errors"] > 0 or manifest["summary"]["extraction_errors"] > 0:
         manifest["status"] = "partial"
+    if scan["status"] == "error":
+        manifest["status"] = "failed"
+    if not manifest["documents"] and not scan["entries"]:
+        manifest["status"] = "unsupported"
     manifest["summary"]["usable"] = (
         len(manifest["documents"]) > 0
         and scan["complete"]

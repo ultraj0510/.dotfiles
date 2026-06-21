@@ -118,13 +118,23 @@ class SafeHttpClient:
                 return FetchResult(None, "unsafe_address", url, next_url, "", 0)
             return self._fetch(next_url, allowed_domains, max_bytes, redirect_count + 1)
 
-        return self._read_response(resp, url, max_bytes)
+        return self._read_response(resp, url, max_bytes, allowed_domains)
 
-    def _read_response(self, resp, url, max_bytes):
+    def _read_response(self, resp, url, max_bytes, allowed_domains):
+        final_url = getattr(resp, 'url', None)
+        if final_url and final_url != url:
+            final_parsed = urlparse(final_url)
+            if final_parsed.scheme != "https":
+                return FetchResult(None, "insecure_url", url, final_url, "", 0)
+            final_host = final_parsed.hostname or ""
+            if registrable_domain(final_host) not in allowed_domains:
+                return FetchResult(None, "unexpected_host", url, final_url, "", 0)
+            if not _safe_host_via(final_host, self._resolver):
+                return FetchResult(None, "unsafe_address", url, final_url, "", 0)
+
         content_type = _sanitize_content_type(
             resp.headers.get("Content-Type") or resp.headers.get("content-type", "")
         )
-        final_url = getattr(resp, 'url', url) or url
         body = bytearray()
         while True:
             chunk = resp.read(CHUNK_SIZE)

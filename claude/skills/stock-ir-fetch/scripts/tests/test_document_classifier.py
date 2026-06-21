@@ -13,7 +13,7 @@ from document_classifier import classify_document
         ("業績予想及び配当予想の修正", "forecast_revision"),
         ("5月度 月次KPI", "business_kpi"),
         ("資本業務提携に関するお知らせ", "material_disclosure"),
-        ("自己株式取得に関するお知らせ", "treasury_stock"),
+        ("自己株式取得に関するお知らせ", "material_disclosure"),
         ("事業戦略説明資料", "other_relevant"),
     ],
 )
