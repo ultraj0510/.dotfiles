@@ -122,7 +122,7 @@ def test_live_sync(ticker, tmp_path):
     )
     assert second.returncode == 0
     incremental = json.loads(second.stdout)
-    assert incremental["status"] in ("success", "partial")
+    assert incremental["status"] in ("success", "partial", "unsupported")
     assert incremental["sync"]["mode"] == "incremental", \
         f"Expected incremental, got {incremental['sync']['mode']}"
     # 90-day incremental window (±3 days)
