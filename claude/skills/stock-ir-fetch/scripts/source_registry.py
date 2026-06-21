@@ -117,15 +117,19 @@ def _validate_source(payload, ticker: str) -> bool:
         if not isinstance(val, str):
             return False
         try:
-            datetime.fromisoformat(val)
+            dt = datetime.fromisoformat(val)
         except ValueError:
+            return False
+        if dt.tzinfo is None:
             return False
     sync_at = payload.get("last_successful_sync_at")
     if sync_at is not None:
         if not isinstance(sync_at, str):
             return False
         try:
-            datetime.fromisoformat(sync_at)
+            dt = datetime.fromisoformat(sync_at)
         except ValueError:
+            return False
+        if dt.tzinfo is None:
             return False
     return True

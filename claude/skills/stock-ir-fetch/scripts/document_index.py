@@ -114,31 +114,82 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
         from safe_http import registrable_domain
         link_domain = registrable_domain(host_domain)
 
-        # Archive links for further crawling
-        if link_domain == approved_domain:
-            text = a.get_text(" ", strip=True)
-            href_lower = href.lower()
-            if _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
-                links.append(absolute)
+        text = a.get_text(" ", strip=True)
+        href_lower = href.lower()
 
-        # Extract date from nearby text
+        # Archive/index links for further crawling (not documents)
+        if link_domain == approved_domain:
+            if _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
+                if _looks_like_crawl_target(href_lower):
+                    links.append(absolute)
+
+        # Only treat as document candidate if link targets a file or document page
+        if not _looks_like_document_target(href_lower, text):
+            continue
+
+        # Extract date from the nearest semantic block (not a page-wide container)
         block = _nearest_block(a)
         date_str = _extract_date(block)
+        if not date_str:
+            continue
 
-        if date_str:
-            try:
-                entry_date = date.fromisoformat(date_str)
-                if window_start <= entry_date <= window_end:
-                    entries.append({
-                        "published_at": date_str,
-                        "title": a.get_text(" ", strip=True)[:200],
-                        "url": absolute,
-                        "context": block[:500],
-                    })
-            except ValueError:
-                pass
+        # Verify date is from the same row/card, not a distant heading
+        if not _date_near_link(a, date_str):
+            continue
+
+        try:
+            entry_date = date.fromisoformat(date_str)
+            if window_start <= entry_date <= window_end:
+                entries.append({
+                    "published_at": date_str,
+                    "title": text[:200],
+                    "url": absolute,
+                    "context": block[:500],
+                })
+        except ValueError:
+            pass
 
     return entries, links
+
+
+def _looks_like_crawl_target(href_lower):
+    """Archive/year index pages, not document files."""
+    return not _is_document_extension(href_lower)
+
+
+def _looks_like_document_target(href_lower, text):
+    """Link leads to a downloadable document or document detail page."""
+    if _is_document_extension(href_lower):
+        return True
+    # .html pages only count if the link text contains document keywords
+    if href_lower.endswith((".htm", ".html")):
+        doc_keywords = ("決算", "報告", "説明", "短信", "発表", "計画", "予想",
+                        "修正", "月次", "取得", "配当", "result", "report",
+                        "presentation", "plan", "forecast", "material")
+        return any(kw in text for kw in doc_keywords)
+    return False
+
+
+def _is_document_extension(href_lower):
+    """Binary document extensions only (not .html navigation pages)."""
+    return any(href_lower.endswith(ext) for ext in
+               (".pdf", ".xlsx", ".xls", ".csv"))
+
+
+def _date_near_link(link_element, date_str):
+    """Check that the date is in the link's immediate container, not a distant parent."""
+    # Walk up and check each ancestor — if we find the date text,
+    # verify it's in the first few ancestors, not at page level
+    for depth, parent in enumerate(link_element.parents):
+        if parent.name == "body":
+            return False
+        if parent.name in ("tr", "li", "article", "section"):
+            return True
+        if parent.name == "div":
+            parent_text = parent.get_text(" ", strip=True)
+            if date_str in parent_text and depth <= 3:
+                return True
+    return False
 
 
 def _nearest_block(element):

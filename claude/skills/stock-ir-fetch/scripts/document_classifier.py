@@ -15,7 +15,7 @@ _EXCLUDE_PATTERNS = [
 _INCLUDE_PATTERNS = [
     (re.compile(r"決算短信(?![\s\S]*説明)"), "earnings_release"),
     (re.compile(r"決算説明|決算(?:概要|発表)|financial\s*results?\s*(?:briefing|presentation)"), "earnings_presentation"),
-    (re.compile(r"有価証券報告書|有報|securities\s*report"), "securities_report"),
+    (re.compile(r"有価証券報告書|有報|四半期報告書|半期報告書|securities\s*report|quarterly\s*report|semi.?annual\s*report"), "securities_report"),
     (re.compile(r"(?:中期|中長期)経営計画|mid.?term\s*(?:management)?\s*plan"), "management_plan"),
     (re.compile(r"業績予想|配当予想|業績修正|forecast|revision"), "forecast_revision"),
     (re.compile(r"月次|マンスリー|monthly|KPI|売上高|営業利益"), "business_kpi"),
