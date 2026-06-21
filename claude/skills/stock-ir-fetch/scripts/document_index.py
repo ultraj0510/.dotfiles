@@ -13,9 +13,12 @@ _JAPANESE_DATE_PATTERNS = [
 ]
 
 _ARCHIVE_LABELS = re.compile(
-    r"archive|library|past|過去|年度|\d{4}",
+    r"archive|library|past|過去|年度|page=|p=\d+",
     re.IGNORECASE,
 )
+
+# Only match 4-digit years when in IR context (URL path contains ir/ or text has IR keyword)
+_YEAR_IN_IR = re.compile(r"(?:ir/|ir$|ライブラリ|アーカイブ|過去|資料一覧|決算|報告)", re.IGNORECASE)
 
 _JS_SHELL_MARKERS = re.compile(
     r'<div\s+id="(?:root|app|ir-)'
@@ -122,6 +125,11 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
             if _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
                 if _looks_like_crawl_target(href_lower):
                     links.append(absolute)
+            elif re.search(r"\d{4}", text) or re.search(r"\d{4}", href_lower):
+                # Year-only: require IR context to avoid crawling general news
+                combined = f"{text} {absolute}"
+                if _YEAR_IN_IR.search(combined) and _looks_like_crawl_target(href_lower):
+                    links.append(absolute)
 
         # Only treat as document candidate if link targets a file or document page
         if not _looks_like_document_target(href_lower, text):
@@ -171,23 +179,24 @@ def _looks_like_document_target(href_lower, text):
 
 
 def _is_document_extension(href_lower):
-    """Binary document extensions only (not .html navigation pages)."""
-    return any(href_lower.endswith(ext) for ext in
+    """Check URL path (not query/fragment) for document extensions."""
+    from urllib.parse import urlparse
+    path = urlparse(href_lower).path.lower()
+    return any(path.endswith(ext) for ext in
                (".pdf", ".xlsx", ".xls", ".csv"))
 
 
 def _date_near_link(link_element, date_str):
-    """Check that the date is in the link's immediate container, not a distant parent."""
-    # Walk up and check each ancestor — if we find the date text,
-    # verify it's in the first few ancestors, not at page level
+    """Check that the date is in the link's immediate container."""
     for depth, parent in enumerate(link_element.parents):
         if parent.name == "body":
             return False
         if parent.name in ("tr", "li", "article", "section"):
             return True
-        if parent.name == "div":
+        if parent.name == "div" and depth <= 3:
+            # Re-extract dates from parent to avoid encoding mismatch
             parent_text = parent.get_text(" ", strip=True)
-            if date_str in parent_text and depth <= 3:
+            if _extract_date(parent_text) == date_str:
                 return True
     return False
 

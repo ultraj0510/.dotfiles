@@ -2,7 +2,7 @@
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -162,7 +162,13 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     }
 
     current_doc_ids = set()
+    seen_entry_ids = set()
     for entry in scan["entries"]:
+        entry_doc_id = document_id(entry["url"], entry["published_at"])
+        if entry_doc_id in seen_entry_ids:
+            continue
+        seen_entry_ids.add(entry_doc_id)
+
         category = classify_document(entry["title"], entry.get("context", ""))
         if category is None:
             continue

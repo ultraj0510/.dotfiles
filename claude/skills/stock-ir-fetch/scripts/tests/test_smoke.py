@@ -19,7 +19,7 @@ SMOKE_SOURCES = {
         "company_name": "KIOXIA HOLDINGS CORPORATION",
         "company_site_url": "https://www.kioxia-holdings.com/",
         "ir_top_url": "https://www.kioxia-holdings.com/ja-jp/ir/",
-        "document_index_url": "https://www.kioxia-holdings.com/ja-jp/ir/library/data.html",
+        "document_index_url": "https://www.kioxia-holdings.com/ja-jp/ir/",
         "approved_domain": "kioxia-holdings.com",
     },
 }
@@ -51,7 +51,7 @@ def _write_source(tmp_path, ticker):
     reason="set RUN_IR_SMOKE=1 for live IR smoke test",
 )
 @pytest.mark.parametrize("ticker", ["3932", "285A"])
-def test_live_sync_detects_js_rendered_site(ticker, tmp_path):
+def test_live_sync(ticker, tmp_path):
     _write_source(tmp_path, ticker)
 
     first = subprocess.run(
@@ -61,18 +61,46 @@ def test_live_sync_detects_js_rendered_site(ticker, tmp_path):
     initial = json.loads(first.stdout)
     assert initial["ticker"] == ticker
 
-    # JS-rendered sites: must return unsupported or failed (never success)
-    assert initial["status"] in ("unsupported", "failed"), \
-        f"JS site must be unsupported/failed, got {initial['status']}"
+    if ticker == "3932":
+        assert initial["status"] in ("unsupported", "failed"), \
+            f"JS site must be unsupported/failed, got {initial['status']}"
+        for marker in ("Cookie", "Authorization", "token=", "password", ".tmp"):
+            assert marker not in first.stdout
+        return
 
-    # No secrets in stdout
+    # 285A: static HTML IR site — expect usable sync with documents
+    assert initial["status"] in ("success", "partial"), \
+        f"status={initial['status']} errors={initial.get('errors')}"
+    assert initial["sync"]["mode"] == "initial"
+    assert initial["summary"]["discovered"] > 0, "No entries discovered"
+    docs = initial.get("documents", [])
+    assert len(docs) > 0, "No documents saved"
+
+    # At least one must have a standard IR category
+    ir_cats = {"earnings_release", "earnings_presentation", "securities_report",
+               "management_plan", "forecast_revision", "business_kpi", "material_disclosure"}
+    doc_cats = {d.get("category") for d in docs}
+    assert doc_cats & ir_cats, f"No IR category in {doc_cats}. docs: {[(d['title'][:60], d['category']) for d in docs[:5]]}"
+
+    # If scan is complete, usable must be True
+    if initial["sync"]["index_parse_status"] == "ok":
+        assert initial["summary"]["usable"] is True
+
+    # Verify no duplicates in document_ids
+    doc_ids = [d["document_id"] for d in docs]
+    assert len(doc_ids) == len(set(doc_ids)), f"Duplicate document_ids: {len(doc_ids)} vs {len(set(doc_ids))}"
+
     for marker in ("Cookie", "Authorization", "token=", "password", ".tmp"):
         assert marker not in first.stdout
 
-    # Second run must not crash
+    # Incremental sync: must be incremental mode, 90-day window
     second = subprocess.run(
         [SCRIPT, ticker, "--data-dir", str(tmp_path)],
         text=True, capture_output=True, check=False,
     )
+    assert second.returncode == 0
     incremental = json.loads(second.stdout)
-    assert incremental["status"] in ("unsupported", "failed")
+    assert incremental["status"] in ("success", "partial")
+    assert incremental["sync"]["mode"] == "incremental", \
+        f"Expected incremental, got {incremental['sync']['mode']}"
+    assert incremental["summary"]["unchanged"] >= 0
