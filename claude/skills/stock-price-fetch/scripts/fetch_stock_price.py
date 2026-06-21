@@ -29,7 +29,9 @@ def _error(code, message, retryable=False):
     return {"code": code, "message": message, "retryable": retryable}
 
 
-def _empty_series(status="not_available", fetched_at=""):
+def _empty_series(status="not_available", fetched_at=None):
+    if fetched_at is None:
+        raise ValueError("fetched_at must be a valid ISO datetime")
     return {"status": status, "fetched_at": fetched_at, "data_as_of": None, "bars": []}
 
 
@@ -68,8 +70,8 @@ def _failed_result(raw_ticker, now, code, message):
         "data": {
             "exchange_timezone": "Asia/Tokyo",
             "currency": "JPY",
-            "daily": _empty_series(),
-            "intraday_1h": _empty_series(),
+            "daily": _empty_series("not_available", now.isoformat()),
+            "intraday_1h": _empty_series("not_available", now.isoformat()),
         },
         "sources": {},
         "errors": [_error(code, message)],
@@ -248,8 +250,11 @@ def fetch_stock_price(
     elif old_daily_bars:
         # No new data but nothing errored — keep existing with prior freshness
         daily_series = dict(prev_daily) if prev_daily else _series_result(old_daily_bars, "ok", "")
+    elif daily_error:
+        # Fetch failed, no previous — record error with attempt timestamp
+        daily_series = _empty_series("error", now.isoformat())
     else:
-        daily_series = _empty_series("not_available", "")
+        daily_series = _empty_series("not_available", now.isoformat())
 
     # --- Build intraday series (merge or fall back) ---
     if incoming_intraday:
@@ -270,8 +275,11 @@ def fetch_stock_price(
             if datetime.fromisoformat(bar["timestamp"]) >= cutoff
         ]
         intraday_series = _intraday_series_result(kept, "ok", prev_intraday["fetched_at"] if prev_intraday else "")
+    elif intraday_error:
+        # Fetch failed, no previous — record error with attempt timestamp
+        intraday_series = _empty_series("error", now.isoformat())
     else:
-        intraday_series = _empty_series("not_available", "")
+        intraday_series = _empty_series("not_available", now.isoformat())
 
     payload = _build_payload(
         normalized, symbol, now, mode, daily_start, intraday_start,

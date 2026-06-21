@@ -255,3 +255,35 @@ def test_same_incremental_payload_is_idempotent(tmp_path):
 
     assert len(result["data"]["daily"]["bars"]) == 1
     assert len(result["data"]["intraday_1h"]["bars"]) == 1
+
+
+def test_partial_success_saved_and_reloadable(tmp_path):
+    """P2: initial fetch with daily ok + intraday error must save a reloadable file."""
+    from price_store import PriceStore
+
+    class IntradayFailureProvider(FakeProvider):
+        def fetch_intraday(self, symbol, start, end):
+            from yahoo_provider import PriceProviderError
+            raise PriceProviderError("provider_failed", True, "safe failure")
+
+    provider = IntradayFailureProvider(
+        [daily_frame(["2026-06-20"])],
+        [],
+    )
+
+    result = fetch_stock_price(
+        "3932", tmp_path, now=NOW, provider=provider, minimum_daily_rows=1,
+    )
+
+    assert result["status"] == "partial"
+    assert result["data"]["daily"]["status"] == "ok"
+    assert result["data"]["daily"]["bars"]
+    assert result["data"]["intraday_1h"]["status"] == "error"
+    assert result["data"]["intraday_1h"]["fetched_at"]  # non-empty ISO
+
+    # Must be reloadable
+    store = PriceStore(tmp_path)
+    reloaded = store.load("3932")
+    assert reloaded is not None, "partial success file must be reloadable"
+    assert reloaded["data"]["daily"]["status"] == "ok"
+    assert reloaded["data"]["intraday_1h"]["status"] == "error"
