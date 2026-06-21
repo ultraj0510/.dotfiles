@@ -70,10 +70,10 @@ def test_save_manifest(tmp_path):
         "ticker": "285A",
         "as_of": NOW.isoformat(),
         "status": "success",
-        "sync": {"mode": "initial"},
+        "sync": {"mode": "initial", "window_start": "2023-06-21", "window_end": "2026-06-21"},
         "documents": [],
         "errors": [],
-        "summary": {"usable": True},
+        "summary": {"discovered": 0, "new_documents": 0, "new_versions": 0, "unchanged": 0, "no_longer_listed": 0, "fetch_errors": 0, "extraction_errors": 0, "usable": True},
     }
     path = store.save_manifest("285A", manifest)
     loaded = store.load_manifest("285A")

@@ -156,19 +156,40 @@ def _validate_manifest(payload, ticker):
     # status must be valid
     if payload.get("status") not in ("success", "partial", "failed", "unsupported"):
         return False
-    # sync must be a dict with required fields
+    # sync must be a dict with valid mode
     sync = payload.get("sync")
     if not isinstance(sync, dict):
         return False
-    if not isinstance(sync.get("mode"), str):
+    if sync.get("mode") not in ("none", "initial", "incremental", "full_reconcile"):
         return False
-    # summary must be a dict
-    if not isinstance(payload.get("summary"), dict):
+    if not isinstance(sync.get("window_start"), (str, type(None))):
         return False
-    # errors must be a list
-    if not isinstance(payload.get("errors"), list):
+    if not isinstance(sync.get("window_end"), (str, type(None))):
         return False
-    # documents must be a list of dicts with 24-char hex document_id and 64-char hex sha256
+    # summary must be a dict with correct types
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return False
+    if not isinstance(summary.get("usable"), bool):
+        return False
+    for key in ("discovered", "new_documents", "new_versions", "unchanged",
+                "no_longer_listed", "fetch_errors", "extraction_errors"):
+        if not isinstance(summary.get(key), int):
+            return False
+    # errors must be list of dicts with section/code/message
+    errors = payload.get("errors")
+    if not isinstance(errors, list):
+        return False
+    for e in errors:
+        if not isinstance(e, dict):
+            return False
+        if not isinstance(e.get("section"), str):
+            return False
+        if not isinstance(e.get("code"), str):
+            return False
+        if not isinstance(e.get("message"), str):
+            return False
+    # documents must be list of dicts with 24-char hex doc_id and 64-char hex sha256
     docs = payload.get("documents")
     if not isinstance(docs, list):
         return False

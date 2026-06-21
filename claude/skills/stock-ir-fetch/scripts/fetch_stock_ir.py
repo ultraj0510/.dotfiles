@@ -169,10 +169,20 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         },
     }
 
+    def _is_prohibited_url(url):
+        lower = url.lower()
+        for kw in ("/tdnet/", "disclosure.edinet-fsa", "disclosure2.edinet-fsa",
+                    "eoldisclosure", "edinet-fsa.go.jp"):
+            if kw in lower:
+                return True
+        return False
+
     current_doc_ids = set()
     discovered_ids = set()
     seen_entry_ids = set()
     for entry in scan["entries"]:
+        if _is_prohibited_url(entry["url"]):
+            continue
         entry_doc_id = document_id(entry["url"], entry["published_at"])
         if entry_doc_id in seen_entry_ids:
             continue

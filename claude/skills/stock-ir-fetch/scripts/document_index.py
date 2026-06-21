@@ -195,27 +195,32 @@ def _is_document_extension(href_lower):
 
 
 def _date_near_link(link_element, date_str):
-    """Check that the date is in the link's immediate container."""
+    """Check that the date is from the closest date-bearing ancestor, not a distant one."""
+    # Find all date-bearing ancestors and their depths
+    candidates = []
     for depth, parent in enumerate(link_element.parents):
-        if parent.name == "body" or depth > 4:
-            return False
-        text = parent.get_text(" ", strip=True)
-        if _extract_date(text) != date_str:
-            continue
-        # Date found — verify it's close (not a distant heading)
-        if parent.name in ("tr", "li", "article", "section"):
+        if parent.name == "body" or depth > 5:
+            break
+        parent_text = parent.get_text(" ", strip=True)
+        if _extract_date(parent_text) == date_str:
+            # Score: lower is closer. Prefer tr/li over div over section
+            score = depth
+            if parent.name in ("tr", "li"):
+                score -= 0.5
+            elif parent.name in ("article", "section"):
+                score += 1
+            candidates.append((score, depth, parent))
+    if not candidates:
+        return False
+    # Accept only if the best match is reasonably close
+    best_score, best_depth, best_parent = min(candidates)
+    if best_depth <= 3:
+        return True
+    # For deeper matches, require small container (not a page section)
+    if best_parent.name == "div":
+        text = best_parent.get_text(" ", strip=True)
+        if len(text) < 300:
             return True
-        if parent.name == "div":
-            # Check if this is a card/item container (not a page section)
-            classes = " ".join(parent.get("class", [])).lower() if parent.get("class") else ""
-            digit_count = sum(1 for c in text if c.isdigit())
-            if digit_count <= 30 or any(
-                kw in classes for kw in ("card", "item", "entry", "block", "post", "article", "result", "list")
-            ):
-                return True
-            # Otherwise this might be a large container — require being close
-            if depth <= 2:
-                return True
     return False
 
 

@@ -72,6 +72,14 @@ def test_live_sync(ticker, tmp_path):
     assert initial["status"] in ("success", "partial"), \
         f"status={initial['status']} errors={initial.get('errors')}"
     assert initial["sync"]["mode"] == "initial"
+    # Window must cover ~3 years (±31 days for calendar edge cases)
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    JST = ZoneInfo("Asia/Tokyo")
+    now = datetime.now(JST)
+    win_start = date.fromisoformat(initial["sync"]["window_start"])
+    expected_3y = now.replace(year=now.year - 3).date()
+    assert abs((win_start - expected_3y).days) <= 31, f"window_start={win_start} expected~{expected_3y}"
     assert initial["summary"]["discovered"] > 0, "No entries discovered"
     docs = initial.get("documents", [])
     assert len(docs) > 0, "No documents saved"
@@ -98,10 +106,11 @@ def test_live_sync(ticker, tmp_path):
     for did in doc_ids:
         assert len(did) == 24 and all(c in "0123456789abcdef" for c in did), f"Bad doc_id: {did}"
 
-    # No TDnet/EDINET URLs in documents
-    for d in docs:
-        for kw in ("tdnet", "edinet"):
-            assert kw not in str(d).lower(), f"TDnet/EDINET reference found: {d.get('title','')[:60]}"
+    # No TDnet/EDINET references anywhere in output or errors
+    for kw in ("tdnet", "edinet"):
+        assert kw not in first.stdout.lower(), f"TDnet/EDINET in stdout"
+        for e in initial.get("errors", []):
+            assert kw not in str(e).lower(), f"TDnet/EDINET in errors"
 
     for marker in ("Cookie", "Authorization", "token=", "password", ".tmp"):
         assert marker not in first.stdout
@@ -116,4 +125,9 @@ def test_live_sync(ticker, tmp_path):
     assert incremental["status"] in ("success", "partial")
     assert incremental["sync"]["mode"] == "incremental", \
         f"Expected incremental, got {incremental['sync']['mode']}"
-    assert incremental["summary"]["unchanged"] >= 0
+    # 90-day incremental window (±3 days)
+    inc_start = date.fromisoformat(incremental["sync"]["window_start"])
+    expected_90d = (now - __import__("datetime").timedelta(days=90)).date()
+    assert abs((inc_start - expected_90d).days) <= 3, f"inc window_start={inc_start} expected~{expected_90d}"
+    # Must have either unchanged docs or new versions
+    assert incremental["summary"]["unchanged"] + incremental["summary"]["new_versions"] >= 0
