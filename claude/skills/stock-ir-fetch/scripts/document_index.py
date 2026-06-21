@@ -33,6 +33,7 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
     Returns dict with keys: entries, visited_pages, complete, status, errors.
     """
     visited = set()
+    scheduled = {start_url}
     errors = []
     entries = []
     to_visit = [(start_url, 0)]
@@ -64,8 +65,9 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
 
         if depth < max_depth:
             for link_url in page_links:
-                if link_url not in visited:
-                    if len(visited) + len(to_visit) < max_pages:
+                if link_url not in visited and link_url not in scheduled:
+                    if len(visited) + len(scheduled) < max_pages:
+                        scheduled.add(link_url)
                         to_visit.append((link_url, depth + 1))
                     else:
                         complete = False
@@ -121,16 +123,22 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
         href_lower = href.lower()
 
         # Archive/index links for further crawling (not documents)
+        is_crawl_target = False
         if link_domain == approved_domain:
             if _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
                 if _looks_like_crawl_target(href_lower):
                     links.append(absolute)
+                    is_crawl_target = True
             elif re.search(r"\d{4}", text) or re.search(r"\d{4}", href_lower):
                 # Year-only: require IR context to avoid crawling general news
                 combined = f"{text} {absolute}"
                 if _YEAR_IN_IR.search(combined) and _looks_like_crawl_target(href_lower):
                     links.append(absolute)
+                    is_crawl_target = True
 
+        # Skip crawl targets as document candidates
+        if is_crawl_target:
+            continue
         # Only treat as document candidate if link targets a file or document page
         if not _looks_like_document_target(href_lower, text):
             continue
@@ -192,9 +200,12 @@ def _date_near_link(link_element, date_str):
         if parent.name == "body":
             return False
         if parent.name in ("tr", "li", "article", "section"):
-            return True
+            # Re-extract date from container to verify semantic association
+            parent_text = parent.get_text(" ", strip=True)
+            if _extract_date(parent_text) == date_str:
+                return True
+            # Continue climbing if date not in this container
         if parent.name == "div" and depth <= 3:
-            # Re-extract dates from parent to avoid encoding mismatch
             parent_text = parent.get_text(" ", strip=True)
             if _extract_date(parent_text) == date_str:
                 return True

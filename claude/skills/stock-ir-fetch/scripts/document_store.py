@@ -146,8 +146,31 @@ def _validate_manifest(payload, ticker):
         return False
     if payload.get("ticker") != ticker:
         return False
+    # as_of must be timezone-aware ISO datetime
     try:
-        datetime.fromisoformat(payload.get("as_of", ""))
+        dt = datetime.fromisoformat(payload.get("as_of", ""))
     except (ValueError, TypeError):
         return False
+    if dt.tzinfo is None:
+        return False
+    # status must be valid
+    if payload.get("status") not in ("success", "partial", "failed", "unsupported"):
+        return False
+    # documents must be a list of dicts with document_id and sha256
+    docs = payload.get("documents")
+    if not isinstance(docs, list):
+        return False
+    doc_ids = set()
+    for doc in docs:
+        if not isinstance(doc, dict):
+            return False
+        did = doc.get("document_id")
+        sha = doc.get("sha256")
+        if not isinstance(did, str) or not isinstance(sha, str):
+            return False
+        if len(sha) != 64 or not all(c in "0123456789abcdef" for c in sha):
+            return False
+        if did in doc_ids:
+            return False
+        doc_ids.add(did)
     return True

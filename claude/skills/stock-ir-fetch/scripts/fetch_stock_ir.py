@@ -93,9 +93,9 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         else:
             return _empty_manifest(normalized, now, "confirmation_required", [{"section": "_global", "code": "no_candidates", "message": "No IR candidates found"}])
 
-    # Determine window
-    prev_manifest = None if refresh else store.load_manifest(normalized)
-    if prev_manifest and prev_manifest.get("status") in ("success", "partial"):
+    # Determine window (always load prev manifest for doc retention)
+    prev_manifest = store.load_manifest(normalized)
+    if not refresh and prev_manifest and prev_manifest.get("status") in ("success", "partial"):
         window_start = (now - timedelta(days=90)).date()
         mode = "incremental"
     else:
@@ -122,14 +122,18 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         store.save_manifest(normalized, result)
         registry.update_sync_times(normalized, now, None)
         return result
-    # Collect delivery domains from index entries
+    # Collect delivery domains from index entries (block TDnet/EDINET)
+    _TDNET_HOSTS = {"tdnet", "disclosure.edinet-fsa", "disclosure2.edinet-fsa", "eoldisclosure"}
     delivery_domains = set()
     for entry in scan["entries"]:
         parsed = urlparse(entry["url"])
         host = parsed.hostname or ""
+        host_lower = host.lower()
         entry_domain = registrable_domain(host)
         if entry_domain and entry_domain != domain:
-            delivery_domains.add(entry_domain)
+            # Block known TDnet/EDINET hosts
+            if not any(td in host_lower for td in _TDNET_HOSTS):
+                delivery_domains.add(entry_domain)
 
     # Merge with previous manifest
     prev_docs = {}
