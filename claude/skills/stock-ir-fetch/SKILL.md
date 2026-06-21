@@ -35,3 +35,13 @@ stock-ir-fetch <ticker> [--refresh] [--data-dir PATH] [--approve-source ID] [--a
 - TDnet/EDINETを取得元にしない
 - 企業分析・売買判断を行わない
 - ブラウザ自動操作をしない
+
+## 完了条件
+
+- 自動テストが全件PASS
+- 3932と285Aの初回・差分smokeがPASS
+- 承認前にsource.jsonを保存しない
+- 同一URL差替を新しいSHA-256版として保持する
+- PDF/HTML抽出とOCR preflightがPASS
+- 未対応サイトをunsupportedとして明示する
+- 原本、manifest、stdoutに秘密値やローカル一時パスがない

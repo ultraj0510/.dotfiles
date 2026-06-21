@@ -174,8 +174,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         and scan["complete"]
     )
 
-    if manifest["documents"] or prev_manifest:
-        store.save_manifest(normalized, manifest)
+    store.save_manifest(normalized, manifest)
     registry.update_sync_times(normalized, now, now if manifest["status"] in ("success", "partial") else None)
 
     return manifest
