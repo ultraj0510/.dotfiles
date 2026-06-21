@@ -195,32 +195,26 @@ def _is_document_extension(href_lower):
 
 
 def _date_near_link(link_element, date_str):
-    """Check that the date is from the closest date-bearing ancestor, not a distant one."""
-    # Find all date-bearing ancestors and their depths
-    candidates = []
+    """Check that date and link are in the same minimal card/row container."""
     for depth, parent in enumerate(link_element.parents):
-        if parent.name == "body" or depth > 5:
-            break
-        parent_text = parent.get_text(" ", strip=True)
-        if _extract_date(parent_text) == date_str:
-            # Score: lower is closer. Prefer tr/li over div over section
-            score = depth
-            if parent.name in ("tr", "li"):
-                score -= 0.5
-            elif parent.name in ("article", "section"):
-                score += 1
-            candidates.append((score, depth, parent))
-    if not candidates:
-        return False
-    # Accept only if the best match is reasonably close
-    best_score, best_depth, best_parent = min(candidates)
-    if best_depth <= 3:
-        return True
-    # For deeper matches, require small container (not a page section)
-    if best_parent.name == "div":
-        text = best_parent.get_text(" ", strip=True)
-        if len(text) < 300:
-            return True
+        if parent.name == "body" or depth > 4:
+            return False
+        # Stop at section — too broad; article is a self-contained card
+        if parent.name == "section":
+            return False
+        # Row/card containers are acceptable
+        if parent.name in ("tr", "li", "article"):
+            parent_text = parent.get_text(" ", strip=True)
+            return _extract_date(parent_text) == date_str
+        if parent.name == "div":
+            parent_text = parent.get_text(" ", strip=True)
+            if len(parent_text) > 500:
+                continue  # too large, look closer
+            classes = " ".join(parent.get("class", [])).lower() if parent.get("class") else ""
+            if depth <= 2 or any(
+                kw in classes for kw in ("card", "item", "entry", "block", "post", "result", "list", "row")
+            ):
+                return _extract_date(parent_text) == date_str
     return False
 
 

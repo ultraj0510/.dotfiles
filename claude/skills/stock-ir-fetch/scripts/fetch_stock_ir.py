@@ -195,13 +195,13 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
 
         fetched, fetch_err = fetch_document(entry["url"], allowed, delivery_domains, http)
         if fetch_err:
-            manifest["errors"].append({"url": entry["url"], "code": fetch_err["code"], "message": fetch_err["message"]})
+            manifest["errors"].append({"section": "document", "url": entry["url"], "code": fetch_err["code"], "message": fetch_err["message"]})
             manifest["summary"]["fetch_errors"] += 1
             continue
 
         extraction = extract_document(fetched["body"], fetched["extension"], now, ocr)
         if extraction.get("error"):
-            manifest["errors"].append({"url": entry["url"], "code": extraction["error"]["code"], "message": extraction["error"]["message"]})
+            manifest["errors"].append({"section": "extraction", "url": entry["url"], "code": extraction["error"]["code"], "message": extraction["error"]["message"]})
             manifest["summary"]["extraction_errors"] += 1
 
         version_info, is_new_version = store.save_version(normalized, entry, fetched, extraction, now)
@@ -265,6 +265,11 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         and scan["complete"]
     )
 
+    # If initial sync found entries but all were filtered, mark unsupported
+    if mode == "initial" and not manifest["documents"] and seen_entry_ids:
+        manifest["status"] = "unsupported"
+        manifest["errors"].append({"section": "index", "code": "no_eligible_docs",
+                                    "message": "All discovered entries were filtered or prohibited"})
     store.save_manifest(normalized, manifest)
     success_time = now if (manifest["status"] in ("success", "partial") and scan["complete"]) else None
     registry.update_sync_times(normalized, now, success_time)

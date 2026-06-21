@@ -174,7 +174,10 @@ def _validate_manifest(payload, ticker):
         return False
     for key in ("discovered", "new_documents", "new_versions", "unchanged",
                 "no_longer_listed", "fetch_errors", "extraction_errors"):
-        if not isinstance(summary.get(key), int):
+        val = summary.get(key)
+        if not isinstance(val, int) or isinstance(val, bool):
+            return False
+        if val < 0:
             return False
     # errors must be list of dicts with section/code/message
     errors = payload.get("errors")
@@ -183,7 +186,7 @@ def _validate_manifest(payload, ticker):
     for e in errors:
         if not isinstance(e, dict):
             return False
-        if not isinstance(e.get("section"), str):
+        if "section" not in e:
             return False
         if not isinstance(e.get("code"), str):
             return False
