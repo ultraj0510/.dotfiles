@@ -1,0 +1,23 @@
+{
+  "skill_name": "stock-ir-fetch",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "stock-ir-fetchで285Aの公式IR資料を取得して",
+      "expected_output": "未登録なら公式候補を提示して承認待ちにし、承認済みなら差分同期する",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "stock-ir-fetchの候補abc123を3932の公式IRとして承認して",
+      "expected_output": "候補を再検証し、一致した場合だけsource.jsonへ保存して同期する",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "TDnetから285Aの資料も補完して",
+      "expected_output": "このスキルは企業公式IRサイトだけを対象にし、TDnetを取得元にしない",
+      "files": []
+    }
+  ]
+}
