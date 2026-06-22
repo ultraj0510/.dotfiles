@@ -62,7 +62,7 @@ def save_fresh_cookie(cookie: str, source: str):
 
 
 def cmd_default():
-    from cookie_store import read_cookie, save_cookie
+    from cookie_store import read_cookie
     from sbi_auth import validate
 
     cookie = read_cookie()
@@ -80,8 +80,6 @@ def cmd_default():
     print(f"STATUS: {status}")
     if status == "OK":
         print("SBI証券セッションは有効です。")
-        save_cookie(cookie, source="check")
-        print("Cookieを保存しました: ~/.config/sbi-portfolio/tokens.json")
     elif status in ("EXPIRED", "MAINTENANCE"):
         print("Cookieの有効期限が切れています。ブラウザで再ログインし、/portfolio-auth に新しいCookieを貼り付けてください。")
         sys.exit(1)

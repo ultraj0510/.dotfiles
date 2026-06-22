@@ -328,26 +328,54 @@ def get_filename_from_url(url: str, index: int) -> str:
     return f"photo_{index:04d}.jpg"
 
 
-def run_analyze(site_key: str, email: str, password: str) -> dict:
-    """Run site analysis mode."""
-    site = SITES[site_key]
+def load_cookies_from_file(path: str) -> list[dict]:
+    """Load cookies from a JSON file (Playwright format)."""
+    with open(path) as f:
+        cookies = json.load(f)
+    # Normalize: Playwright expects sameSite as string enum, not None
+    valid_same_site = {"Strict", "Lax", "None"}
+    for c in cookies:
+        if c.get("sameSite") not in valid_same_site:
+            c.pop("sameSite", None)
+        # Playwright doesn't accept hostOnly; remove it
+        c.pop("hostOnly", None)
+        c.pop("storeId", None)
+        c.pop("session", None)
+    log.info(f"Loaded {len(cookies)} cookies from {path}")
+    return cookies
 
+
+def create_context_with_auth(browser, site_key: str, email: str | None, password: str | None,
+                             cookies_file: str | None):
+    """Handle authentication: cookies first, then login fallback. Returns (context, page)."""
+    if cookies_file:
+        cookies = load_cookies_from_file(cookies_file)
+        context = browser.new_context()
+        context.add_cookies(cookies)
+        page = context.new_page()
+        log.info("Using cookie-based authentication")
+        return context, page
+
+    context = browser.new_context()
+    page = context.new_page()
+
+    if site_key == "8122":
+        login_8122(page, email, password)
+    elif site_key == "fujifilm-fasp":
+        login_fujifilm_fasp(page, email, password)
+
+    return context, page
+
+
+def run_analyze(site_key: str, email: str | None = None, password: str | None = None,
+                cookies_file: str | None = None) -> dict:
+    """Run site analysis mode."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-
         try:
-            if site_key == "8122":
-                login_8122(page, email, password)
-                navigate_to_cart(page, site_key)
-            elif site_key == "fujifilm-fasp":
-                login_fujifilm_fasp(page, email, password)
-                navigate_to_cart(page, site_key)
-            else:
-                log.error(f"Unknown site: {site_key}")
-                sys.exit(1)
-
+            context, page = create_context_with_auth(
+                browser, site_key, email, password, cookies_file)
+            navigate_to_cart(page, site_key)
             result = analyze_page(page, site_key)
         finally:
             browser.close()
@@ -355,22 +383,24 @@ def run_analyze(site_key: str, email: str, password: str) -> dict:
     return result
 
 
-def run_download(site_key: str, email: str, password: str, download_dir: Path, limit: int | None = None) -> dict:
+def run_download(site_key: str, email: str | None, password: str | None,
+                 download_dir: Path, limit: int | None = None,
+                 cookies_file: str | None = None) -> dict:
     stats = {"success": 0, "failed": 0, "skipped": 0}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+        page = None
+        context = None
 
         try:
+            context, page = create_context_with_auth(
+                browser, site_key, email, password, cookies_file)
+            navigate_to_cart(page, site_key)
+
             if site_key == "8122":
-                login_8122(page, email, password)
-                navigate_to_cart(page, site_key)
                 urls = get_photo_urls_8122(page)
             elif site_key == "fujifilm-fasp":
-                login_fujifilm_fasp(page, email, password)
-                navigate_to_cart(page, site_key)
                 urls = get_photo_urls_fujifilm_fasp(page)
             else:
                 urls = get_photo_urls_generic(page)
@@ -408,12 +438,14 @@ def main():
                         help="Analyze site structure instead of downloading")
     parser.add_argument("--url", default=None,
                         help="Override cart URL for analysis")
+    parser.add_argument("--cookies", default=None,
+                        help="Path to JSON file with cookies (Playwright format). Skips login if provided.")
     args = parser.parse_args()
 
     email = os.environ.get("SITE_EMAIL")
     password = os.environ.get("SITE_PASSWORD")
-    if not email or not password:
-        log.error("Set SITE_EMAIL and SITE_PASSWORD environment variables")
+    if not args.cookies and (not email or not password):
+        log.error("Set SITE_EMAIL and SITE_PASSWORD environment variables, or use --cookies")
         sys.exit(1)
 
     if args.analyze:
@@ -423,7 +455,7 @@ def main():
             SITES[site_key]["name"] = args.url
 
         log.info(f"Analyzing site: {SITES[site_key]['name']}")
-        result = run_analyze(site_key, email, password)
+        result = run_analyze(site_key, email, password, args.cookies)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
@@ -434,7 +466,7 @@ def main():
     if args.limit:
         log.info(f"Limit: {args.limit} photos")
 
-    stats = run_download(args.site, email, password, download_dir, args.limit)
+    stats = run_download(args.site, email, password, download_dir, args.limit, args.cookies)
 
     log.info("=" * 50)
     log.info("Download complete!")

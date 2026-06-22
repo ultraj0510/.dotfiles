@@ -117,7 +117,7 @@ def main():
         # Phase 3: Evidence pack
         company_name = ticker
         if info_result.parsed:
-            company_name = info_result.parsed.get("data", {}).get("company_name", ticker)
+            company_name = info_result.parsed.get("company_name", ticker)
         pack = build_evidence_pack(ticker, company_name, now, info_result, price_result, ir_result, metrics)
         pack_path = run_dir / "evidence-pack.json"
         _atomic_write(pack_path, json.dumps(pack, ensure_ascii=False, indent=2))
@@ -172,6 +172,21 @@ def main():
             for claim in report.get("claims", []):
                 if not claim.get("evidence_ids"):
                     all_evidence = False
+
+        # Compute essential_items_available for confidence (10 items × 3pts each = max 30)
+        essential_count = 0
+        if current_price:
+            essential_count += 1  # 1. current price
+        if daily_bars and len(daily_bars) >= 250:
+            essential_count += 1  # 6. balance sheet info (proxy: sufficient price history)
+        if info_result.parsed:
+            sections = info_result.parsed.get("sections", {})
+            perf = sections.get("performance", {}) if isinstance(sections, dict) else {}
+            if isinstance(perf, dict) and perf.get("data"):
+                essential_count += 1  # 2/3/4. earnings data
+        if ir_result.parsed and ir_result.parsed.get("documents"):
+            essential_count += 1  # 10. latest IR materials
+        data_quality["essential_items_available"] = essential_count
 
         conf_result = compute_confidence(
             data_quality=data_quality,

@@ -1,122 +1,231 @@
-"""Claude Code エージェントと TradingAgents パイプラインのアダプタ。
+"""LLM-based adapter for deep-analyze (TradingAgents replacement).
 
-TradingAgents の LangGraph パイプラインを Claude Code スキルから
-呼び出すためのインターフェース。
+Runs stock-advisor pipeline modules for a single ticker and
+produces a report_context.json for Claude to interpret.
 """
 
-import os
-import sys
 import json
-from pathlib import Path
+import os
+import subprocess
+import sys
 from datetime import date
+from pathlib import Path
 
-TRADING_AGENTS_DIR = os.path.expanduser("~/code/deepcode/TradingAgents")
-if TRADING_AGENTS_DIR not in sys.path:
-    sys.path.insert(0, TRADING_AGENTS_DIR)
+STOCK_ADVISOR_SCRIPTS = os.path.expanduser(
+    "~/.dotfiles/claude/skills/stock-advisor/scripts"
+)
+STOCK_VENV_PYTHON = os.path.join(STOCK_ADVISOR_SCRIPTS, ".venv", "bin", "python")
 
 
 def build_config(ticker: str, output_language: str = "Japanese") -> dict:
-    """TradingAgents の設定を構築する。
-
-    v0.2.5 対応: 全7エージェントが output_language を尊重。
-    DeepSeek V4 互換のため DeepSeekChatOpenAI を使用。
-    """
+    """Build analysis configuration for a single ticker."""
+    output_dir = os.path.expanduser(
+        f"~/.claude/skills/stock-advisor/_workspace/{ticker}/{date.today().isoformat()}"
+    )
     return {
         "ticker": ticker,
         "output_language": output_language,
-        "deep_think": os.environ.get("TRADINGAGENTS_DEEP_THINK", "false").lower() == "true",
-        "max_debate_rounds": int(os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "2")),
-        "memory_log_dir": os.environ.get(
-            "TRADINGAGENTS_MEMORY_LOG_DIR",
-            os.path.expanduser("~/.claude/skills/stock-advisor/_workspace/memory"),
-        ),
-        "output_dir": os.path.expanduser(
-            f"~/.claude/skills/stock-advisor/_workspace/{ticker}/{date.today().isoformat()}"
-        ),
+        "output_dir": output_dir,
+        "deep_think": True,
     }
 
 
 def load_previous_memory(ticker: str) -> str | None:
-    """同一 ticker の過去判断を memory log から読み込む。
-
-    v0.2.5 の _resolve_pending_entries() → reflection ライフサイクルを使用。
-    """
-    try:
-        from tradingagents.agents.utils.memory import TradingMemoryLog
-
-        memory_dir = os.path.expanduser("~/.claude/skills/stock-advisor/_workspace/memory")
-        log = TradingMemoryLog(memory_dir)
-        entries = log._resolve_pending_entries(ticker)
-        if entries:
-            return entries
-    except ImportError:
-        pass
+    """Load previous analysis memory if available."""
+    memory_file = os.path.expanduser(
+        f"~/.claude/skills/stock-advisor/_workspace/{ticker}/memory.json"
+    )
+    if os.path.isfile(memory_file):
+        try:
+            with open(memory_file) as f:
+                data = json.load(f)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
     return None
 
 
 def run_pipeline(config: dict) -> dict:
-    """TradingAgents のフルパイプラインを実行する。
+    """Run stock-advisor pipeline modules for a single ticker."""
+    ticker = config["ticker"]
+    output_dir = Path(config["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    パイプライン構成:
-    - 4 analysts (market/fundamentals/sentiment/news)
-    - bull/bear debate (research manager 統括)
-    - trader (トレードプラン生成)
-    - 3-way risk debate (bull/bear/neutral)
-    - portfolio manager (最終判断 + PortfolioDecision)
-    """
-    from tradingagents.graph.trading_graph import TradingAgentsGraph
-    from tradingagents.agents.utils.agent_utils import get_language_instruction
+    results = {"ticker": ticker, "steps_completed": [], "errors": []}
 
-    lang_instruction = get_language_instruction(config["output_language"])
+    def _run(cmd: list[str], step_name: str):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+            results["steps_completed"].append(step_name)
+        except subprocess.CalledProcessError as e:
+            results["errors"].append(f"{step_name}: {e.stderr[:500]}")
+        except Exception as e:
+            results["errors"].append(f"{step_name}: {str(e)[:500]}")
 
-    graph = TradingAgentsGraph(
-        ticker=config["ticker"],
-        output_language=config["output_language"],
-        deep_think=config["deep_think"],
-        max_debate_rounds=config["max_debate_rounds"],
-        previous_context=config.get("previous_context"),
+    # Step 1: Signal engine (single ticker)
+    signals_path = output_dir / "signals.json"
+    _run(
+        [
+            STOCK_VENV_PYTHON,
+            os.path.join(STOCK_ADVISOR_SCRIPTS, "signal_engine.py"),
+            "--ticker", ticker,
+            "-o", str(signals_path),
+        ],
+        "signal_engine",
     )
 
-    result = graph.run()
+    # Step 2: Backtest
+    backtest_dir = output_dir / "backtest"
+    backtest_dir.mkdir(exist_ok=True)
+    reference_date = date.today().isoformat()
+    if signals_path.exists():
+        try:
+            with open(signals_path) as f:
+                ref = json.load(f).get("reference_date", "")
+            if ref:
+                reference_date = ref
+        except Exception:
+            pass
 
-    return {
-        "ticker": config["ticker"],
-        "decision": result.get("decision", {}),
-        "research_plan": result.get("research_plan", {}),
-        "trader_proposal": result.get("trader_proposal", {}),
-        "debate_log": result.get("debate_log", []),
-        "memory_updated": result.get("memory_updated", False),
+    _run(
+        [
+            STOCK_VENV_PYTHON,
+            os.path.join(STOCK_ADVISOR_SCRIPTS, "backtest_engine.py"),
+            "--ticker", ticker,
+            "--strategy", "auto",
+            "--execution-delay",
+            "--end", reference_date,
+            "-o", str(backtest_dir / f"{ticker}.json"),
+        ],
+        "backtest",
+    )
+
+    # Step 3: Price zones (single ticker)
+    zones_path = output_dir / "price_zones_and_margin.json"
+    tick_sizes_path = os.path.join(
+        os.path.dirname(STOCK_ADVISOR_SCRIPTS), "data", "tick_sizes.json"
+    )
+    price_limits_path = os.path.join(
+        os.path.dirname(STOCK_ADVISOR_SCRIPTS), "data", "price_limits.json"
+    )
+    market_conv_path = os.path.join(
+        os.path.dirname(STOCK_ADVISOR_SCRIPTS), "market_conventions.yaml"
+    )
+    portfolio_path = os.path.expanduser(
+        "~/code/playground/stock-price-analyze/portfolio.yaml"
+    )
+
+    _run(
+        [
+            STOCK_VENV_PYTHON,
+            os.path.join(STOCK_ADVISOR_SCRIPTS, "price_zone_calculator.py"),
+            "--ticker", ticker,
+            "--signals", str(signals_path),
+            "--portfolio", portfolio_path,
+            "--tick-sizes", tick_sizes_path,
+            "--price-limits", price_limits_path,
+            "--market-conventions", market_conv_path,
+            "-o", str(zones_path),
+        ],
+        "price_zones",
+    )
+
+    # Step 4: Peer comparison
+    peer_output = output_dir / "peer_comparison.json"
+    peer_mapping_path = os.path.join(
+        os.path.dirname(STOCK_ADVISOR_SCRIPTS), "peer_mapping.yaml"
+    )
+    jp_stop_limit_pct = -30.0
+    if zones_path.exists():
+        try:
+            with open(zones_path) as f:
+                zones_data = json.load(f)
+            jp_stop_limit_pct = zones_data.get("stop_limit_pct", -30.0)
+        except Exception:
+            pass
+
+    jp_close = 0
+    if signals_path.exists():
+        try:
+            with open(signals_path) as f:
+                sig_data = json.load(f)
+            for entry in sig_data.get("results", []):
+                if entry["ticker"] == ticker:
+                    jp_close = float(entry.get("indicators", {}).get("close", 0))
+                    break
+        except Exception:
+            pass
+
+    if jp_close > 0:
+        _run(
+            [
+                STOCK_VENV_PYTHON,
+                os.path.join(STOCK_ADVISOR_SCRIPTS, "peer_comparison.py"),
+                "--ticker", ticker,
+                "--jp-close", str(jp_close),
+                "--jp-stop-limit-pct", str(round(jp_stop_limit_pct, 2)),
+                "--peer-mapping", peer_mapping_path,
+                "-o", str(peer_output),
+            ],
+            "peer_comparison",
+        )
+
+    # Save context
+    context = {
+        "ticker": ticker,
+        "reference_date": reference_date,
+        "generated_at": date.today().isoformat(),
+        "signals": None,
+        "backtest": None,
+        "price_zones": None,
+        "peer_comparison": None,
+        "steps_completed": results["steps_completed"],
+        "errors": results["errors"],
     }
+
+    if signals_path.exists():
+        with open(signals_path) as f:
+            context["signals"] = json.load(f)
+    if zones_path.exists():
+        with open(zones_path) as f:
+            context["price_zones"] = json.load(f)
+    if peer_output.exists():
+        with open(peer_output) as f:
+            context["peer_comparison"] = json.load(f)
+
+    context_path = output_dir / "report_context.json"
+    with open(context_path, "w") as f:
+        json.dump(context, f, ensure_ascii=False, indent=2, default=str)
+
+    # Save memory
+    memory_path = output_dir.parent / "memory.json"
+    memory = {
+        "ticker": ticker,
+        "last_analysis": date.today().isoformat(),
+        "last_decision": {},
+    }
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(memory_path, "w") as f:
+        json.dump(memory, f, ensure_ascii=False, indent=2)
+
+    return context
 
 
 def format_decision_output(result: dict) -> str:
-    """パイプライン結果を stock-advisor 互換の FINAL_DECISION 形式に整形。"""
-    decision = result.get("decision", {})
-    if not decision:
-        return ""
-
+    """Format pipeline results as FINAL_DECISION."""
     lines = [
         "## FINAL_DECISION",
         "",
-        f"**Ticker:** {result['ticker']}",
-        f"**Action:** {decision.get('action', 'HOLD')}",
-        f"**Quantity:** {decision.get('quantity', 0)}株",
-        f"**Entry Price:** ¥{decision.get('entry_price', 0):,}",
-        f"**Stop Loss:** ¥{decision.get('stop_loss', 0):,}",
-        f"**Take Profit:** ¥{decision.get('take_profit', 0):,}",
-        f"**Confidence:** {decision.get('confidence', 'medium')}",
-        "",
-        f"**Rationale:** {decision.get('rationale', '')}",
-        f"**Risk Factors:** {decision.get('risk_factors', '')}",
-        "",
+        f"**Ticker:** {result.get('ticker', '?')}",
+        f"**Reference Date:** {result.get('reference_date', '?')}",
+        f"**Steps Completed:** {', '.join(result.get('steps_completed', []))}",
     ]
-
-    trader = result.get("trader_proposal", {})
-    if trader:
-        lines.append("### Trade Plan")
-        lines.append(f"- Entry Strategy: {trader.get('entry_strategy', 'N/A')}")
-        lines.append(f"- Exit Strategy: {trader.get('exit_strategy', 'N/A')}")
-        lines.append(f"- Position Sizing: {trader.get('position_sizing', 'N/A')}")
+    errors = result.get("errors", [])
+    if errors:
         lines.append("")
-
+        lines.append("**Errors:**")
+        for e in errors:
+            lines.append(f"- {e}")
+    lines.append("")
+    lines.append("> LLM deep analysis follows in report.md")
     return "\n".join(lines)

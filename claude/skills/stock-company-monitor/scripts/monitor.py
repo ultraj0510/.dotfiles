@@ -173,10 +173,12 @@ def trigger_reanalysis(ticker, data_dir):
             return None, f"analyze failed: {proc.stderr[:200]}"
         analysis = json.loads(proc.stdout)
         run_id = analysis.get("run_id")
-        subprocess.run(
+        report_proc = subprocess.run(
             [SKILL_PATHS["stock-company-report"], ticker, "--run-id", run_id, "--data-dir", str(data_dir)],
             capture_output=True, text=True, timeout=120, shell=False,
         )
+        if report_proc.returncode != 0:
+            return None, f"report generation failed: {report_proc.stderr[:200]}"
         return run_id, None
     except subprocess.TimeoutExpired:
         return None, "Reanalysis timeout"

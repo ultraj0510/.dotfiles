@@ -113,12 +113,16 @@ def _fetch_sbi_page_urllib(url: str, user_agent: str = None) -> tuple[str | None
                 try:
                     html = raw.decode(enc)
                     status = classify_sbi_html(html, resp.geturl())
-                    return (None, "auth_expired" if status == "EXPIRED" else status.lower()) if status else (html, "ok")
+                    if status and status != "OK":
+                        return (None, "auth_expired" if status == "EXPIRED" else status.lower())
+                    return (html, "ok")
                 except UnicodeDecodeError:
                     continue
             html = raw.decode("cp932", errors="replace")
             status = classify_sbi_html(html, resp.geturl())
-            return (None, "auth_expired" if status == "EXPIRED" else status.lower()) if status else (html, "ok")
+            if status and status != "OK":
+                return (None, "auth_expired" if status == "EXPIRED" else status.lower())
+            return (html, "ok")
     except Exception as e:
         print(f"[WARN] urllib fetch failed: {e}", file=sys.stderr)
         return (None, "http_error")
@@ -149,14 +153,17 @@ def parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
     # Spot holdings
     spot_pattern = re.compile(
         r"(\d{3,4}[A-Z]?)\s+(\S+?)\s+[0-9\-/]+\s+([\d,]+)\s+([\d,.]+)\s+([\d,]+)\s+")
-    spot_section_pattern = re.compile(r"株式[（(]現物/(?:特定預り|NISA|一般預り)[）)]")
-    spot_ranges = [m.start() for m in spot_section_pattern.finditer(html)]
+    spot_section_pattern = re.compile(r"(株式[（(]現物/(特定預り|NISA(?:預り)?|一般預り)[）)])")
+    spot_matches = list(spot_section_pattern.finditer(html))
     credit_marker = html.find("株式（信用）")
     if credit_marker < 0: credit_marker = html.find("株式(信用)")
     if credit_marker < 0: credit_marker = html.find("信用建玉")
 
-    for i, start in enumerate(spot_ranges):
-        end = spot_ranges[i + 1] if i + 1 < len(spot_ranges) else credit_marker
+    for i, m in enumerate(spot_matches):
+        section_header = m.group(1)
+        section_type = m.group(2)
+        start = m.start()
+        end = spot_matches[i + 1].start() if i + 1 < len(spot_matches) else credit_marker
         if end < 0 or end <= start: end = start + 20000
         section_html = html[start:end]
         section_text = re.sub(r"<[^>]+>", " ", section_html)
@@ -166,6 +173,8 @@ def parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
             account_type = "NISA成長"
         elif "NISA（つみたて投資枠）" in section_html or "NISA(つみたて投資枠)" in section_html:
             account_type = "NISAつみたて"
+        elif section_type.startswith("NISA"):
+            account_type = "NISA"
         elif "一般預り" in section_html: account_type = "一般"
         else: account_type = "特定"
         for sm in spot_pattern.finditer(section_text):
@@ -249,17 +258,40 @@ def parse_sbi_account(html: str) -> dict[str, float]:
 
 
 def merge_holdings(existing: list, sbi_holdings: list) -> list | None:
-    if existing and len(sbi_holdings) < len(existing) * 0.5:
-        print(f"[WARN] SBI holdings ({len(sbi_holdings)}) < 50% of existing ({len(existing)}). Merge aborted.", file=sys.stderr)
-        return None
     def key_for(h):
         if h.get("position_type") == "信用":
             return (h.get("ticker"), "信用", h.get("open_date"))
         return (h.get("ticker"), h.get("position_type", "現物"), h.get("account_type"))
-    existing_index = {key_for(h): h for h in existing}
+
+    def ticker_key(h):
+        """Key without account_type — used for missing-holding detection."""
+        if h.get("position_type") == "信用":
+            return (h.get("ticker"), "信用", h.get("open_date"))
+        return (h.get("ticker"), h.get("position_type", "現物"))
+
+    if existing:
+        sbi_ticker_keys = {ticker_key(h) for h in sbi_holdings}
+        existing_ticker_keys = {ticker_key(h) for h in existing}
+        missing_ticker_keys = existing_ticker_keys - sbi_ticker_keys
+        if len(sbi_holdings) < len(existing) * 0.5:
+            print(f"[WARN] SBI holdings ({len(sbi_holdings)}) < 50% of existing ({len(existing)}). Merge aborted.", file=sys.stderr)
+            return None
+        if len(missing_ticker_keys) >= 3:
+            print(f"[WARN] {len(missing_ticker_keys)} holdings missing from SBI response (>= 3). Merge aborted.", file=sys.stderr)
+            return None
+
+    existing_by_key = {key_for(h): h for h in existing}
+    existing_by_ticker = {}
+    for h in existing:
+        tk = ticker_key(h)
+        if tk not in existing_by_ticker:
+            existing_by_ticker[tk] = h
+
     merged = []
     for sbi_h in sbi_holdings:
-        old = existing_index.get(key_for(sbi_h), {})
+        old = existing_by_key.get(key_for(sbi_h))
+        if old is None:
+            old = existing_by_ticker.get(ticker_key(sbi_h), {})
         item = dict(old)
         item.update(sbi_h)
         merged.append(item)
@@ -328,9 +360,10 @@ def sync_from_sbi(portfolio_path: str) -> str:
         if merged is None: return "parse_error"
     else:
         merged = holdings
+    now_iso = datetime.now(timezone.utc).isoformat()
     portfolio = {
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-        "last_successful_sync_at": datetime.now(timezone.utc).isoformat(),
+        "last_updated": now_iso,
+        "last_successful_sync_at": now_iso,
         "last_sync_source": "SBI", "sync_status": "ok",
         "account": existing_account, "holdings": merged,
     }

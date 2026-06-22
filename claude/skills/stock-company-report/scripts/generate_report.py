@@ -43,7 +43,7 @@ def _render_claims(claims):
         kind = c.get("claim_type", "fact")
         text = c.get("claim_ja", c.get("claim_en", ""))
         eids = c.get("evidence_ids", [])
-        links = " ".join(f'<code style="font-size:10px">[{e[:8]}]</code>' for e in eids[:3])
+        links = " ".join(f'<code style="font-size:10px">[{_esc(e[:8])}]</code>' for e in eids[:3])
         items += f"<li>{_tag(kind)} {_esc(text)} {links}</li>"
     return f"<ul>{items}</ul>"
 

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 
+import yaml
 
 _STOCK_ANALYZE_DIR = os.path.expanduser("~/code/playground/stock-price-analyze")
 _DEFAULT_PORTFOLIO_PATH = os.path.join(_STOCK_ANALYZE_DIR, "portfolio.yaml")
@@ -15,15 +16,31 @@ def _print_json(snapshot: dict) -> None:
     print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=False))
 
 
-def _load_cache_or_exit(portfolio_path: str, status: str):
-    from sbi_fetch import load_cached_snapshot
+def _build_snapshot(data: dict, sync_status: str, cache_used: bool) -> dict:
+    """Build JSON snapshot from portfolio YAML data.
 
+    YAML stores ``last_updated`` / ``last_sync_source`` for backward
+    compatibility; the JSON output maps them to ``fetched_at`` / ``source``.
+    """
+    return {
+        "fetched_at": data.get("last_updated"),
+        "source": data.get("last_sync_source", "SBI"),
+        "sync_status": sync_status,
+        "cache_used": cache_used,
+        "account": data.get("account", {}),
+        "holdings": data.get("holdings", []),
+    }
+
+
+def _load_cache_or_exit(portfolio_path: str, status: str) -> None:
     try:
-        snapshot = load_cached_snapshot(portfolio_path, status=status)
+        with open(portfolio_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         print(f"[ERROR] portfolio.yaml not found at {portfolio_path}", file=sys.stderr)
         sys.exit(1)
-    _print_json(snapshot)
+
+    _print_json(_build_snapshot(data, sync_status=status, cache_used=True))
 
 
 def main():
@@ -37,11 +54,14 @@ def main():
         _load_cache_or_exit(args.portfolio_path, status="cache")
         return
 
-    from sbi_fetch import fetch_raw_snapshot
+    from sbi_fetch import sync_from_sbi
 
-    snapshot, status = fetch_raw_snapshot(args.portfolio_path)
+    status = sync_from_sbi(args.portfolio_path)
+
     if status == "ok":
-        _print_json(snapshot)
+        with open(args.portfolio_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        _print_json(_build_snapshot(data, sync_status="ok", cache_used=False))
         return
 
     if args.use_cache_on_fail:

@@ -28,7 +28,8 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 ## Shared Rules
 
 - Respond to the user in Japanese.
-- Commit messages and code comments are written in English.
+- Commit messages are written in English.
+- Code comments are written in Japanese when comments improve readability. Avoid obvious comments.
 - Security-sensitive files, credentials, brokerage Cookies, and personal portfolio data must not be committed.
 - For non-trivial work, write or update a plan before implementation.
 - Prefer one source of truth and generated tool-specific files over duplicated manual definitions.

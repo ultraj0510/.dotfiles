@@ -45,6 +45,6 @@ python3 auth_sbi.py --save-file /path/to/cookie.json
 
 ## 完了証拠
 
-- 検証成功: `STATUS: OK` + exit 0 + `tokens.json` の `saved_at` 更新
+- 検証成功: `STATUS: OK` + exit 0
 - 未設定: `STATUS: UNSET` + exit 1
 - 期限切れ: `STATUS: EXPIRED` + exit 1 + 再取得手順表示

@@ -7,9 +7,6 @@
     "type": "command",
     "command": "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"
   },
-  "omcHud": {
-    "preset": "full"
-  },
   "enabledPlugins": {
     "github@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
@@ -20,28 +17,14 @@
     "commit-commands@claude-plugins-official": true,
     "claude-code-setup@claude-plugins-official": true,
     "hookify@claude-plugins-official": true,
-    "microsoft-docs@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
-    "harness@harness-marketplace": true,
-    "team-standards@org-marketplace": true,
-    "playwright@claude-plugins-official": true,
-    "oh-my-claudecode@omc": true
+    "playwright@claude-plugins-official": true
   },
-  "extraKnownMarketplaces": {
-    "harness-marketplace": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/revfactory/harness.git"
-      }
-    },
-    "org-marketplace": {
-      "source": {
-        "source": "github",
-        "repo": "ultraj0510/org-claude-plugins"
-      }
-    }
-  },
+  "extraKnownMarketplaces": {},
   "autoDreamEnabled": true,
   "theme": "auto",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "omcHud": {
+    "preset": "full"
+  }
 }

@@ -15,13 +15,11 @@ def load_auth_module():
     return module
 
 
-def test_default_check_resaves_valid_cookie(monkeypatch, capsys):
+def test_default_check_validates_without_resaving(monkeypatch, capsys):
     module = load_auth_module()
-    calls = []
 
     fake_cookie_store = SimpleNamespace(
         read_cookie=lambda: "JSESSIONID=x; __lt__sid=y; __lt__cid=z; AWSALBCORS=a",
-        save_cookie=lambda cookie, source: calls.append((cookie, source)),
     )
     fake_sbi_auth = SimpleNamespace(
         validate=lambda cookie: ("OK", None),
@@ -34,4 +32,4 @@ def test_default_check_resaves_valid_cookie(monkeypatch, capsys):
     out = capsys.readouterr().out
 
     assert "STATUS: OK" in out
-    assert calls == [("JSESSIONID=x; __lt__sid=y; __lt__cid=z; AWSALBCORS=a", "check")]
+    assert "SBI証券セッションは有効です" in out

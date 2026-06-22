@@ -1,52 +1,58 @@
 ---
 name: deep-analyze
-description: 1銘柄に対して7エージェント×多段議論の深堀分析を実行。TradingAgents v0.2.5 日本語対応版
+description: 1銘柄に対してマルチエージェント深堀分析を実行
 when_to_use: 「深堀分析して」「この銘柄詳しく見て」「deep analyze」または /deep-analyze 実行時
 ---
 
 # deep-analyze — マルチエージェント深堀分析
 
-TradingAgents v0.2.5 の日本語対応版パイプラインを使用し、1銘柄を多角的に分析する。
+指定銘柄を多角的に分析する。数値計算は stock-advisor パイプライン、解釈は LLM。
 
 ## パイプライン構成
 
 ```
-4 analysts (market/fundamentals/sentiment/news)
+数値分析（Python — stock-advisor パイプライン流用）
+  ├ シグナル検出（signal_engine）
+  ├ バックテスト（backtest_engine）
+  ├ USピア比較（peer_comparison）
+  └ 価格ゾーン＋追い証（price_zone_calculator）
     ↓
-bull/bear debate（研究マネージャー統括）
-    ↓
-trader（トレードプラン生成）
-    ↓
-3-way risk debate（bull/bear/neutral）
-    ↓
-portfolio manager（最終判断 + 構造化出力）
+LLM分析（Claude）
+  ├ Web検索で最新ニュース・アナリスト評価を取得
+  ├ 全データを解釈し構造化レポート生成
+  └ FINAL_DECISION 出力
 ```
-
-## TradingAgents v0.2.5 対応
-
-- 全7エージェント日本語出力 (`output_language: "Japanese"`)
-- Pydantic 構造化出力（ResearchPlan, TraderProposal, PortfolioDecision）
-- Memory Log: 同一 ticker の過去判断を次回分析に注入
-- DeepSeek V4: `DeepSeekChatOpenAI` で thinking mode 対応
 
 ## 手順
 
-### 1. 分析実行
+### 1. 数値分析実行
 
 ```bash
 cd ~/.claude/skills/deep-analyze
-python pipeline/run_deep_analyze.py <TICKER>
+~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
+  pipeline/run_deep_analyze.py <TICKER>
 ```
 
-タイムアウト: 300秒（全パイプライン分）
+### 2. LLM深堀分析
 
-### 2. 結果確認
+Claude が以下のデータを読み込み分析:
+- `report_context.json`（1銘柄分の全数値データ集約）
+- Web 検索で最新ニュース・アナリスト評価を取得
+- ユーザーの取引スタイルに合わせた判断を出力
 
-- `FINAL_DECISION` ブロックのアクション・価格を確認
-- 出力ディレクトリに `decision.json`（構造化データ）が保存される
-- memory log に今回の判断が追記される（次回同銘柄分析時に参照）
+### 3. 結果確認
+
+- `FINAL_DECISION` ブロックのアクション・価格・数量を確認
+- `decision.json` に構造化判断を保存
 
 ## オプション
 
-- `--language English` : 英語出力に切り替え
-- `--output-dir <path>` : 出力先を変更
+- `--language English` : 英語出力
+- `--output-dir <path>` : 出力先変更
+
+## 注記
+
+TradingAgents v0.2.5 フレームワークは非推奨（依存未解決のため）。
+本スキルは LLM ベースの代替実装を使用する。
+
+TradingAgents 復活時は `pipeline/adapters.py` を差し替えて元のパイプラインに戻せる。

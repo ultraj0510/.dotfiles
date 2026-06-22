@@ -58,10 +58,12 @@ def run_analysis(evidence_pack_path, market_metrics_path, run_dir, config_overri
     ta = TradingAgentsGraph(debug=False, config=config)
     start = time.monotonic()
     try:
-        _, result = ta.propagate(ticker, date_str)
+        final_state, result = ta.propagate(ticker, date_str)
     except Exception as e:
         return {"error": str(e), "status": "failed"}
     elapsed = time.monotonic() - start
+    # result is the structured dict from _build_result_dict:
+    # {"analyst_reports": {...}, "debate": {...}, "portfolio_manager": {...}}
     return {
         "status": "completed",
         "result": result,

@@ -27,19 +27,57 @@ def build_evidence_pack(ticker, company_name, as_of, info_result, price_result, 
 
     if info_result.parsed:
         info = info_result.parsed
-        company_info = info.get("data", {}).get("company_info", {})
-        for key, val in company_info.items():
-            if val is not None:
-                evidence.append({
-                    "evidence_id": f"info-company-{_safe_id(key)}",
-                    "kind": "fundamentals",
-                    "field": key,
-                    "value": val,
-                    "unit": None,
-                    "source_type": "stock-info-fetch",
-                    "source_ref": f"company_info:{key}",
-                    "usable": True,
-                })
+        # stock-info-fetch schema 1.1: top-level company_name + sections dict
+        sections = info.get("sections", {})
+        # Company profile
+        profile = sections.get("company_profile", {})
+        if isinstance(profile, dict):
+            for key, val in profile.items():
+                if val is not None and key not in ("raw_html",):
+                    evidence.append({
+                        "evidence_id": f"info-profile-{_safe_id(key)}",
+                        "kind": "fundamentals",
+                        "field": key,
+                        "value": val,
+                        "unit": None,
+                        "source_type": "stock-info-fetch",
+                        "source_ref": f"company_profile:{key}",
+                        "usable": True,
+                    })
+        # Performance/earnings data
+        perf = sections.get("performance", {})
+        if isinstance(perf, dict):
+            perf_data = perf.get("data", {})
+            if isinstance(perf_data, dict):
+                for key, val in perf_data.items():
+                    if val is not None:
+                        evidence.append({
+                            "evidence_id": f"info-perf-{_safe_id(key)}",
+                            "kind": "fundamentals",
+                            "field": key,
+                            "value": val,
+                            "unit": None,
+                            "source_type": "stock-info-fetch",
+                            "source_ref": f"performance:{key}",
+                            "usable": True,
+                        })
+        # Company scores
+        scores = sections.get("company_scores", {})
+        if isinstance(scores, dict):
+            scores_data = scores.get("data", {})
+            if isinstance(scores_data, dict):
+                for key, val in scores_data.items():
+                    if val is not None:
+                        evidence.append({
+                            "evidence_id": f"info-score-{_safe_id(key)}",
+                            "kind": "fundamentals",
+                            "field": key,
+                            "value": val,
+                            "unit": None,
+                            "source_type": "stock-info-fetch",
+                            "source_ref": f"company_scores:{key}",
+                            "usable": True,
+                        })
 
     if ir_result.parsed:
         for doc in ir_result.parsed.get("documents", []):
