@@ -142,7 +142,7 @@ def _reject_nonfinite(value):
 def _validate_manifest(payload, ticker):
     if not isinstance(payload, dict):
         return False
-    if payload.get("schema_version") != "1.0":
+    if payload.get("schema_version") != "1.1":
         return False
     if payload.get("ticker") != ticker:
         return False
@@ -156,7 +156,7 @@ def _validate_manifest(payload, ticker):
     # status must be valid
     if payload.get("status") not in ("success", "partial", "failed", "unsupported"):
         return False
-    # sync must be a dict with valid mode
+    # sync must be a dict with valid mode and new schema 1.1 fields
     sync = payload.get("sync")
     if not isinstance(sync, dict):
         return False
@@ -176,18 +176,44 @@ def _validate_manifest(payload, ticker):
             return False
         if wsd > wed:
             return False
+    # start_urls must be list of HTTPS strings
+    start_urls = sync.get("start_urls")
+    if not isinstance(start_urls, list):
+        return False
+    for u in start_urls:
+        if not isinstance(u, str) or not u.startswith("https://"):
+            return False
+    # dynamic_pages must be list of strings
+    dynamic_pages = sync.get("dynamic_pages")
+    if not isinstance(dynamic_pages, list):
+        return False
+    for u in dynamic_pages:
+        if not isinstance(u, str):
+            return False
     # summary must be a dict with correct types
     summary = payload.get("summary")
     if not isinstance(summary, dict):
         return False
     if not isinstance(summary.get("usable"), bool):
         return False
+    if not isinstance(summary.get("coverage_complete"), bool):
+        return False
     for key in ("discovered", "new_documents", "new_versions", "unchanged",
-                "no_longer_listed", "fetch_errors", "extraction_errors"):
+                "no_longer_listed", "fetch_errors", "extraction_errors",
+                "prohibited_documents", "dynamic_pages"):
         val = summary.get(key)
         if not isinstance(val, int) or isinstance(val, bool):
             return False
         if val < 0:
+            return False
+    # latest_published_at must be valid date string or None
+    lpa = summary.get("latest_published_at")
+    if lpa is not None:
+        if not isinstance(lpa, str):
+            return False
+        try:
+            date.fromisoformat(lpa)
+        except (ValueError, TypeError):
             return False
     # errors must be list of dicts with section/code/message
     errors = payload.get("errors")

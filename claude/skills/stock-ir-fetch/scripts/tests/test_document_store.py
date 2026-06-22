@@ -2,6 +2,8 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from document_store import DocumentStore, document_id, normalize_document_url
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -62,23 +64,89 @@ def test_save_version_changed_hash_adds_new_version(tmp_path):
     assert meta["version_count"] == 2
 
 
-def test_save_manifest(tmp_path):
-    store = DocumentStore(tmp_path)
-    manifest = {
-        "schema_version": "1.0",
+def _valid_manifest_1_1():
+    return {
+        "schema_version": "1.1",
         "run_id": "20260621T120000+0900-285A",
         "ticker": "285A",
         "as_of": NOW.isoformat(),
-        "status": "success",
-        "sync": {"mode": "initial", "window_start": "2023-06-21", "window_end": "2026-06-21"},
+        "status": "partial",
+        "sync": {
+            "mode": "initial",
+            "window_start": "2023-06-21",
+            "window_end": "2026-06-21",
+            "index_url": "https://example.co.jp/ir/library.html",
+            "start_urls": [
+                "https://example.co.jp/ir.html",
+                "https://example.co.jp/ir/library.html",
+            ],
+            "visited_pages": ["https://example.co.jp/ir.html"],
+            "dynamic_pages": ["https://example.co.jp/ir/data.html"],
+            "index_parse_status": "incomplete",
+        },
         "documents": [],
         "errors": [],
-        "summary": {"discovered": 0, "new_documents": 0, "new_versions": 0, "unchanged": 0, "no_longer_listed": 0, "fetch_errors": 0, "extraction_errors": 0, "usable": True},
+        "summary": {
+            "discovered": 0,
+            "new_documents": 0,
+            "new_versions": 0,
+            "unchanged": 0,
+            "no_longer_listed": 0,
+            "fetch_errors": 0,
+            "extraction_errors": 0,
+            "prohibited_documents": 0,
+            "dynamic_pages": 1,
+            "coverage_complete": False,
+            "latest_published_at": None,
+            "usable": False,
+        },
     }
+
+
+def test_save_manifest(tmp_path):
+    store = DocumentStore(tmp_path)
+    manifest = _valid_manifest_1_1()
     path = store.save_manifest("285A", manifest)
     loaded = store.load_manifest("285A")
     assert loaded is not None
     assert loaded["ticker"] == "285A"
+    assert loaded["schema_version"] == "1.1"
+
+
+def test_load_rejects_schema_1_0(tmp_path):
+    store = DocumentStore(tmp_path)
+    manifest = _valid_manifest_1_1()
+    manifest["schema_version"] = "1.0"
+    manifest["sync"].pop("start_urls", None)
+    manifest["sync"].pop("dynamic_pages", None)
+    manifest_path = store.manifest_path("285A")
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(manifest))
+    assert store.load_manifest("285A") is None
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("summary", "prohibited_documents"), -1),
+        (("summary", "dynamic_pages"), True),
+        (("summary", "coverage_complete"), "yes"),
+        (("summary", "latest_published_at"), "2026-13-40"),
+        (("sync", "start_urls"), "https://example.co.jp/ir"),
+        (("sync", "dynamic_pages"), [123]),
+    ],
+)
+def test_load_rejects_invalid_coverage_contract(tmp_path, path, value):
+    store = DocumentStore(tmp_path)
+    payload = _valid_manifest_1_1()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    manifest_path = store.manifest_path("285A")
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(payload))
+    assert store.load_manifest("285A") is None
 
 
 def test_load_rejects_corrupt_manifest(tmp_path):

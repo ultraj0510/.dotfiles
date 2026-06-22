@@ -35,19 +35,22 @@ def _ir_root_path(url):
 
 def _empty_manifest(ticker, now, status, errors=None):
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "run_id": f"{now.strftime('%Y%m%dT%H%M%S%z')}-{ticker}",
         "ticker": ticker,
         "as_of": now.isoformat(),
         "status": status,
         "sync": {"mode": "none", "window_start": None, "window_end": None,
-                 "index_url": "", "visited_pages": [], "index_parse_status": ""},
+                 "index_url": "", "start_urls": [], "visited_pages": [],
+                 "dynamic_pages": [], "index_parse_status": ""},
         "documents": [],
         "errors": errors or [],
         "summary": {
             "discovered": 0, "new_documents": 0, "new_versions": 0,
             "unchanged": 0, "no_longer_listed": 0, "fetch_errors": 0,
-            "extraction_errors": 0, "usable": False,
+            "extraction_errors": 0, "prohibited_documents": 0,
+            "dynamic_pages": 0, "coverage_complete": False,
+            "latest_published_at": None, "usable": False,
         },
     }
 
@@ -90,7 +93,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         candidates = discover_candidates(normalized, meta_provider, http)
         if candidates:
             return {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "ticker": normalized,
                 "status": "confirmation_required",
                 "candidates": candidates,
@@ -158,7 +161,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         for doc in prev_manifest.get("documents", []):
             prev_docs[doc["document_id"]] = doc
     manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "run_id": f"{now.strftime('%Y%m%dT%H%M%S%z')}-{normalized}",
         "ticker": normalized,
         "as_of": now.isoformat(),
@@ -168,15 +171,19 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
             "window_start": window_start.isoformat(),
             "window_end": window_end.isoformat(),
             "index_url": index_url,
+            "start_urls": start_urls,
             "visited_pages": scan["visited_pages"],
+            "dynamic_pages": scan["dynamic_pages"],
             "index_parse_status": scan["status"] if scan["complete"] else "incomplete",
         },
         "documents": [],
-        "errors": list(prev_manifest.get("errors", [])) if prev_manifest else [],
+        "errors": [],
         "summary": {
             "discovered": len(scan["entries"]),
             "new_documents": 0, "new_versions": 0, "unchanged": 0,
             "no_longer_listed": 0, "fetch_errors": 0, "extraction_errors": 0,
+            "prohibited_documents": 0, "dynamic_pages": len(scan["dynamic_pages"]),
+            "coverage_complete": False, "latest_published_at": None,
             "usable": False,
         },
     }
@@ -192,6 +199,7 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     current_doc_ids = set()
     discovered_ids = set()
     seen_entry_ids = set()
+    prohibited_titles = []
     for entry in scan["entries"]:
         entry_doc_id = document_id(entry["url"], entry["published_at"])
         if entry_doc_id in seen_entry_ids:
@@ -199,6 +207,8 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         seen_entry_ids.add(entry_doc_id)
         discovered_ids.add(entry_doc_id)
         if _is_prohibited_url(entry["url"]):
+            prohibited_titles.append(entry["title"])
+            manifest["summary"]["prohibited_documents"] += 1
             continue
 
         category = classify_document(entry["title"], entry.get("context", ""))
@@ -272,10 +282,43 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
         manifest["status"] = "failed"
     if not manifest["documents"] and not scan["entries"]:
         manifest["status"] = "unsupported"
-    manifest["summary"]["usable"] = (
-        len(manifest["documents"]) > 0
-        and scan["complete"]
+
+    # Prohibited delivery error (aggregated, no URLs)
+    if prohibited_titles:
+        top5 = prohibited_titles[:5]
+        manifest["errors"].append({
+            "section": "document",
+            "code": "prohibited_external_delivery",
+            "message": f"{len(prohibited_titles)} official IR link(s) not fetched because delivery source is prohibited",
+            "titles": top5,
+        })
+
+    # Dynamic IR component error
+    if scan["dynamic_pages"]:
+        manifest["errors"].append({
+            "section": "index",
+            "code": "dynamic_ir_component",
+            "message": f"{len(scan['dynamic_pages'])} page(s) use dynamic IR components; static scan may be incomplete",
+        })
+
+    # Compute latest_published_at
+    published_dates = [
+        doc["published_at"]
+        for doc in manifest["documents"]
+        if isinstance(doc.get("published_at"), str)
+    ]
+    manifest["summary"]["latest_published_at"] = max(published_dates, default=None)
+
+    # Separate usable (have documents) from coverage_complete (everything fetched)
+    manifest["summary"]["coverage_complete"] = (
+        scan["complete"]
+        and manifest["summary"]["prohibited_documents"] == 0
+        and not scan["dynamic_pages"]
     )
+    manifest["summary"]["usable"] = len(manifest["documents"]) > 0
+
+    if not manifest["summary"]["coverage_complete"]:
+        manifest["status"] = "partial"
 
     # If initial sync found entries but all were filtered, mark unsupported
     if mode == "initial" and not manifest["documents"] and seen_entry_ids:
