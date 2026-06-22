@@ -73,7 +73,8 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
                         complete = False
 
     status = "ok"
-    if not entries and not errors and visited:
+    # Only mark unsupported for single-page visits with JS markers
+    if not entries and not errors and len(visited) == 1:
         for u in list(visited)[:1]:
             r = http_client.fetch(u, {approved_domain}, 5 * 1024 * 1024)
             if r.body:

@@ -144,7 +144,6 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     if prev_manifest:
         for doc in prev_manifest.get("documents", []):
             prev_docs[doc["document_id"]] = doc
-
     manifest = {
         "schema_version": "1.0",
         "run_id": f"{now.strftime('%Y%m%dT%H%M%S%z')}-{normalized}",
