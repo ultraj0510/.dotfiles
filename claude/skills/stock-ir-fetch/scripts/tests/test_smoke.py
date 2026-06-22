@@ -118,6 +118,9 @@ def test_live_sync(ticker, tmp_path):
         assert meta_path.exists(), f"metadata.json missing for {did}"
         meta = json.loads(meta_path.read_text())
         latest_sha = meta.get("latest_sha256", "")
+        # Metadata, original, and manifest must all agree
+        assert latest_sha == sha_manifest, \
+            f"metadata SHA != manifest SHA: {latest_sha[:12]} vs {sha_manifest[:12]}"
         # Find original file
         ver_dir = doc_dir / "versions" / latest_sha
         orig_files = list(ver_dir.glob("original.*"))
@@ -125,7 +128,8 @@ def test_live_sync(ticker, tmp_path):
         orig_path = orig_files[0]
         # Recompute SHA
         actual_sha = hashlib.sha256(orig_path.read_bytes()).hexdigest()
-        assert actual_sha == latest_sha, f"SHA mismatch: manifest={latest_sha[:12]} actual={actual_sha[:12]}"
+        assert actual_sha == sha_manifest, \
+            f"original SHA != manifest SHA: {actual_sha[:12]} vs {sha_manifest[:12]}"
         # Check extracted text
         txt_path = ver_dir / "extracted.txt"
         assert txt_path.exists(), f"extracted.txt missing for {did}"
@@ -162,10 +166,10 @@ def test_live_sync(ticker, tmp_path):
     # Verify originals were NOT re-written (same inode)
     for d in incremental.get("documents", []):
         did = d["document_id"]
-        if did in mtimes_before:
-            sha = d["sha256"]
-            ver_dir = base / did / "versions" / sha
-            orig_files = list(ver_dir.glob("original.*"))
-            if orig_files:
-                new_ino = _os.stat(str(orig_files[0])).st_ino
-                assert new_ino == mtimes_before[did], f"Original re-written for {did}"
+        assert did in mtimes_before, f"Doc {did} not in first-run set"
+        sha = d["sha256"]
+        ver_dir = base / did / "versions" / sha
+        orig_files = list(ver_dir.glob("original.*"))
+        assert orig_files, f"Original missing on second run for {did}"
+        new_ino = _os.stat(str(orig_files[0])).st_ino
+        assert new_ino == mtimes_before[did], f"Original re-written for {did}"
