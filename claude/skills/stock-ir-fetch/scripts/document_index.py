@@ -26,8 +26,15 @@ _JS_SHELL_MARKERS = re.compile(
     r'|data-sly-|clientlib',
 )
 
+_IR_NAV_LABELS = re.compile(
+    r"IRニュース|IRライブラ|決算短信|決算説明|有価証券|半期報告|"
+    r"統合報告|IRイベント|経営方針|Investor|archive|library|past|過去|"
+    r"page=|p=\d+",
+    re.IGNORECASE,
+)
+
 def scan_index(start_urls, window_start, window_end, approved_domain, http_client,
-               max_depth=2, max_pages=20):
+               ir_root_paths=(), max_depth=2, max_pages=24):
     """Crawl the IR index and return matching entries.
 
     Returns dict with keys: entries, visited_pages, complete, status, errors, dynamic_pages.
@@ -64,7 +71,7 @@ def scan_index(start_urls, window_start, window_end, approved_domain, http_clien
             complete = False
             continue
 
-        page_entries, page_links = _parse_index_page(html, url, window_start, window_end, approved_domain)
+        page_entries, page_links = _parse_index_page(html, url, window_start, window_end, approved_domain, ir_root_paths)
         entries.extend(page_entries)
 
         if depth < max_depth:
@@ -108,7 +115,7 @@ def _decode(body):
     return ""
 
 
-def _parse_index_page(html, base_url, window_start, window_end, approved_domain):
+def _parse_index_page(html, base_url, window_start, window_end, approved_domain, ir_root_paths=()):
     soup = BeautifulSoup(html, "html.parser")
     entries = []
     links = []
@@ -131,7 +138,11 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
         # Archive/index links for further crawling (not documents)
         is_crawl_target = False
         if link_domain == approved_domain:
-            if _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
+            if ir_root_paths:
+                if _is_ir_navigation_target(absolute, text, approved_domain, ir_root_paths):
+                    links.append(absolute)
+                    is_crawl_target = True
+            elif _ARCHIVE_LABELS.search(text) or _ARCHIVE_LABELS.search(href_lower):
                 if _looks_like_crawl_target(href_lower):
                     links.append(absolute)
                     is_crawl_target = True
@@ -172,6 +183,20 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
 def _looks_like_crawl_target(href_lower):
     """Archive/year index pages, not document files."""
     return not _is_document_extension(href_lower)
+
+
+def _is_ir_navigation_target(absolute_url, text, approved_domain, ir_root_paths):
+    from safe_http import registrable_domain
+    parsed = urlparse(absolute_url)
+    if registrable_domain(parsed.hostname or "") != approved_domain:
+        return False
+    if _is_document_extension(absolute_url.lower()):
+        return False
+    path = parsed.path.rstrip("/")
+    if not any(path == root or path.startswith(f"{root}/") or path.startswith(f"{root}.")
+               for root in ir_root_paths):
+        return False
+    return bool(_IR_NAV_LABELS.search(f"{text} {absolute_url}"))
 
 
 def _looks_like_document_target(href_lower, text):

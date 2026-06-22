@@ -26,6 +26,13 @@ JST = ZoneInfo("Asia/Tokyo")
 DEFAULT_DATA_DIR = Path("/Users/fujie/code/runtime/stock-company-analysis")
 
 
+def _ir_root_path(url):
+    path = urlparse(url).path.rstrip("/")
+    if path.endswith(".html"):
+        path = path[:-5]
+    return path or "/"
+
+
 def _empty_manifest(ticker, now, status, errors=None):
     return {
         "schema_version": "1.0",
@@ -110,7 +117,13 @@ def fetch_stock_ir(ticker, data_dir=DEFAULT_DATA_DIR, now=None, refresh=False,
     index_url = source["document_index_url"]
     allowed = {domain}
 
-    scan = scan_index(index_url, window_start, window_end, domain, http)
+    start_urls = list(dict.fromkeys([
+        source["ir_top_url"],
+        source["document_index_url"],
+    ]))
+    ir_root_paths = (_ir_root_path(source["ir_top_url"]),)
+
+    scan = scan_index(start_urls, window_start, window_end, domain, http, ir_root_paths)
     if scan["status"] == "error":
         # Do not overwrite existing manifest on failed sync
         return _empty_manifest(normalized, now, "failed", [{"section": "index", "code": "index_fetch_failed", "message": "All index pages failed to fetch"}])

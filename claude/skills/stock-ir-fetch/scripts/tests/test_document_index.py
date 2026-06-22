@@ -5,7 +5,7 @@ from fixtures import (
     KIOXIA_NEWS_CARD_HTML, KIOXIA_EVENT_GROUP_HTML, DISTANT_DATE_SECTION_HTML,
 )
 
-from document_index import scan_index, _extract_date, _extract_dates
+from document_index import scan_index, _extract_date, _extract_dates, _is_ir_navigation_target
 
 
 class FakeHttpClient:
@@ -154,3 +154,73 @@ def test_scan_does_not_attach_distant_section_date():
         http,
     )
     assert result["entries"] == []
+
+
+def test_scan_follows_ir_news_from_ir_top():
+    top = """
+    <a href="/ir/news.html">IRニュース</a>
+    <a href="/news/company.html">ニュース</a>
+    """
+    http = FakeHttpClient({
+        "https://example.co.jp/ir.html": top,
+        "https://example.co.jp/ir/news.html": KIOXIA_NEWS_CARD_HTML,
+        "https://example.co.jp/ir/library.html": "<p>library</p>",
+    })
+    result = scan_index(
+        [
+            "https://example.co.jp/ir.html",
+            "https://example.co.jp/ir/library.html",
+        ],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+        ("/ir",),
+    )
+    assert "https://example.co.jp/ir/news.html" in result["visited_pages"]
+    # Non-IR paths must not be crawled
+    assert "https://example.co.jp/news/company.html" not in http.calls
+
+
+def test_scan_deduplicates_multiple_start_urls():
+    http = FakeHttpClient({
+        "https://example.co.jp/ir.html": '<a href="/ir/library.html">IRライブラリー</a>',
+        "https://example.co.jp/ir/library.html": "<p>library</p>",
+    })
+    result = scan_index(
+        [
+            "https://example.co.jp/ir.html",
+            "https://example.co.jp/ir/library.html",
+            "https://example.co.jp/ir/library.html",
+        ],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+        ("/ir",),
+    )
+    assert http.calls.count("https://example.co.jp/ir/library.html") == 1
+    assert result["complete"] is True
+
+
+def test_is_ir_navigation_target_filters_non_ir_paths():
+    # Under /ir/ root with IR labels → accepted
+    assert _is_ir_navigation_target(
+        "https://example.co.jp/ir/news.html", "IRニュース",
+        "example.co.jp", ("/ir",),
+    )
+    # Outside /ir/ root → rejected
+    assert not _is_ir_navigation_target(
+        "https://example.co.jp/news/company.html", "ニュース",
+        "example.co.jp", ("/ir",),
+    )
+    # PDF documents → rejected (not crawl targets)
+    assert not _is_ir_navigation_target(
+        "https://example.co.jp/ir/results.pdf", "決算短信",
+        "example.co.jp", ("/ir",),
+    )
+    # Different domain → rejected
+    assert not _is_ir_navigation_target(
+        "https://other.co.jp/ir/news.html", "IRニュース",
+        "example.co.jp", ("/ir",),
+    )
