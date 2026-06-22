@@ -7,7 +7,7 @@ def test_main_prints_json_only_to_stdout(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         module,
         "fetch_stock_price",
-        lambda ticker, data_dir, refresh=False: {
+        lambda ticker, data_dir, refresh=False, benchmark=None: {
             "status": "success",
             "ticker": ticker,
         },
@@ -25,7 +25,7 @@ def test_main_returns_one_for_failed_result(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         module,
         "fetch_stock_price",
-        lambda ticker, data_dir, refresh=False: {
+        lambda ticker, data_dir, refresh=False, benchmark=None: {
             "status": "failed",
             "ticker": "",
         },

@@ -16,6 +16,7 @@ from yahoo_provider import PriceProviderError, YahooPriceProvider
 
 JST = ZoneInfo("Asia/Tokyo")
 DEFAULT_DATA_DIR = Path("/Users/fujie/code/runtime/stock-company-analysis")
+_BENCHMARK_SYMBOLS = {"TOPIX": "^TOPX"}
 
 
 def _five_year_start(now):
@@ -115,12 +116,13 @@ def _intraday_start(existing_bars, now):
 
 
 def _build_payload(ticker, symbol, now, mode, daily_start, intraday_start,
-                   daily_series, intraday_series, errors, reconcile_reason, minimum_daily_rows):
+                   daily_series, intraday_series, errors, reconcile_reason, minimum_daily_rows,
+                   is_benchmark=False, benchmark_id=None):
     status = "success" if not errors else "partial"
     summary = _build_summary(daily_series, intraday_series, minimum_daily_rows)
     if not daily_series["bars"] and not intraday_series["bars"]:
         status = "failed"
-    return {
+    payload = {
         "schema_version": "1.1",
         "run_id": f"{now.strftime('%Y%m%dT%H%M%S%z')}-{ticker}",
         "ticker": ticker,
@@ -154,6 +156,10 @@ def _build_payload(ticker, symbol, now, mode, daily_start, intraday_start,
         "errors": errors,
         "summary": summary,
     }
+    if is_benchmark:
+        payload["instrument_type"] = "benchmark"
+        payload["benchmark_id"] = benchmark_id
+    return payload
 
 
 def fetch_stock_price(
@@ -163,16 +169,25 @@ def fetch_stock_price(
     refresh=False,
     provider=None,
     minimum_daily_rows=200,
+    benchmark=None,
 ):
     now = now or datetime.now(JST)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(JST)
-    normalized = normalize_ticker(ticker)
-    if normalized is None:
-        return _failed_result(ticker, now, "ticker_invalid", "Invalid ticker format")
 
-    symbol = to_provider_symbol(normalized)
+    is_benchmark = benchmark is not None
+    if is_benchmark:
+        if benchmark not in _BENCHMARK_SYMBOLS:
+            return _failed_result(ticker, now, "benchmark_unknown",
+                                  f"Unknown benchmark: {benchmark}. Supported: {list(_BENCHMARK_SYMBOLS)}")
+        normalized = benchmark
+        symbol = _BENCHMARK_SYMBOLS[benchmark]
+    else:
+        normalized = normalize_ticker(ticker)
+        if normalized is None:
+            return _failed_result(ticker, now, "ticker_invalid", "Invalid ticker format")
+        symbol = to_provider_symbol(normalized)
     store = PriceStore(data_dir)
 
     # Always load previous as safety net (P1#1: refresh no longer discards)
@@ -191,6 +206,46 @@ def fetch_stock_price(
     errors = []
     incoming_daily = []
     incoming_intraday = []
+
+    if is_benchmark:
+        # Benchmarks: daily only, skip intraday and corporate action
+        incoming_intraday = []
+        intraday_error = None
+        old_intraday_bars = []
+        reconcile_reason = None
+        try:
+            incoming_daily = normalize_daily(
+                provider.fetch_daily(symbol, daily_start, end)
+            )
+        except (PriceProviderError, PriceDataError) as exc:
+            daily_error = exc
+            errors.append(_error(
+                exc.code, "Daily benchmark retrieval failed",
+                getattr(exc, "retryable", False),
+            ))
+            incoming_daily = []
+        # Jump to series building
+        daily_fetched_new = bool(incoming_daily)
+        if incoming_daily:
+            daily_bars = merge_bars(old_daily_bars, incoming_daily, "date")
+            daily_series = _series_result(daily_bars, "ok", now.isoformat())
+        elif daily_error and prev_daily:
+            daily_series = dict(prev_daily)
+        elif old_daily_bars:
+            daily_series = dict(prev_daily) if prev_daily else _series_result(old_daily_bars, "ok", "")
+        elif daily_error:
+            daily_series = _empty_series("error", now.isoformat())
+        else:
+            daily_series = _empty_series("not_available", now.isoformat())
+        intraday_series = _empty_series("not_available", now.isoformat())
+        payload = _build_payload(
+            normalized, symbol, now, mode, daily_start, intraday_start,
+            daily_series, intraday_series, errors, reconcile_reason, minimum_daily_rows,
+            is_benchmark=True, benchmark_id=benchmark,
+        )
+        if payload["status"] != "failed" and (daily_fetched_new or previous is None):
+            store.save(normalized, payload)
+        return payload
 
     # --- Daily fetch ---
     daily_error = None
@@ -313,6 +368,9 @@ def _parser():
     parser.add_argument("ticker")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--benchmark", type=str, default=None,
+                        choices=["TOPIX"],
+                        help="Fetch benchmark index instead of stock")
     return parser
 
 
@@ -322,6 +380,7 @@ def main(argv=None):
         args.ticker,
         args.data_dir,
         refresh=args.refresh,
+        benchmark=args.benchmark,
     )
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2, allow_nan=False)
     sys.stdout.write("\n")
