@@ -106,6 +106,34 @@ def test_live_sync(ticker, tmp_path):
     for did in doc_ids:
         assert len(did) == 24 and all(c in "0123456789abcdef" for c in did), f"Bad doc_id: {did}"
 
+    # Verify SHA-256 and extracted text for each saved document
+    import hashlib, os as _os
+    base = tmp_path / "285A" / "raw" / "stock-ir-fetch" / "documents"
+    mtimes_before = {}
+    for d in docs:
+        did = d["document_id"]
+        sha_manifest = d["sha256"]
+        doc_dir = base / did
+        meta_path = doc_dir / "metadata.json"
+        assert meta_path.exists(), f"metadata.json missing for {did}"
+        meta = json.loads(meta_path.read_text())
+        latest_sha = meta.get("latest_sha256", "")
+        # Find original file
+        ver_dir = doc_dir / "versions" / latest_sha
+        orig_files = list(ver_dir.glob("original.*"))
+        assert orig_files, f"No original.* in {ver_dir}"
+        orig_path = orig_files[0]
+        # Recompute SHA
+        actual_sha = hashlib.sha256(orig_path.read_bytes()).hexdigest()
+        assert actual_sha == latest_sha, f"SHA mismatch: manifest={latest_sha[:12]} actual={actual_sha[:12]}"
+        # Check extracted text
+        txt_path = ver_dir / "extracted.txt"
+        assert txt_path.exists(), f"extracted.txt missing for {did}"
+        txt = txt_path.read_text()
+        assert len(txt.strip()) > 0, f"extracted.txt empty for {did}"
+        # Record mtime for non-rewrite check
+        mtimes_before[did] = _os.stat(str(orig_path)).st_ino
+
     # No TDnet/EDINET references anywhere in output or errors
     for kw in ("tdnet", "edinet"):
         assert kw not in first.stdout.lower(), f"TDnet/EDINET in stdout"
@@ -122,12 +150,22 @@ def test_live_sync(ticker, tmp_path):
     )
     assert second.returncode == 0
     incremental = json.loads(second.stdout)
-    assert incremental["status"] in ("success", "partial", "unsupported")
+    assert incremental["status"] in ("success", "partial")
     assert incremental["sync"]["mode"] == "incremental", \
         f"Expected incremental, got {incremental['sync']['mode']}"
     # 90-day incremental window (±3 days)
     inc_start = date.fromisoformat(incremental["sync"]["window_start"])
     expected_90d = (now - __import__("datetime").timedelta(days=90)).date()
     assert abs((inc_start - expected_90d).days) <= 3, f"inc window_start={inc_start} expected~{expected_90d}"
-    # Must have either unchanged docs or new versions
-    assert incremental["summary"]["unchanged"] + incremental["summary"]["new_versions"] >= 0
+    # Must have unchanged docs (not zero)
+    assert incremental["summary"]["unchanged"] > 0, f"No unchanged docs in incremental sync"
+    # Verify originals were NOT re-written (same inode)
+    for d in incremental.get("documents", []):
+        did = d["document_id"]
+        if did in mtimes_before:
+            sha = d["sha256"]
+            ver_dir = base / did / "versions" / sha
+            orig_files = list(ver_dir.glob("original.*"))
+            if orig_files:
+                new_ino = _os.stat(str(orig_files[0])).st_ino
+                assert new_ino == mtimes_before[did], f"Original re-written for {did}"
