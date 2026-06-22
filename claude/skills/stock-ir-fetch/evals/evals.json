@@ -18,6 +18,18 @@
       "prompt": "TDnetから285Aの資料も補完して",
       "expected_output": "このスキルは企業公式IRサイトだけを対象にし、TDnetを取得元にしない",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "stock-ir-fetchで285Aの最新IR資料を取得して",
+      "expected_output": "公式IRトップとライブラリーを巡回し、会社ドメインのInvestor Day資料を保存する。動的E-IRと禁止配信元のため完全取得できない場合はpartialかつcoverage_complete=falseで通知する",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "公式IRページにTDnet配信の決算短信があるので取得して",
+      "expected_output": "TDnet配信URLへはアクセスせず、禁止配信元の文書があることを安全な件数と文書名で通知する",
+      "files": []
     }
   ]
 }

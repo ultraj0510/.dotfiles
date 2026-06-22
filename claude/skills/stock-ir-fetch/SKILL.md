@@ -17,7 +17,17 @@ stock-ir-fetch <ticker> [--refresh] [--data-dir PATH] [--approve-source ID] [--a
 
 - 未承認 → Yahoo Financeから候補を発見し `confirmation_required` を返す
 - 承認済み → 初回3年・通常90日の差分同期
+- 同一公式ドメインのIRトップ、IRニュース、IRライブラリーを静的HTMLで巡回する
+- 動的E-IR部品は実行せず、`status=partial`と`coverage_complete=false`で通知する
 - 静的HTML限定、JSサイトは `unsupported`
+
+## カバレッジ
+
+- 同一公式ドメインのIRトップ、IRニュース、IRライブラリーを静的HTMLで巡回する。
+- 動的E-IR部品は実行せず、`status=partial`と`coverage_complete=false`で通知する。
+- 公式IRページから禁止配信元へリンクされている文書は取得せず、件数と文書名だけを安全に通知する。
+- `summary.usable`は保存済み文書を分析入力として利用できるかを示す。
+- `summary.coverage_complete`は公式IR一覧を完全に確認できたかを示す。
 
 ## 実行
 
@@ -27,8 +37,12 @@ stock-ir-fetch <ticker> [--refresh] [--data-dir PATH] [--approve-source ID] [--a
 
 ## 出力
 
-- 標準出力: JSONのみ
+- 標準出力: JSONのみ（schema 1.1）
 - `status`: `success`, `partial`, `failed`, `confirmation_required`, `unsupported`
+- `summary.usable`: 保存済み文書が存在するか
+- `summary.coverage_complete`: 静的取得ですべてのIRリンクをカバーできたか
+- `summary.prohibited_documents`: 禁止配信元のため取得しなかった文書数
+- `summary.dynamic_pages`: 動的E-IR部品を含むページ数
 
 ## 禁止事項
 
