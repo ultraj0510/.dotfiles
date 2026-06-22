@@ -3,6 +3,7 @@ from datetime import date
 from fixtures import (
     TABLE_HTML, CARD_HTML, ARCHIVE_HTML, JS_ONLY_HTML,
     KIOXIA_NEWS_CARD_HTML, KIOXIA_EVENT_GROUP_HTML, DISTANT_DATE_SECTION_HTML,
+    EIR_COMPONENT_HTML,
 )
 
 from document_index import scan_index, _extract_date, _extract_dates, _is_ir_navigation_target
@@ -224,3 +225,19 @@ def test_is_ir_navigation_target_filters_non_ir_paths():
         "https://other.co.jp/ir/news.html", "IRニュース",
         "example.co.jp", ("/ir",),
     )
+
+
+def test_scan_reports_dynamic_eir_component_as_incomplete():
+    http = FakeHttpClient({
+        "https://example.co.jp/ir/data.html": EIR_COMPONENT_HTML,
+    })
+    result = scan_index(
+        ["https://example.co.jp/ir/data.html"],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+    )
+    assert result["dynamic_pages"] == ["https://example.co.jp/ir/data.html"]
+    assert result["complete"] is False
+    assert result["status"] == "ok"

@@ -72,6 +72,15 @@ KIOXIA_EVENT_GROUP_HTML = """
 </div>
 """
 
+EIR_COMPONENT_HTML = """
+<h1>決算短信</h1>
+<div class="eir" data-area-name="area_tanshin_001"></div>
+<script>
+scriptLoader.setSrc(eirPassCore + 'eir_common.js');
+scriptLoader.load(function(){setParts('file_tanshin_001');});
+</script>
+"""
+
 DISTANT_DATE_SECTION_HTML = """
 <section>
   <h2>2026年6月2日</h2>

@@ -26,6 +26,11 @@ _JS_SHELL_MARKERS = re.compile(
     r'|data-sly-|clientlib',
 )
 
+_DYNAMIC_IR_MARKERS = re.compile(
+    r'data-area-name="area_[^"]+"|setParts\([\'"]file_[^\'"]+[\'"]\)|eir_common\.js',
+    re.IGNORECASE,
+)
+
 _IR_NAV_LABELS = re.compile(
     r"IRニュース|IRライブラ|決算短信|決算説明|有価証券|半期報告|"
     r"統合報告|IRイベント|経営方針|Investor|archive|library|past|過去|"
@@ -70,6 +75,10 @@ def scan_index(start_urls, window_start, window_end, approved_domain, http_clien
             errors.append({"url": url, "code": "decode_failed", "message": "Could not decode response"})
             complete = False
             continue
+
+        if _DYNAMIC_IR_MARKERS.search(html):
+            dynamic_pages.append(url)
+            complete = False
 
         page_entries, page_links = _parse_index_page(html, url, window_start, window_end, approved_domain, ir_root_paths)
         entries.extend(page_entries)
