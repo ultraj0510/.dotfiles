@@ -113,17 +113,26 @@ def test_live_sync(ticker, tmp_path):
     for did in doc_ids:
         assert len(did) == 24 and all(c in "0123456789abcdef" for c in did), f"Bad doc_id: {did}"
 
-    # All document URLs must be on the approved domain
+    # All document URLs must be on approved domain or allowed delivery domain
+    # (KIOXIA uses eir-parts.net for E-IR delivery — not TDnet/EDINET)
     import hashlib, os as _os
     base = tmp_path / "285A" / "raw" / "stock-ir-fetch" / "documents"
+    _PROHIBITED_DELIVERY = ("tdnet", "edinet", "disclosure.edinet-fsa", "eoldisclosure")
     for d in docs:
         did = d["document_id"]
         meta_path = base / did / "metadata.json"
         assert meta_path.exists(), f"metadata.json missing for {did}"
         meta = json.loads(meta_path.read_text())
         doc_url = meta.get("url", "")
-        assert "kioxia-holdings.com" in doc_url, \
-            f"Document {did} not hosted on approved domain: {doc_url}"
+        url_lower = doc_url.lower()
+        assert not any(kw in url_lower for kw in _PROHIBITED_DELIVERY), \
+            f"Document {did} hosted on prohibited domain: {doc_url}"
+    # Investor Day documents must be on kioxia-holdings.com
+    investor_day_docs = [d for d in docs if d["published_at"] == "2026-06-02"]
+    for d in investor_day_docs:
+        meta = json.loads((base / d["document_id"] / "metadata.json").read_text())
+        assert "kioxia-holdings.com" in meta.get("url", ""), \
+            f"Investor Day doc not on company domain: {meta.get('url')}"
 
     # Verify SHA-256 and extracted text for each saved document
     mtimes_before = {}
