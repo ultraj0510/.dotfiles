@@ -26,17 +26,21 @@ _JS_SHELL_MARKERS = re.compile(
     r'|data-sly-|clientlib',
 )
 
-def scan_index(start_url, window_start, window_end, approved_domain, http_client,
+def scan_index(start_urls, window_start, window_end, approved_domain, http_client,
                max_depth=2, max_pages=20):
     """Crawl the IR index and return matching entries.
 
-    Returns dict with keys: entries, visited_pages, complete, status, errors.
+    Returns dict with keys: entries, visited_pages, complete, status, errors, dynamic_pages.
     """
+    if isinstance(start_urls, str):
+        start_urls = [start_urls]
+    ordered_starts = list(dict.fromkeys(start_urls))
+    scheduled = set(ordered_starts)
+    to_visit = [(url, 0) for url in ordered_starts]
     visited = set()
-    scheduled = {start_url}
     errors = []
     entries = []
-    to_visit = [(start_url, 0)]
+    dynamic_pages = []
     complete = True
 
     while to_visit:
@@ -91,6 +95,7 @@ def scan_index(start_url, window_start, window_end, approved_domain, http_client
         "complete": complete,
         "status": status,
         "errors": errors,
+        "dynamic_pages": dynamic_pages,
     }
 
 
@@ -144,15 +149,10 @@ def _parse_index_page(html, base_url, window_start, window_end, approved_domain)
         if not _looks_like_document_target(href_lower, text):
             continue
 
-        # Extract date from the nearest semantic block (not a page-wide container)
-        block = _nearest_block(a)
-        date_str = _extract_date(block)
-        if not date_str:
+        context = _entry_context(a)
+        if context is None:
             continue
-
-        # Verify date is from the same row/card, not a distant heading
-        if not _date_near_link(a, date_str):
-            continue
+        block, date_str = context
 
         try:
             entry_date = date.fromisoformat(date_str)
@@ -195,58 +195,42 @@ def _is_document_extension(href_lower):
                (".pdf", ".xlsx", ".xls", ".csv"))
 
 
-def _date_near_link(link_element, date_str):
-    """Check that date and link are in the same minimal card/row container."""
+def _extract_dates(text):
+    dates = []
+    for pattern in _JAPANESE_DATE_PATTERNS:
+        for match in pattern.finditer(text):
+            year, month, day = map(int, match.groups())
+            try:
+                parsed = date(year, month, day)
+            except ValueError:
+                continue
+            if 2000 <= parsed.year <= 2030:
+                value = parsed.isoformat()
+                if value not in dates:
+                    dates.append(value)
+    return dates
+
+
+def _entry_context(link_element):
     for depth, parent in enumerate(link_element.parents):
-        if parent.name == "body" or depth > 4:
-            return False
-        # Stop at section — too broad; article is a self-contained card
-        if parent.name == "section":
-            return False
-        # Row/card containers are acceptable
-        if parent.name in ("tr", "li", "article"):
-            parent_text = parent.get_text(" ", strip=True)
-            return _extract_date(parent_text) == date_str
-        if parent.name == "div":
-            parent_text = parent.get_text(" ", strip=True)
-            if len(parent_text) > 500:
-                continue  # too large, look closer
-            classes = " ".join(parent.get("class", [])).lower() if parent.get("class") else ""
-            if depth <= 2 or any(
-                kw in classes for kw in ("card", "item", "entry", "block", "post", "result", "list", "row")
-            ):
-                return _extract_date(parent_text) == date_str
-    return False
-
-
-def _nearest_block(element):
-    """Climb to a container that includes both date and link context.
-
-    Walk up ancestors and select the first block-level element whose text
-    contains at least two numeric tokens (typical for date + title) OR
-    the first <tr>/<li>/<article>/<section> encountered.
-    """
-    for parent in element.parents:
-        if parent.name == "td":
-            row = parent.find_parent("tr")
-            if row:
-                return row.get_text(" ", strip=True)
-            return parent.get_text(" ", strip=True)
-        if parent.name in ("tr", "li", "article", "section"):
-            return parent.get_text(" ", strip=True)
-        if parent.name == "div":
-            text = parent.get_text(" ", strip=True)
-            digit_count = sum(1 for c in text if c.isdigit())
-            # Climb past thin wrappers; stop at card/article-like containers
-            classes = parent.get("class", [])
-            class_str = " ".join(classes).lower() if classes else ""
-            if digit_count >= 4 or any(
-                kw in class_str for kw in ("card", "item", "entry", "block", "post", "article")
-            ):
-                return text
-        if parent.name == "body":
+        if parent.name == "body" or depth > 8:
             break
-    return element.get_text(" ", strip=True)
+        text = parent.get_text(" ", strip=True)
+        if not text or len(text) > 1200:
+            continue
+        dates = _extract_dates(text)
+        if len(dates) != 1:
+            continue
+        if parent.name in ("tr", "li", "article"):
+            return text, dates[0]
+        if parent.name == "div":
+            classes = " ".join(parent.get("class", [])).lower()
+            if depth <= 4 or any(
+                token in classes
+                for token in ("card", "item", "entry", "box", "row", "grid", "container")
+            ):
+                return text, dates[0]
+    return None
 
 
 def _extract_date(text):

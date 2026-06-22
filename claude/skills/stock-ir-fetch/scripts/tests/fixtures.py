@@ -45,3 +45,39 @@ PAGINATION_HTML = """
 <a href="/ir/?page=2">次へ</a>
 </body></html>
 """
+
+KIOXIA_NEWS_CARD_HTML = """
+<ul class="searchResult__list">
+  <li class="box">
+    <div class="virticalReverse">
+      <div class="button">
+        <a href="https://delivery.example/blocked/2026-results.pdf">
+          2026年3月期 決算短信
+        </a>
+      </div>
+      <div class="textTop"><span class="date">2026年05月15日</span></div>
+    </div>
+  </li>
+</ul>
+"""
+
+KIOXIA_EVENT_GROUP_HTML = """
+<div class="col--box">
+  <div class="aem-Grid">
+    <h2>Investor Day（2026年6月2日）</h2>
+    <div><a href="/ir/event/investor-day-script.pdf">プレゼンテーション資料（スクリプト付き）</a></div>
+    <div><a href="/ir/event/investor-day.pdf">プレゼンテーション資料</a></div>
+    <div><a href="/ir/event/investor-day-qa.pdf">質疑応答集</a></div>
+  </div>
+</div>
+"""
+
+DISTANT_DATE_SECTION_HTML = """
+<section>
+  <h2>2026年6月2日</h2>
+  <div class="large-unrelated-block">
+    <p>{body}</p>
+    <a href="/ir/unrelated.pdf">お知らせ</a>
+  </div>
+</section>
+""".replace("{body}", "x" * 1500)

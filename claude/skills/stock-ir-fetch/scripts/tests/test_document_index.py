@@ -1,8 +1,11 @@
 from datetime import date
 
-from fixtures import TABLE_HTML, CARD_HTML, ARCHIVE_HTML, JS_ONLY_HTML
+from fixtures import (
+    TABLE_HTML, CARD_HTML, ARCHIVE_HTML, JS_ONLY_HTML,
+    KIOXIA_NEWS_CARD_HTML, KIOXIA_EVENT_GROUP_HTML, DISTANT_DATE_SECTION_HTML,
+)
 
-from document_index import scan_index, _extract_date
+from document_index import scan_index, _extract_date, _extract_dates
 
 
 class FakeHttpClient:
@@ -106,3 +109,48 @@ def test_extract_date_dot():
 
 def test_extract_date_invalid():
     assert _extract_date("99年1月1日") == ""
+
+
+def test_scan_extracts_date_from_outer_news_card():
+    http = FakeHttpClient({
+        "https://example.co.jp/ir/news.html": KIOXIA_NEWS_CARD_HTML,
+    })
+    result = scan_index(
+        ["https://example.co.jp/ir/news.html"],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+    )
+    assert [(e["published_at"], e["title"]) for e in result["entries"]] == [
+        ("2026-05-15", "2026年3月期 決算短信")
+    ]
+
+
+def test_scan_associates_group_heading_date_with_event_pdfs():
+    http = FakeHttpClient({
+        "https://example.co.jp/ir/event.html": KIOXIA_EVENT_GROUP_HTML,
+    })
+    result = scan_index(
+        ["https://example.co.jp/ir/event.html"],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+    )
+    assert len(result["entries"]) == 3
+    assert {e["published_at"] for e in result["entries"]} == {"2026-06-02"}
+
+
+def test_scan_does_not_attach_distant_section_date():
+    http = FakeHttpClient({
+        "https://example.co.jp/ir/event.html": DISTANT_DATE_SECTION_HTML,
+    })
+    result = scan_index(
+        ["https://example.co.jp/ir/event.html"],
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "example.co.jp",
+        http,
+    )
+    assert result["entries"] == []
