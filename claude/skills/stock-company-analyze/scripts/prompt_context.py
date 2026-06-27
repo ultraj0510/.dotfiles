@@ -30,7 +30,7 @@ def build_prompt_context(evidence_pack: dict, market_metrics: dict) -> dict:
             })
 
     # Sort ir_documents by published_at descending (None last)
-    ir_documents.sort(key=lambda x: (x["published_at"] is None, x.get("published_at", "") or ""), reverse=True)
+    ir_documents.sort(key=lambda x: (x["published_at"] is not None, x.get("published_at", "") or ""), reverse=True)
 
     # Current price: latest close from market_data
     current_price = None

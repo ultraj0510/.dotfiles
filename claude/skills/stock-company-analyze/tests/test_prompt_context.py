@@ -85,6 +85,26 @@ def test_evidence_counts():
     assert ctx["evidence_counts"]["ir_document"] >= 1
 
 
+def test_ir_documents_none_dates_sort_last():
+    pack = {
+        "evidence": [
+            {"evidence_id": "ir-1", "kind": "ir_document", "field": "r1", "value": "Doc A",
+             "source_type": "ir", "source_ref": "ir:1", "usable": True, "published_at": "2026-06-24"},
+            {"evidence_id": "ir-2", "kind": "ir_document", "field": "r2", "value": "Doc B",
+             "source_type": "ir", "source_ref": "ir:2", "usable": True},  # No published_at
+            {"evidence_id": "ir-3", "kind": "ir_document", "field": "r3", "value": "Doc C",
+             "source_type": "ir", "source_ref": "ir:3", "usable": True, "published_at": "2026-06-25"},
+        ],
+    }
+    ctx = build_prompt_context(pack, {})
+    docs = ctx["ir_documents"]
+    assert len(docs) == 3
+    # Latest date first (descending by date, None at end)
+    assert docs[0]["title"] == "Doc C"  # 2026-06-25
+    assert docs[1]["title"] == "Doc A"  # 2026-06-24
+    assert docs[2]["title"] == "Doc B"  # None
+
+
 def test_empty_evidence_pack_returns_minimal_context():
     ctx = build_prompt_context({"evidence": []}, {})
     assert ctx["current_price"] is None
