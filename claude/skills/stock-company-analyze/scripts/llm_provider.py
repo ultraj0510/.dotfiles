@@ -158,9 +158,25 @@ class FileProvider(LLMProvider):
         ticker: str,
         run_dir: Path,
     ) -> dict:
-        raise NotImplementedError(
-            "FileProvider.analyze is implemented in Task 5"
-        )
+        from llm_analyzer import validate_analysis_output
+
+        if not Path(self.result_path).exists():
+            return {
+                "status": "failed",
+                "error": f"LLM result file not found: {self.result_path}",
+            }
+
+        try:
+            data = json.loads(Path(self.result_path).read_text())
+            validate_analysis_output(data)
+            return {
+                "status": "completed",
+                "result": data,
+                "elapsed_seconds": 0.0,
+                "provider": "file",
+            }
+        except (json.JSONDecodeError, ValueError) as e:
+            return {"status": "failed", "error": str(e)}
 
 
 class CodexProvider(LLMProvider):
