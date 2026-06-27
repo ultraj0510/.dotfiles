@@ -17,11 +17,18 @@ stock_advisor_workspace = "runtime/stock-advisor/workspace"
 stock_results = "runtime/stock-price-analyze-results"
 
 [projects]
-stock_price_analyze = "playground/stock-price-analyze"
-playground_repo = "playground"
+stock_price_analyze = "repo/stock-price-analyze"
+playground_repo = "repo/playground"
+
+[repos]
+stock_price_analyze = "repo/stock-price-analyze"
+playground = "repo/playground"
+tradingagents = "repo/tradingagents"
+claude_code_best_practice = "repo/claude-code-best-practice"
+codexpro = "repo/codexpro"
 
 [references]
-claude_code_best_practice = "references/claude-code-best-practice"
+claude_code_best_practice = "repo/claude-code-best-practice"
 
 [generated]
 claude_agents = ".claude/agents"

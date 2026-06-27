@@ -195,15 +195,16 @@ def parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
         credit_text = re.sub(r"&nbsp;", " ", credit_text)
         credit_text = re.sub(r"\s+", " ", credit_text)
         margin_pattern = re.compile(
-            r"(\d{3,4}[A-Z]?)\s+(\S+?)\s+(?:買建|売建)\s+"
+            r"(\d{3,4}[A-Z]?)\s+(\S+?)\s+(買建|売建)\s+"
             r"(\S+?)\s+([0-9\-/]+)\s+([\d,]+)\s+([\d,.]+)\s+([\d,]+)")
         for mm in margin_pattern.finditer(credit_text):
             ticker = SBI_TICKER_MAP.get(mm.group(2), f"{mm.group(1)}.T")
-            term_str = mm.group(3)
-            open_date = mm.group(4)
-            qty = int(float(mm.group(5).replace(",", "")))
-            cost = float(mm.group(6).replace(",", ""))
-            price = float(mm.group(7).replace(",", ""))
+            margin_side = mm.group(3)
+            term_str = mm.group(4)
+            open_date = mm.group(5)
+            qty = int(float(mm.group(6).replace(",", "")))
+            cost = float(mm.group(7).replace(",", ""))
+            price = float(mm.group(8).replace(",", ""))
             open_date_iso = None
             if open_date and "/" in open_date and not open_date.startswith("--"):
                 parts = [p for p in open_date.split("/") if p.strip() and not p.strip().startswith("-")]
@@ -229,6 +230,7 @@ def parse_sbi_holdings(html: str) -> tuple[list[dict], dict]:
                     except ValueError: pass
             holdings.append({
                 "ticker": ticker, "name": mm.group(2), "position_type": "信用",
+                "margin_side": margin_side,
                 "quantity": qty, "cost_price": cost, "current_price": price,
                 "open_date": open_date_iso, "expiry_date": expiry_date_iso,
             })

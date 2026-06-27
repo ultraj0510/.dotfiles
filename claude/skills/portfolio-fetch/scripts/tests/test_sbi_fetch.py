@@ -80,6 +80,30 @@ _IPPAN_SECTION_HTML = """<tr><td>株式（現物/一般預り）</td></tr>
 """
 
 
+_CREDIT_SECTION_HTML = """<tr><td>株式（信用）</td></tr>
+<tr>
+  <td>285A</td>
+  <td>キオクシアＨＤ</td>
+  <td>売建</td>
+  <td>6ヶ月</td>
+  <td>26/06/23</td>
+  <td>300</td>
+  <td>110,750</td>
+  <td>92,290</td>
+</tr>
+<tr>
+  <td>7012</td>
+  <td>川崎重</td>
+  <td>買建</td>
+  <td>6ヶ月</td>
+  <td>26/06/20</td>
+  <td>100</td>
+  <td>8,000</td>
+  <td>8,500</td>
+</tr>
+<tr><td>投資信託</td></tr>
+"""
+
 def test_nisa_section_header_matched():
     module = load_sbi_fetch()
     pattern = module._SBI_FETCH_MODULE__spot_section_pattern if hasattr(module, '_SBI_FETCH_MODULE__spot_section_pattern') else None
@@ -141,6 +165,20 @@ def test_parse_ippan():
     assert len(holdings) == 1
     assert holdings[0]["ticker"] == "4661.T"
     assert holdings[0]["account_type"] == "一般"
+
+
+def test_parse_credit_side():
+    module = load_sbi_fetch()
+    holdings, _ = module.parse_sbi_holdings(_CREDIT_SECTION_HTML)
+    assert len(holdings) == 2
+    assert holdings[0]["ticker"] == "285A.T"
+    assert holdings[0]["position_type"] == "信用"
+    assert holdings[0]["margin_side"] == "売建"
+    assert holdings[0]["quantity"] == 300
+    assert holdings[0]["cost_price"] == 110750.0
+    assert holdings[0]["current_price"] == 92290.0
+    assert holdings[1]["ticker"] == "7012.T"
+    assert holdings[1]["margin_side"] == "買建"
 
 
 def test_merge_holdings_aborts_on_50pct():
