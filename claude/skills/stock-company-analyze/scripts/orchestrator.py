@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """stock-company-analyze — full pipeline orchestrator."""
-import argparse, json, os, sys, tempfile
+import argparse, json, os, sys, tempfile, time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,6 +57,19 @@ def main():
     parser.add_argument("ticker")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument(
+        "--provider", type=str, default="anthropic",
+        choices=["anthropic", "file", "codex", "tradingagents"],
+        help="Phase 4 analysis provider (default: anthropic)",
+    )
+    parser.add_argument(
+        "--model", type=str, default=None,
+        help="LLM model override (AnthropicProvider only)",
+    )
+    parser.add_argument(
+        "--llm-result", type=Path, default=None,
+        help="Path to pre-generated Phase 4 JSON (FileProvider only)",
+    )
     args = parser.parse_args()
 
     ticker = normalize_ticker(args.ticker)
@@ -122,13 +135,51 @@ def main():
         pack_path = run_dir / "evidence-pack.json"
         _atomic_write(pack_path, json.dumps(pack, ensure_ascii=False, indent=2))
 
-        # Phase 4: TradingAgents
-        from tradingagents_bridge import run_analysis
-        ta_result = run_analysis(pack_path, run_dir / "market-metrics.json", run_dir)
+        # Phase 4: Multi-agent analysis
+        ta_start = time.monotonic()
+        if args.provider == "tradingagents":
+            from tradingagents_bridge import run_analysis
+            ta_result = run_analysis(pack_path, run_dir / "market-metrics.json", run_dir)
+        else:
+            from llm_provider import get_provider
+            from llm_analyzer import run_llm_analysis
+
+            provider_kwargs: dict = {}
+            if args.provider == "file":
+                if not args.llm_result:
+                    result = {
+                        "status": "failed",
+                        "error": "--llm-result is required with --provider file",
+                    }
+                    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+                    return 1
+                provider_kwargs["result_path"] = args.llm_result
+            elif args.provider == "anthropic":
+                if args.model:
+                    provider_kwargs["model"] = args.model
+
+            try:
+                provider = get_provider(args.provider, **provider_kwargs)
+            except (ValueError, NotImplementedError) as e:
+                result = {"status": "failed", "error": str(e)}
+                json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+                return 1
+
+            ta_result = run_llm_analysis(
+                pack_path, run_dir / "market-metrics.json", run_dir, provider
+            )
+
         if ta_result.get("status") == "failed":
-            result = {"status": "failed", "error": ta_result.get("error", "TradingAgents failed")}
+            result = {
+                "status": "failed",
+                "error": ta_result.get("error", "Phase 4 analysis failed"),
+            }
             json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
             return 1
+
+        ta_elapsed = time.monotonic() - ta_start
+        if ta_result.get("elapsed_seconds") is None:
+            ta_result["elapsed_seconds"] = ta_elapsed
 
         # Phase 5: Rating
         pm_output = ta_result.get("result", {}).get("portfolio_manager", {})
@@ -224,7 +275,7 @@ def main():
             "fact_sheet": {},
             "analyst_reports": analyst_reports,
             "debate": ta_result.get("result", {}).get("debate", {}),
-            "investment_thesis": "",
+            "investment_thesis": pm_output.get("investment_thesis_ja", ""),
             "scenarios": pm_output.get("scenarios", []),
             "catalysts": pm_output.get("catalysts", []),
             "disconfirmers": pm_output.get("disconfirmers", []),
@@ -236,6 +287,8 @@ def main():
                 "stock_ir_fetch": ir_result.parsed.get("run_id") if ir_result.parsed else None,
             },
             "evidence_pack_sha256": pack["sha256"],
+            "phase4_provider": args.provider,
+            "phase4_model": ta_result.get("model") or ta_result.get("provider"),
             "run_manifest_ref": "claude-sonnet-4-6",
         }
 
@@ -244,7 +297,9 @@ def main():
             "started_at": now.isoformat(),
             "completed_at": datetime.now(JST).isoformat(),
             "elapsed_seconds": ta_result.get("elapsed_seconds"),
-            "model_id": "claude-sonnet-4-6",
+            "model_id": args.model or "claude-sonnet-4-6",
+            "phase4_provider": args.provider,
+            "phase4_model": ta_result.get("model") or ta_result.get("provider"),
             "temperature": None,
             "prompt_version": "1.0",
             "retry_count": 0,
