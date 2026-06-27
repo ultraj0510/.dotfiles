@@ -26,6 +26,9 @@ def validate_analysis_output(output: dict[str, Any]) -> bool:
             if key not in s:
                 raise ValueError(f"Scenario missing '{key}': {s}")
 
+    if not pm.get("investment_thesis_ja"):
+        raise ValueError("Missing 'investment_thesis_ja' in portfolio_manager")
+
     probs = [s["probability"] for s in scenarios]
     prob_sum = sum(probs)
     if abs(prob_sum - 1.0) > 0.01:
@@ -187,7 +190,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
         "debate": {"type": "object"},
         "portfolio_manager": {
             "type": "object",
-            "required": ["proposed_rating", "scenarios"],
+            "required": ["proposed_rating", "scenarios", "investment_thesis_ja"],
             "properties": {
                 "proposed_rating": {
                     "type": "string",

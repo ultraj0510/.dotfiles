@@ -63,12 +63,30 @@ def test_validate_analysis_output_rejects_wrong_scenario_count():
         })
 
 
+def test_validate_analysis_output_rejects_missing_investment_thesis():
+    with pytest.raises(ValueError, match="investment_thesis_ja"):
+        validate_analysis_output({
+            "analyst_reports": {"bull_researcher": {}, "bear_researcher": {}},
+            "debate": {},
+            "portfolio_manager": {
+                "proposed_rating": "HOLD",
+                "scenarios": [
+                    {"label": "a", "eps": 1, "per": 1, "probability": 0.3},
+                    {"label": "b", "eps": 1, "per": 1, "probability": 0.5},
+                    {"label": "c", "eps": 1, "per": 1, "probability": 0.2},
+                ],
+                # investment_thesis_ja missing
+            },
+        })
+
+
 def test_validate_analysis_output_rejects_probability_sum_not_1():
     with pytest.raises(ValueError, match="sum to 1"):
         validate_analysis_output({
             "analyst_reports": {"bull_researcher": {}, "bear_researcher": {}},
             "debate": {},
             "portfolio_manager": {
+                "investment_thesis_ja": "test",
                 "scenarios": [
                     {"label": "a", "eps": 1, "per": 1, "probability": 0.5},
                     {"label": "b", "eps": 1, "per": 1, "probability": 0.4},
@@ -84,6 +102,7 @@ def test_validate_analysis_output_accepts_valid_output():
         "debate": {},
         "portfolio_manager": {
             "proposed_rating": "HOLD",
+            "investment_thesis_ja": "テスト判断サマリー",
             "scenarios": [
                 {"label": "強気", "eps": 100, "per": 10, "probability": 0.3},
                 {"label": "中立", "eps": 80, "per": 8, "probability": 0.5},
@@ -103,6 +122,7 @@ def test_run_llm_analysis_returns_completed_on_success():
             "debate": {},
             "portfolio_manager": {
                 "proposed_rating": "BUY",
+                "investment_thesis_ja": "テスト判断",
                 "scenarios": [
                     {"label": "強気", "eps": 100, "per": 10, "probability": 0.3},
                     {"label": "中立", "eps": 80, "per": 8, "probability": 0.5},
@@ -134,6 +154,7 @@ def test_run_llm_analysis_saves_llm_result_to_run_dir():
             "debate": {},
             "portfolio_manager": {
                 "proposed_rating": "HOLD",
+                "investment_thesis_ja": "テスト判断",
                 "scenarios": [
                     {"label": "強気", "eps": 100, "per": 10, "probability": 0.3},
                     {"label": "中立", "eps": 80, "per": 8, "probability": 0.5},
@@ -173,6 +194,7 @@ def test_file_provider_reads_valid_json(tmp_path):
         "debate": {},
         "portfolio_manager": {
             "proposed_rating": "HOLD",
+            "investment_thesis_ja": "テスト判断",
             "scenarios": [
                 {"label": "強気", "eps": 100, "per": 10, "probability": 0.3},
                 {"label": "中立", "eps": 80, "per": 8, "probability": 0.5},
