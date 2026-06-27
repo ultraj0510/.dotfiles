@@ -52,6 +52,54 @@ def _compute_valid_until(as_of, info_result):
     return default_expiry.isoformat()
 
 
+def _run_phase4(*, provider_name, pack_path, market_metrics_path, run_dir,
+                 model=None, llm_result=None, fallback_provider_name=None):
+    """Run Phase 4 analysis. Returns TradingAgents-compatible result dict.
+
+    When provider_name is 'tradingagents' and it fails, optionally falls back
+    to a second provider via fallback_provider_name.
+    """
+    ta_start = time.monotonic()
+
+    def _execute(provider_name_inner):
+        if provider_name_inner == "tradingagents":
+            from tradingagents_bridge import run_analysis
+            return run_analysis(pack_path, market_metrics_path, run_dir)
+        else:
+            from llm_provider import get_provider
+            from llm_analyzer import run_llm_analysis
+
+            kwargs: dict = {}
+            if provider_name_inner == "file":
+                if not llm_result:
+                    return {
+                        "status": "failed",
+                        "error": "--llm-result is required with --provider file",
+                    }
+                kwargs["result_path"] = llm_result
+            elif provider_name_inner == "anthropic":
+                if model:
+                    kwargs["model"] = model
+
+            provider = get_provider(provider_name_inner, **kwargs)
+            return run_llm_analysis(pack_path, market_metrics_path, run_dir, provider)
+
+    ta_result = _execute(provider_name)
+
+    # Fallback: if tradingagents fails and a fallback provider is configured
+    if ta_result.get("status") == "failed" and fallback_provider_name:
+        fallback_result = _execute(fallback_provider_name)
+        fallback_result["fallback_from"] = provider_name
+        fallback_result["fallback_error"] = ta_result.get("error")
+        ta_result = fallback_result
+
+    ta_elapsed = time.monotonic() - ta_start
+    if ta_result.get("elapsed_seconds") is None:
+        ta_result["elapsed_seconds"] = ta_elapsed
+
+    return ta_result
+
+
 def main():
     parser = argparse.ArgumentParser(prog="stock-company-analyze")
     parser.add_argument("ticker")
@@ -69,6 +117,11 @@ def main():
     parser.add_argument(
         "--llm-result", type=Path, default=None,
         help="Path to pre-generated Phase 4 JSON (FileProvider only)",
+    )
+    parser.add_argument(
+        "--fallback-provider", type=str, default=None,
+        choices=["anthropic", "file"],
+        help="Fallback provider if primary Phase 4 fails (tradingagents only)",
     )
     args = parser.parse_args()
 
@@ -136,39 +189,15 @@ def main():
         _atomic_write(pack_path, json.dumps(pack, ensure_ascii=False, indent=2))
 
         # Phase 4: Multi-agent analysis
-        ta_start = time.monotonic()
-        if args.provider == "tradingagents":
-            from tradingagents_bridge import run_analysis
-            ta_result = run_analysis(pack_path, run_dir / "market-metrics.json", run_dir)
-        else:
-            from llm_provider import get_provider
-            from llm_analyzer import run_llm_analysis
-
-            provider_kwargs: dict = {}
-            if args.provider == "file":
-                if not args.llm_result:
-                    result = {
-                        "status": "failed",
-                        "error": "--llm-result is required with --provider file",
-                    }
-                    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
-                    return 1
-                provider_kwargs["result_path"] = args.llm_result
-            elif args.provider == "anthropic":
-                if args.model:
-                    provider_kwargs["model"] = args.model
-
-            try:
-                provider = get_provider(args.provider, **provider_kwargs)
-            except (ValueError, NotImplementedError) as e:
-                result = {"status": "failed", "error": str(e)}
-                json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
-                return 1
-
-            ta_result = run_llm_analysis(
-                pack_path, run_dir / "market-metrics.json", run_dir, provider
-            )
-
+        ta_result = _run_phase4(
+            provider_name=args.provider,
+            pack_path=pack_path,
+            market_metrics_path=run_dir / "market-metrics.json",
+            run_dir=run_dir,
+            model=args.model,
+            llm_result=args.llm_result,
+            fallback_provider_name=args.fallback_provider,
+        )
         if ta_result.get("status") == "failed":
             result = {
                 "status": "failed",
@@ -177,9 +206,7 @@ def main():
             json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
             return 1
 
-        ta_elapsed = time.monotonic() - ta_start
-        if ta_result.get("elapsed_seconds") is None:
-            ta_result["elapsed_seconds"] = ta_elapsed
+        ta_elapsed = ta_result.get("elapsed_seconds", 0.0)
 
         # Phase 5: Rating
         pm_output = ta_result.get("result", {}).get("portfolio_manager", {})
@@ -287,19 +314,24 @@ def main():
                 "stock_ir_fetch": ir_result.parsed.get("run_id") if ir_result.parsed else None,
             },
             "evidence_pack_sha256": pack["sha256"],
-            "phase4_provider": args.provider,
-            "phase4_model": ta_result.get("model") or ta_result.get("provider"),
-            "run_manifest_ref": "claude-sonnet-4-6",
+            "run_manifest_ref": args.provider,
         }
+
+        # Determine provider_name and model_id from ta_result
+        effective_provider = ta_result.get("provider") or args.provider
+        effective_model = ta_result.get("model") or effective_provider
 
         run_manifest = {
             "run_id": run_id, "ticker": ticker,
             "started_at": now.isoformat(),
             "completed_at": datetime.now(JST).isoformat(),
             "elapsed_seconds": ta_result.get("elapsed_seconds"),
-            "model_id": args.model or "claude-sonnet-4-6",
-            "phase4_provider": args.provider,
-            "phase4_model": ta_result.get("model") or ta_result.get("provider"),
+            "provider_name": effective_provider,
+            "model_id": effective_model,
+            "phase4_provider": args.provider,  # deprecated: use provider_name
+            "phase4_model": effective_model,   # deprecated: use model_id
+            "fallback_from": ta_result.get("fallback_from"),
+            "fallback_error": ta_result.get("fallback_error"),
             "temperature": None,
             "prompt_version": "1.0",
             "retry_count": 0,
