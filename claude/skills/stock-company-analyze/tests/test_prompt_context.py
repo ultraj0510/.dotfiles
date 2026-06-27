@@ -7,15 +7,28 @@ MOCK_EVIDENCE_PACK = {
         {"evidence_id": "price-2026-06-26-close", "kind": "market_data",
          "field": "close", "value": 92180.0, "unit": "JPY", "source_type": "stock-price-fetch",
          "source_ref": "daily:2026-06-26", "usable": True, "period_end": "2026-06-26"},
-        {"evidence_id": "info-profile-sector", "kind": "fundamentals",
-         "field": "sector", "value": "電気機器", "unit": None, "source_type": "stock-info-fetch",
-         "source_ref": "company_profile:sector", "usable": True},
+        # Real evidence_pack.py structure: company_profile:data is a nested dict
+        {"evidence_id": "info-profile-data", "kind": "fundamentals",
+         "field": "data", "value": {
+             "company_name": "キオクシアHD", "sector": "電気機器",
+             "peer_companies": "5801 古河電工,5805 SWCC", "overseas_ratio": "80",
+         }, "unit": None, "source_type": "stock-info-fetch",
+         "source_ref": "company_profile:data", "usable": True},
+        # company_profile:source should be excluded from prompt context
+        {"evidence_id": "info-profile-source", "kind": "fundamentals",
+         "field": "source", "value": {"url": "https://..."}, "unit": None,
+         "source_type": "stock-info-fetch",
+         "source_ref": "company_profile:source", "usable": True},
         {"evidence_id": "info-perf-revenue", "kind": "fundamentals",
          "field": "revenue", "value": "2,500,000百万円", "unit": None, "source_type": "stock-info-fetch",
          "source_ref": "performance:revenue", "usable": True},
-        {"evidence_id": "info-score-overall", "kind": "fundamentals",
-         "field": "overall_score", "value": 5, "unit": None, "source_type": "stock-info-fetch",
-         "source_ref": "scores:overall", "usable": True},
+        # Real structure: company_scores: prefix
+        {"evidence_id": "info-score-total", "kind": "fundamentals",
+         "field": "total_score", "value": 4.0, "unit": None, "source_type": "stock-info-fetch",
+         "source_ref": "company_scores:total_score", "usable": True},
+        {"evidence_id": "info-score-momentum", "kind": "fundamentals",
+         "field": "price_momentum", "value": 10.0, "unit": None, "source_type": "stock-info-fetch",
+         "source_ref": "company_scores:price_momentum", "usable": True},
         {"evidence_id": "ir-abc123", "kind": "ir_document",
          "field": "securities_report", "value": "有価証券報告書",
          "unit": None, "source_type": "stock-ir-fetch",
@@ -49,7 +62,15 @@ def test_current_price_from_market_data():
 
 def test_company_profile_from_fundamentals():
     ctx = build_prompt_context(MOCK_EVIDENCE_PACK, MOCK_MARKET_METRICS)
+    # company_profile:data is flattened into company_profile
     assert ctx["company_profile"]["sector"] == "電気機器"
+    assert ctx["company_profile"]["peer_companies"] == "5801 古河電工,5805 SWCC"
+
+
+def test_company_profile_excludes_source():
+    ctx = build_prompt_context(MOCK_EVIDENCE_PACK, MOCK_MARKET_METRICS)
+    # company_profile:source should be excluded
+    assert "source" not in ctx["company_profile"]
 
 
 def test_performance_from_fundamentals():
@@ -60,7 +81,8 @@ def test_performance_from_fundamentals():
 
 def test_company_scores_from_fundamentals():
     ctx = build_prompt_context(MOCK_EVIDENCE_PACK, MOCK_MARKET_METRICS)
-    assert ctx["company_scores"]["overall_score"] == 5
+    assert ctx["company_scores"]["total_score"] == 4.0
+    assert ctx["company_scores"]["price_momentum"] == 10.0
 
 
 def test_ir_documents_extracted():

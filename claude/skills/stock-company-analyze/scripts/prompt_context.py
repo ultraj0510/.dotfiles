@@ -16,10 +16,18 @@ def build_prompt_context(evidence_pack: dict, market_metrics: dict) -> dict:
 
         if kind == "fundamentals":
             if source_ref.startswith("company_profile:"):
-                company_profile[item["field"]] = item["value"]
+                key = source_ref.split(":", 1)[1]
+                if key == "source":
+                    continue  # URL only, not useful in prompt
+                val = item["value"]
+                if key == "data" and isinstance(val, dict):
+                    # Flatten nested company_profile:data dict into profile
+                    company_profile.update(val)
+                else:
+                    company_profile[key] = val
             elif source_ref.startswith("performance:"):
                 performance.append({"field": item["field"], "value": item["value"]})
-            elif source_ref.startswith("scores:"):
+            elif source_ref.startswith("company_scores:"):
                 company_scores[item["field"]] = item["value"]
 
         elif kind == "ir_document" and item.get("usable"):
