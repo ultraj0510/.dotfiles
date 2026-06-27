@@ -88,6 +88,7 @@ def test_anthropic_analyze_returns_structured_result():
         "debate": {"rounds": [], "resolution_ja": ""},
         "portfolio_manager": {
             "proposed_rating": "BUY",
+            "investment_thesis_ja": "テスト強気判断",
             "scenarios": [
                 {"label": "強気", "eps": 12000, "per": 12, "probability": 0.4},
                 {"label": "中立", "eps": 9000, "per": 10, "probability": 0.4},
@@ -113,6 +114,7 @@ def test_anthropic_analyze_returns_structured_result():
 
     assert result["status"] == "completed"
     assert result["result"]["portfolio_manager"]["proposed_rating"] == "BUY"
+    assert result["result"]["portfolio_manager"]["investment_thesis_ja"] == "テスト強気判断"
     assert len(result["result"]["portfolio_manager"]["scenarios"]) == 3
 
 
@@ -137,6 +139,7 @@ def test_anthropic_analyze_retries_on_validation_failure():
         "debate": {},
         "portfolio_manager": {
             "proposed_rating": "HOLD",
+            "investment_thesis_ja": "テスト中立判断",
             "scenarios": [
                 {"label": "強気", "eps": 100, "per": 10, "probability": 0.3},
                 {"label": "中立", "eps": 80, "per": 8, "probability": 0.5},

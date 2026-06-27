@@ -86,8 +86,10 @@ def _run_phase4(*, provider_name, pack_path, market_metrics_path, run_dir,
 
     ta_result = _execute(provider_name)
 
-    # Fallback: if tradingagents fails and a fallback provider is configured
-    if ta_result.get("status") == "failed" and fallback_provider_name:
+    # Fallback: only for tradingagents primary provider
+    if (provider_name == "tradingagents"
+            and ta_result.get("status") == "failed"
+            and fallback_provider_name):
         fallback_result = _execute(fallback_provider_name)
         fallback_result["fallback_from"] = provider_name
         fallback_result["fallback_error"] = ta_result.get("error")

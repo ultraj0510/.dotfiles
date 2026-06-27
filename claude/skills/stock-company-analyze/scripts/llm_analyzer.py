@@ -254,7 +254,13 @@ def run_llm_analysis(
     )
 
     if result.get("status") == "completed":
-        validate_analysis_output(result["result"])
+        try:
+            validate_analysis_output(result["result"])
+        except ValueError as e:
+            return {
+                "status": "failed",
+                "error": f"Phase 4 output validation failed: {e}",
+            }
 
         # Save raw LLM output for FileProvider / debugging
         llm_result_path = run_dir / "llm-analysis-result.json"
