@@ -85,6 +85,9 @@ def merge_portfolio_context(portfolio: dict, analysis: dict) -> dict:
     if position_over_cap:
         risk_flags.append("position_over_cap_watch")
 
+    # Inject computed risk_flags into analysis block for downstream consumers
+    ana["risk_flags"] = risk_flags
+
     # Get name from the first matched holding if available
     name = matched_holdings[0].get("name", "") if matched_holdings else ""
 
@@ -97,6 +100,6 @@ def merge_portfolio_context(portfolio: dict, analysis: dict) -> dict:
         "overridden": overridden,
         "override_reason": override_reason,
         "order_candidates": [],
-        "triggers": [],
+        "triggers": ana.get("monitoring_triggers", []),
         "risk_flags": risk_flags,
     }

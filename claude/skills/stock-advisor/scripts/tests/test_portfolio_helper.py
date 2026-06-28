@@ -42,7 +42,10 @@ class TestMergePortfolioContext:
 
     def test_preserves_analysis(self):
         result = merge_portfolio_context(MOCK_PORTFOLIO, MOCK_ANALYSIS)
-        assert result["analysis"] == MOCK_ANALYSIS
+        # analysis should preserve all original keys (risk_flags may be augmented)
+        for key in ("ticker", "investment_rating", "execution_posture",
+                     "fundamental_rating", "technical_direction"):
+            assert result["analysis"][key] == MOCK_ANALYSIS[key]
 
     def test_default_today_action(self):
         result = merge_portfolio_context(MOCK_PORTFOLIO, MOCK_ANALYSIS)
@@ -155,3 +158,16 @@ class TestCheckCreditExpiry:
     def test_expiry_key_missing(self):
         h = {"position_type": "信用"}
         assert check_credit_expiry(h) is False
+
+    def test_risk_flags_injected_into_analysis(self):
+        result = merge_portfolio_context(MOCK_PORTFOLIO, MOCK_ANALYSIS)
+        # risk_flags should be in analysis block, not just top-level
+        assert "risk_flags" in result["analysis"]
+        # top-level should also have risk_flags for convenience
+        assert "risk_flags" in result
+
+    def test_triggers_from_analysis_monitoring(self):
+        ana = dict(MOCK_ANALYSIS)
+        ana["monitoring_triggers"] = ["2026-08-06 1Q決算", "月次市況"]
+        result = merge_portfolio_context(MOCK_PORTFOLIO, ana)
+        assert result["triggers"] == ["2026-08-06 1Q決算", "月次市況"]

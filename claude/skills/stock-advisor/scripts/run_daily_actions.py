@@ -109,18 +109,23 @@ def build_daily_actions(portfolio_path: Path, data_dir: Path,
     tickers = collect_tickers(portfolio_path)
 
     actions = []
+    errors = []
     for ticker in tickers:
         print(f"[INFO] Analyzing {ticker}...", file=sys.stderr)
         analysis_path = run_analysis(ticker, data_dir, skip_fundamental)
         if analysis_path is None:
-            print(f"[WARN] {ticker}: no analysis.json produced", file=sys.stderr)
+            msg = f"no analysis.json produced"
+            print(f"[WARN] {ticker}: {msg}", file=sys.stderr)
+            errors.append({"ticker": ticker, "error": msg})
             continue
         try:
             analysis = read_analysis_v2(analysis_path)
             entry = merge_portfolio_context(portfolio, analysis)
             actions.append(entry)
         except Exception as e:
-            print(f"[ERROR] {ticker}: failed to process analysis: {e}", file=sys.stderr)
+            msg = str(e)
+            print(f"[ERROR] {ticker}: failed to process analysis: {msg}", file=sys.stderr)
+            errors.append({"ticker": ticker, "error": msg})
 
     # Build summary
     action_needed = [
@@ -145,6 +150,7 @@ def build_daily_actions(portfolio_path: Path, data_dir: Path,
         "generated_at": datetime.now(JST).isoformat(),
         "account": portfolio.get("account", {}),
         "actions": actions,
+        "errors": errors,
         "summary": {
             "total_positions": sum(len(a["holdings"]) for a in actions),
             "action_needed": action_needed,
@@ -182,6 +188,9 @@ def main():
     print(f"Reduce candidates: {', '.join(s['reduce_candidates']) or 'none'}")
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+
+    if result["errors"]:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
