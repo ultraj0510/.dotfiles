@@ -98,6 +98,22 @@ def test_forecast_unavailable_when_missing_atr():
     assert result["ohlc"] is None
 
 
+def test_forecast_guardrail_violation_returns_unavailable():
+    """Guardrail violations return unavailable, not just low confidence."""
+    # Inject a technical state that will produce an invalid OHLC
+    bad_tech = dict(MOCK_TECHNICAL)
+    bad_tech["indicators"] = {"close": 6131, "atr": 10}  # tiny ATR → wide range
+    bad_tech["trend_state"] = "strong_uptrend"
+    result = build_price_forecast(
+        ticker="5803", as_of="2026-07-01T08:00:00+09:00",
+        technical=bad_tech,
+        fundamental=MOCK_FUNDAMENTAL, integrated=MOCK_INTEGRATED,
+        market_metrics=MOCK_MARKET_METRICS, llm_result=MOCK_LLM_RESULT,
+    )
+    assert result["confidence"] == "unavailable"
+    assert "guardrail" in (result.get("unavailable_reason") or "")
+
+
 def test_forecast_unavailable_when_missing_close():
     tech_no_close = dict(MOCK_TECHNICAL)
     tech_no_close["indicators"] = {"atr": 491}

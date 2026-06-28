@@ -72,7 +72,7 @@ def _render_actions(lines, actions):
         lines.append("|------|---------|------|------|")
         for a in action_needed:
             reason = a.get("override_reason") or a["analysis"]["reasoning"][:40]
-            lines.append(f"| {a['ticker']} {a['name']} | {a['analysis']['investment_rating']} | {a['today_action']} | {reason} |")
+            lines.append(f"| {a['ticker']} {_esc(a['name'])} | {a['analysis']['investment_rating']} | {a['today_action']} | {reason} |")
     else:
         lines.append("なし")
     lines.append("")
@@ -87,7 +87,7 @@ def _render_monitor(lines, actions):
         lines.append("|------|---------|---------|-----------|------|")
         for a in monitor:
             ana = a["analysis"]
-            lines.append(f"| {a['ticker']} {a['name']} | {ana['investment_rating']} | {ana['execution_posture']} | {ana.get('technical_signal_raw','-')} | {ana['reasoning'][:40]} |")
+            lines.append(f"| {a['ticker']} {_esc(a['name'])} | {ana['investment_rating']} | {ana['execution_posture']} | {ana.get('technical_signal_raw','-')} | {ana['reasoning'][:40]} |")
     lines.append("")
 
 
@@ -102,7 +102,7 @@ def _render_watchlist(lines, actions):
     lines.append("|------|---------|-----------|------|")
     for a in wl:
         ana = a["analysis"]
-        lines.append(f"| {a['ticker']} {a['name']} | {ana['investment_rating']} | {ana.get('technical_signal_raw','-')} | {ana['reasoning'][:40]} |")
+        lines.append(f"| {a['ticker']} {_esc(a['name'])} | {ana['investment_rating']} | {ana.get('technical_signal_raw','-')} | {ana['reasoning'][:40]} |")
     lines.append("")
 
 
@@ -167,7 +167,12 @@ def _render_ticker_detail(lines, action, analysis):
         lines.append("|------|-----|")
         if ind.get("rsi"): lines.append(f"| RSI(14) | {ind['rsi']} |")
         macd = ind.get("macd", {})
-        if macd: lines.append(f"| MACD | {macd.get('line','-'):+.0f} / signal {macd.get('signal','-'):+.0f} |")
+        if macd:
+            ml = macd.get('line')
+            ms = macd.get('signal')
+            ml_str = f'{ml:+.0f}' if ml is not None else '-'
+            ms_str = f'{ms:+.0f}' if ms is not None else '-'
+            lines.append(f"| MACD | {ml_str} / signal {ms_str} |")
         if ind.get("bollinger", {}).get("position_pct"): lines.append(f"| BB位置 | {ind['bollinger']['position_pct']}% |")
         if ind.get("sma_25"): lines.append(f"| 25日SMA | {_yen(ind['sma_25'])} |")
         if ind.get("sma_75"): lines.append(f"| 75日SMA | {_yen(ind['sma_75'])} |")
@@ -232,6 +237,13 @@ def _format_forecast_row(fc: dict) -> str:
     if reasoning:
         lines.append(f"- 根拠: {reasoning}")
     return "\n".join(lines)
+
+
+def _esc(text: str) -> str:
+    """Escape pipe characters in Markdown table cells."""
+    if text is None:
+        return ""
+    return str(text).replace("|", "\\|")
 
 
 def _yen(value) -> str:

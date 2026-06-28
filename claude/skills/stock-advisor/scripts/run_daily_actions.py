@@ -147,6 +147,7 @@ def build_daily_actions(portfolio_path: Path, data_dir: Path,
             analysis = read_analysis_v2(analysis_path)
             entry = merge_portfolio_context(portfolio, analysis)
             if is_watchlist:
+                entry["source"] = "watchlist"
                 entry["holdings"] = []
             actions.append(entry)
         except Exception as e:
@@ -179,11 +180,14 @@ def build_daily_actions(portfolio_path: Path, data_dir: Path,
         "actions": actions,
         "errors": errors,
         "summary": {
+            "total_holding_tickers": len([a for a in actions if a.get("source") != "watchlist"]),
+            "total_watchlist_tickers": len([a for a in actions if a.get("source") == "watchlist"]),
             "total_positions": sum(len(a["holdings"]) for a in actions),
             "action_needed": action_needed,
             "monitor": monitor,
             "reduce_candidates": reduce_candidates,
             "buy_candidates": buy_candidates,
+            "watchlist": [a["ticker"] for a in actions if a.get("source") == "watchlist"],
         },
     }
 

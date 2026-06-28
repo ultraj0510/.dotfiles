@@ -94,6 +94,7 @@ def merge_portfolio_context(portfolio: dict, analysis: dict) -> dict:
     return {
         "ticker": ana_ticker,
         "name": name,
+        "source": "holding",
         "holdings": matched_holdings,
         "analysis": ana,
         "today_action": today_action,

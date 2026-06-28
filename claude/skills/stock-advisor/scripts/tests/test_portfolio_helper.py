@@ -121,8 +121,9 @@ class TestMergePortfolioContext:
         """Verify the output dict has all expected keys."""
         result = merge_portfolio_context(MOCK_PORTFOLIO, MOCK_ANALYSIS)
         expected_keys = {
-            "ticker", "name", "holdings", "analysis", "today_action",
+            "ticker", "name", "source", "holdings", "analysis", "today_action",
             "overridden", "override_reason", "order_candidates", "triggers",
+            "risk_flags",
         }
         assert expected_keys.issubset(result.keys())
 
@@ -166,7 +167,12 @@ class TestCheckCreditExpiry:
         # top-level should also have risk_flags for convenience
         assert "risk_flags" in result
 
-    def test_triggers_from_analysis_monitoring(self):
+    def test_source_field_is_holding(self):
+        result = merge_portfolio_context(MOCK_PORTFOLIO, MOCK_ANALYSIS)
+        assert result["source"] == "holding"
+
+
+def test_triggers_from_analysis_monitoring():
         ana = dict(MOCK_ANALYSIS)
         ana["monitoring_triggers"] = ["2026-08-06 1Q決算", "月次市況"]
         result = merge_portfolio_context(MOCK_PORTFOLIO, ana)

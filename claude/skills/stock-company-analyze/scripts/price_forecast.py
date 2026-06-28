@@ -40,9 +40,11 @@ def build_price_forecast(
     # Generate OHLC within ATR guardrails
     ohlc = _generate_ohlc(close, atr, bias)
 
-    # Validate
+    # Validate — guardrail violation returns unavailable
     ok, reason = validate_forecast_guardrails(ohlc, close, atr)
-    confidence = "medium" if ok else "low"
+    if not ok:
+        return _unavailable(f"guardrail: {reason}")
+    confidence = "medium"
 
     # Build reasoning
     reasoning = _build_reasoning(bias, bb_pos, topix, fundamental.get("catalysts", []))
@@ -84,15 +86,21 @@ def _determine_target(as_of) -> str:
 
 
 def _target_date(as_of) -> str | None:
-    """Return target date string in YYYY-MM-DD."""
+    """Return target date for forecast. For next_session, returns next business day."""
     if isinstance(as_of, str):
         try:
             as_of = datetime.fromisoformat(as_of)
         except ValueError:
             return None
-    if hasattr(as_of, 'date'):
-        return as_of.date().isoformat()
-    return None
+    if not hasattr(as_of, 'date'):
+        return None
+    target = as_of
+    # If after 15:00 or weekend, advance to next business day
+    if as_of.hour >= 15 or as_of.weekday() >= 5:
+        target = as_of + timedelta(days=1)
+    while target.weekday() >= 5:  # skip Sat/Sun
+        target = target + timedelta(days=1)
+    return target.date().isoformat()
 
 
 def _compute_bias(trend_state, tech_direction, bb_pos, topix,
@@ -117,6 +125,24 @@ def _compute_bias(trend_state, tech_direction, bb_pos, topix,
         up_mult -= 0.1
     elif bb_pos is not None and bb_pos < 20:
         up_mult += 0.1  # easier to bounce
+
+    # TOPIX relative: outperform → boost, underperform → dampen
+    if topix == "outperform":
+        up_mult += 0.05
+    elif topix == "underperform":
+        up_mult -= 0.05
+
+    # Risk flags: reduce conviction on strategy/technical issues
+    if risk_flags:
+        rflag_count = len(risk_flags)
+        if rflag_count >= 2:
+            up_mult = 1.0 + (up_mult - 1.0) * 0.5  # pull toward neutral
+        elif rflag_count == 1:
+            up_mult = 1.0 + (up_mult - 1.0) * 0.7
+
+    # Near-term catalysts: add slight directional boost
+    if catalysts:
+        up_mult += 0.03 * min(len(catalysts), 2)
 
     # Clamp to [0.5, 1.8]
     up_mult = max(0.5, min(1.8, up_mult))
