@@ -15,6 +15,14 @@ _STOCK_ADVISOR_SCRIPTS = "/Users/fujie/.claude/skills/stock-advisor/scripts"
 if _STOCK_ADVISOR_SCRIPTS not in sys.path:
     sys.path.insert(0, _STOCK_ADVISOR_SCRIPTS)
 
+# Add stock-advisor venv site-packages for pandas/yfinance dependencies
+import glob as _glob
+_venv_site = _glob.glob(
+    "/Users/fujie/.claude/skills/stock-advisor/scripts/.venv/lib/python3.*/site-packages"
+)
+if _venv_site and _venv_site[0] not in sys.path:
+    sys.path.insert(0, _venv_site[0])
+
 
 def normalize_direction(signal_raw: str) -> str:
     if signal_raw in ("STRONG_BUY", "BUY", "HOLD_BUY"):
