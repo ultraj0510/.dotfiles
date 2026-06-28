@@ -345,6 +345,19 @@ def main():
             "evidence_pack_sha256": pack["sha256"],
         }
 
+        # Forecast (additive optional block)
+        from price_forecast import build_price_forecast
+        forecast = build_price_forecast(
+            ticker=ticker,
+            as_of=now.isoformat(),
+            technical=analysis["technical"],
+            fundamental=analysis["fundamental"],
+            integrated=integrated,
+            market_metrics=metrics,
+            llm_result=ta_result,
+        )
+        analysis["forecast"] = forecast
+
         # Determine provider_name and model_id from ta_result
         effective_provider = ta_result.get("provider") or args.provider
         effective_model = ta_result.get("model") or effective_provider

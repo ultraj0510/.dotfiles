@@ -77,6 +77,8 @@ def _extract_indicators(raw_indicators: dict) -> dict:
         "sma_25": close_50_sma,
         "sma_75": close_200_sma,
         "volatility_annual_pct": volatility_annual_pct,
+        "close": close,
+        "atr": atr,
     }
 
 
@@ -166,4 +168,6 @@ def run_technical_analysis(
         "indicators": indicators,
         "signals": raw.get("signals", []),
         "backtest": backtest,
+        "close": _safe_float(indicators.get("close")),
+        "atr": _safe_float(indicators.get("atr")),
     }
