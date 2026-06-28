@@ -13,6 +13,8 @@ from rating_validator import validate_and_correct
 from confidence import compute_confidence
 from lock_manager import acquire_lock, release_lock
 from analysis_store import save_analysis
+from technical_analysis import run_technical_analysis
+from integrated_judgment import compute_integrated_judgment
 
 JST = ZoneInfo("Asia/Tokyo")
 DEFAULT_DATA_DIR = Path("/Users/fujie/code/runtime/stock-company-analysis")
@@ -190,7 +192,15 @@ def main():
         pack_path = run_dir / "evidence-pack.json"
         _atomic_write(pack_path, json.dumps(pack, ensure_ascii=False, indent=2))
 
-        # Phase 4: Multi-agent analysis
+        # Phase 4: Technical analysis (signal + backtest)
+        tech_result = run_technical_analysis(
+            ticker=ticker,
+            date_str=now.strftime("%Y-%m-%d"),
+            daily_bars=daily_bars,
+            macro=None,
+        )
+
+        # Phase 5: Fundamental analysis (LLM)
         ta_result = _run_phase4(
             provider_name=args.provider,
             pack_path=pack_path,
@@ -212,6 +222,15 @@ def main():
 
         # Phase 5: Rating
         pm_output = ta_result.get("result", {}).get("portfolio_manager", {})
+
+        # Phase 6: Integrated judgment
+        fundamental_rating = pm_output.get("proposed_rating", "HOLD")
+        technical_direction = tech_result.get("direction", "HOLD")
+        integrated = compute_integrated_judgment(
+            fundamental_rating, technical_direction
+        )
+        risk_flags = list(ta_result.get("result", {}).get("risk_flags", []))
+        integrated["risk_flags"] = risk_flags
         current_price = daily_bars[-1]["close"] if daily_bars else None
         data_quality = pack.get("data_quality", {})
         rating_result = validate_and_correct(pm_output, current_price, data_quality, {})
@@ -277,46 +296,48 @@ def main():
             not_rated=(rating_result.final_rating == "NOT_RATED"),
         )
 
-        # Phase 7: analysis.json
+                # Phase 7: analysis.json v2.0
         analysis = {
-            "schema_version": "1.0",
-            "run_id": run_id, "ticker": ticker, "company_name": company_name,
+            "schema_version": "2.0",
+            "run_id": run_id,
+            "ticker": ticker,
+            "company_name": company_name,
             "as_of": now.isoformat(),
             "valid_until": _compute_valid_until(now, info_result),
             "status": "completed",
-            "rating": {
-                "portfolio_manager_proposal": rating_result.pm_proposal,
-                "final": rating_result.final_rating,
-                "adjusted": rating_result.adjusted,
-                "adjustment_reasons": rating_result.adjustment_reasons,
-                "provisional": rating_result.provisional,
-                "provisional_reasons": rating_result.provisional_reasons,
-                "short_eligible": rating_result.short_eligible,
+
+            "technical": {
+                "signal_raw": tech_result.get("signal_raw"),
+                "direction": tech_result.get("direction"),
+                "score": tech_result.get("score"),
+                "trend_state": tech_result.get("trend_state"),
+                "indicators": tech_result.get("indicators", {}),
+                "signals": tech_result.get("signals", []),
+                "backtest": tech_result.get("backtest", {}),
             },
-            "expected_return": {
-                "current_price": current_price,
-                "expected_price": rating_result.expected_price,
-                "expected_return": rating_result.expected_return,
-                "scenario_prices": rating_result.scenario_prices,
+
+            "fundamental": {
+                "rating": fundamental_rating,
+                "confidence": conf_result,
+                "expected_return_pct": rating_result.expected_return,
+                "scenarios": pm_output.get("scenarios", []),
+                "investment_thesis": pm_output.get("investment_thesis_ja", ""),
+                "analyst_reports": analyst_reports,
+                "debate": ta_result.get("result", {}).get("debate", {}),
+                "catalysts": pm_output.get("catalysts", []),
+                "disconfirmers": pm_output.get("disconfirmers", []),
+                "monitoring_triggers": pm_output.get("monitoring_triggers", []),
+                "data_gaps": pm_output.get("data_gaps", []),
             },
-            "topix_comparison": metrics.get("topix_relative"),
-            "confidence": conf_result,
-            "fact_sheet": {},
-            "analyst_reports": analyst_reports,
-            "debate": ta_result.get("result", {}).get("debate", {}),
-            "investment_thesis": pm_output.get("investment_thesis_ja", ""),
-            "scenarios": pm_output.get("scenarios", []),
-            "catalysts": pm_output.get("catalysts", []),
-            "disconfirmers": pm_output.get("disconfirmers", []),
-            "monitoring_triggers": pm_output.get("monitoring_triggers", []),
-            "unknowns": pm_output.get("data_gaps", []),
+
+            "integrated": integrated,
+
             "source_run_ids": {
                 "stock_info_fetch": info_result.parsed.get("run_id") if info_result.parsed else None,
                 "stock_price_fetch": price_result.parsed.get("run_id") if price_result.parsed else None,
                 "stock_ir_fetch": ir_result.parsed.get("run_id") if ir_result.parsed else None,
             },
             "evidence_pack_sha256": pack["sha256"],
-            "run_manifest_ref": args.provider,
         }
 
         # Determine provider_name and model_id from ta_result
@@ -324,6 +345,7 @@ def main():
         effective_model = ta_result.get("model") or effective_provider
 
         run_manifest = {
+            "schema_version": "2.0",
             "run_id": run_id, "ticker": ticker,
             "started_at": now.isoformat(),
             "completed_at": datetime.now(JST).isoformat(),
