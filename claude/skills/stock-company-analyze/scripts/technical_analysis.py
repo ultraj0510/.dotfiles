@@ -81,7 +81,8 @@ def _extract_indicators(raw_indicators: dict) -> dict:
 
 
 def _run_backtest(ticker: str, date_str: str) -> dict:
-    tmpfile = tempfile.mktemp(suffix=".json")
+    fd, tmpfile = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
     python_bin = os.path.join(
         _STOCK_ADVISOR_SCRIPTS, ".venv", "bin", "python"
     )

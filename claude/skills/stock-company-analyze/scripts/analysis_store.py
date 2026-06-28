@@ -13,10 +13,18 @@ def save_analysis(data_dir, ticker, run_id, analysis, run_manifest):
     _atomic_write(run_dir / "run-manifest.json", json.dumps(run_manifest, ensure_ascii=False, indent=2, allow_nan=False))
     latest_path = Path(data_dir) / ticker / "latest.json"
     latest_path.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve rating: v2.0 uses integrated.investment_rating, v1.0 uses rating.final
+    schema_version = analysis.get("schema_version", "1.0")
+    if schema_version == "2.0":
+        latest_rating = analysis.get("integrated", {}).get("investment_rating")
+    else:
+        latest_rating = analysis.get("rating", {}).get("final")
+
     _atomic_write(latest_path, json.dumps({
         "latest_run_id": run_id,
         "latest_status": analysis.get("status"),
-        "latest_rating": analysis.get("rating", {}).get("final"),
+        "latest_rating": latest_rating,
+        "schema_version": schema_version,
         "updated_at": datetime.now().astimezone().isoformat(),
     }, ensure_ascii=False, indent=2))
 

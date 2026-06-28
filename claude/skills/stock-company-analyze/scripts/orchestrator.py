@@ -220,20 +220,24 @@ def main():
 
         ta_elapsed = ta_result.get("elapsed_seconds", 0.0)
 
-        # Phase 5: Rating
+        # Phase 5: Rating validation
         pm_output = ta_result.get("result", {}).get("portfolio_manager", {})
-
-        # Phase 6: Integrated judgment
-        fundamental_rating = pm_output.get("proposed_rating", "HOLD")
-        technical_direction = tech_result.get("direction", "HOLD")
-        integrated = compute_integrated_judgment(
-            fundamental_rating, technical_direction
-        )
-        risk_flags = list(ta_result.get("result", {}).get("risk_flags", []))
-        integrated["risk_flags"] = risk_flags
         current_price = daily_bars[-1]["close"] if daily_bars else None
         data_quality = pack.get("data_quality", {})
         rating_result = validate_and_correct(pm_output, current_price, data_quality, {})
+
+        # Phase 6: Integrated judgment (uses validator-corrected rating)
+        technical_direction = tech_result.get("direction", "HOLD")
+        # If technical analysis failed, flag it
+        if tech_result.get("error"):
+            technical_direction = "HOLD"
+        integrated = compute_integrated_judgment(
+            rating_result.final_rating, technical_direction
+        )
+        risk_flags = list(ta_result.get("result", {}).get("risk_flags", []))
+        if tech_result.get("error"):
+            risk_flags.append("technical_analysis_failed")
+        integrated["risk_flags"] = risk_flags
 
         # Phase 6: Confidence — measured from actual data
         price_age_days = 0
@@ -310,6 +314,7 @@ def main():
                 "signal_raw": tech_result.get("signal_raw"),
                 "direction": tech_result.get("direction"),
                 "score": tech_result.get("score"),
+                "error": tech_result.get("error"),
                 "trend_state": tech_result.get("trend_state"),
                 "indicators": tech_result.get("indicators", {}),
                 "signals": tech_result.get("signals", []),
@@ -317,7 +322,7 @@ def main():
             },
 
             "fundamental": {
-                "rating": fundamental_rating,
+                "rating": rating_result.final_rating,
                 "confidence": conf_result,
                 "expected_return_pct": rating_result.expected_return,
                 "scenarios": pm_output.get("scenarios", []),
