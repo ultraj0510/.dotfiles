@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED: Use run_daily_actions.py instead.
+# This pipeline is kept for reference only and will be removed in a future phase.
+# See: stock-advisor/scripts/run_daily_actions.py
 """Run the full stock-advisor pipeline end-to-end.
 
 Steps:

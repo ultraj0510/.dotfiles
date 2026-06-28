@@ -48,7 +48,7 @@ RESULTS_DIR=~/code/playground/stock-price-analyze/results/$(date +%F)
 mkdir -p "$RESULTS_DIR"
 
 ~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-  ~/.claude/skills/stock-advisor/scripts/run_stock_advisor_pipeline.py \
+  ~/.claude/skills/stock-advisor/scripts/run_daily_actions.py \
   --portfolio ~/code/playground/stock-price-analyze/portfolio.yaml \
   --watchlist ~/.claude/skills/stock-advisor/watchlist.yaml \
   --results-dir "$RESULTS_DIR"

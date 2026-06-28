@@ -20,14 +20,20 @@ STOCK_COMPANY_ANALYZE = Path(
 )
 
 
-def collect_tickers(portfolio_path: Path) -> list[str]:
-    """Return unique tickers from portfolio holdings (without .T suffix)."""
+def collect_tickers(portfolio_path: Path, watchlist_path: Path | None = None) -> list[str]:
+    """Return unique tickers from portfolio holdings and optional watchlist (without .T suffix)."""
     portfolio = yaml.safe_load(portfolio_path.read_text()) or {}
     seen: dict[str, None] = {}
     for h in portfolio.get("holdings", []):
         t = h.get("ticker", "").replace(".T", "")
         if t:
             seen[t] = None
+    if watchlist_path and watchlist_path.exists():
+        for item in yaml.safe_load(watchlist_path.read_text()) or []:
+            if isinstance(item, dict) and item.get("ticker"):
+                t = item["ticker"].replace(".T", "")
+                if t:
+                    seen[t] = None
     return sorted(seen)
 
 
@@ -103,29 +109,50 @@ def run_analysis(ticker: str, data_dir: Path, skip_fundamental: bool = False) ->
 
 
 def build_daily_actions(portfolio_path: Path, data_dir: Path,
-                        skip_fundamental: bool = False) -> dict:
+                        skip_fundamental: bool = False,
+                        watchlist_path: Path | None = None) -> dict:
     """Run analysis for all portfolio tickers and build daily_actions.json."""
     portfolio = yaml.safe_load(portfolio_path.read_text()) or {}
-    tickers = collect_tickers(portfolio_path)
+
+    # Determine which tickers come from holdings vs watchlist-only
+    holding_tickers: set[str] = set()
+    for h in portfolio.get("holdings", []):
+        t = h.get("ticker", "").replace(".T", "")
+        if t:
+            holding_tickers.add(t)
+
+    tickers = collect_tickers(portfolio_path, watchlist_path)
+
+    # Determine watchlist-only tickers (not in portfolio holdings)
+    watchlist_only: set[str] = set()
+    if watchlist_path and watchlist_path.exists():
+        for item in yaml.safe_load(watchlist_path.read_text()) or []:
+            if isinstance(item, dict) and item.get("ticker"):
+                t = item["ticker"].replace(".T", "")
+                if t and t not in holding_tickers:
+                    watchlist_only.add(t)
 
     actions = []
-    errors = []
+    errors = {"holdings": [], "watchlist": []}
     for ticker in tickers:
+        is_watchlist = ticker in watchlist_only
         print(f"[INFO] Analyzing {ticker}...", file=sys.stderr)
         analysis_path = run_analysis(ticker, data_dir, skip_fundamental)
         if analysis_path is None:
             msg = f"no analysis.json produced"
             print(f"[WARN] {ticker}: {msg}", file=sys.stderr)
-            errors.append({"ticker": ticker, "error": msg})
+            errors["watchlist" if is_watchlist else "holdings"].append({"ticker": ticker, "error": msg})
             continue
         try:
             analysis = read_analysis_v2(analysis_path)
             entry = merge_portfolio_context(portfolio, analysis)
+            if is_watchlist:
+                entry["holdings"] = []
             actions.append(entry)
         except Exception as e:
             msg = str(e)
             print(f"[ERROR] {ticker}: failed to process analysis: {msg}", file=sys.stderr)
-            errors.append({"ticker": ticker, "error": msg})
+            errors["watchlist" if is_watchlist else "holdings"].append({"ticker": ticker, "error": msg})
 
     # Build summary
     action_needed = [
@@ -168,10 +195,13 @@ def main():
     parser.add_argument("--output", type=Path, help="Output path for daily_actions.json")
     parser.add_argument("--skip-fundamental", action="store_true",
                         help="Reuse recent analysis.json (<24h old)")
+    parser.add_argument("--watchlist", type=Path, default=None,
+                        help="Path to watchlist.yaml for additional tickers")
     args = parser.parse_args()
 
     result = build_daily_actions(
-        Path(args.portfolio), args.data_dir, args.skip_fundamental
+        Path(args.portfolio), args.data_dir, args.skip_fundamental,
+        args.watchlist
     )
 
     output_path = args.output or Path(args.portfolio).parent / "daily_actions.json"
@@ -189,7 +219,7 @@ def main():
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
 
-    if result["errors"]:
+    if result["errors"]["holdings"]:
         sys.exit(1)
 
 
