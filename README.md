@@ -89,7 +89,7 @@ bash ~/.dotfiles/install.sh
 | `omc-reference` | Oh My Claude Code 参照 |
 
 株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）と共有ライブラリは
-[stock-analysis](~/code/stock-analysis/) に独立プロジェクトとして移行済み。
+[stock-analysis](~/code/repo/stock-analysis/) に独立プロジェクトとして移行済み。
 `claude/skills/` 以下のそれらは symlink で新プロジェクトを指している。
 
 ## Code workspace
@@ -113,7 +113,7 @@ bash ~/.dotfiles/install.sh
 
 ## テスト
 
-Cookie更新まわりの回帰テストと Python 構文チェックは [stock-analysis](~/code/stock-analysis/) プロジェクトに移行済み。
+Cookie更新まわりの回帰テストと Python 構文チェックは [stock-analysis](~/code/repo/stock-analysis/) プロジェクトに移行済み。
 
 ## 運用メモ
 

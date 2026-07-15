@@ -10,7 +10,7 @@
 
 ## 股票分析系统
 
-独立项目位于 `~/code/stock-analysis/`。技能通过 symlink（`~/.dotfiles/claude/skills/stock-*` → `~/code/stock-analysis/skills/stock-*`）提供。
+独立项目位于 `~/code/repo/stock-analysis/`。技能通过 symlink（`~/.dotfiles/claude/skills/stock-*` → `~/code/repo/stock-analysis/skills/stock-*`）提供。
 
 ### 每日工作流（`stock-advisor`）
 
