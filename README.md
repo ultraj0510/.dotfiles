@@ -85,18 +85,12 @@ bash ~/.dotfiles/install.sh
 
 | Skill | Purpose |
 |-------|---------|
-| `portfolio-auth` | SBI証券セッションCookieの保存・検証 |
-| `portfolio-fetch` | SBI証券ポートフォリオ取得 |
-| `portfolio-update` | 売買記録・保有銘柄更新 |
-| `stock-advisor` | 朝のポートフォリオ確認と取引判断 |
-| `stock-analyze` | 日本株テクニカル分析 |
-| `stock-backtest` | シグナルのバックテスト |
-| `stock-scan` | 保有銘柄のシグナルスキャン |
-| `deep-analyze` | マルチエージェント深掘り分析 |
 | `download-photos` | 写真販売サイトのカート画像ダウンロード |
 | `omc-reference` | Oh My Claude Code 参照 |
 
-SBI証券連携の共通実装は `portfolio-core/` に集約し、skill側は wrapper として扱います。
+株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）と共有ライブラリは
+[stock-analysis](~/code/stock-analysis/) に独立プロジェクトとして移行済み。
+`claude/skills/` 以下のそれらは symlink で新プロジェクトを指している。
 
 ## Code workspace
 
@@ -119,29 +113,7 @@ SBI証券連携の共通実装は `portfolio-core/` に集約し、skill側は w
 
 ## テスト
 
-Cookie更新まわりの回帰テスト:
-
-```bash
-pytest -q tests/test_portfolio_auth_cookie_refresh.py
-```
-
-Python構文チェック:
-
-```bash
-python3 -m py_compile \
-  portfolio-core/cookie_store.py \
-  portfolio-core/sbi_auth.py \
-  portfolio-core/sbi_fetch.py \
-  claude/skills/portfolio-auth/auth_sbi.py \
-  claude/skills/portfolio-fetch/scripts/fetch_portfolio.py
-```
-
-stock-advisor のテストは専用 venv 経由で実行する（system Python には `numpy`, `pandas`, `yfinance` が入っていないため）:
-
-```bash
-~/.claude/skills/stock-advisor/scripts/.venv/bin/python \
-  -m pytest -q ~/.claude/skills/stock-advisor/scripts/tests
-```
+Cookie更新まわりの回帰テストと Python 構文チェックは [stock-analysis](~/code/stock-analysis/) プロジェクトに移行済み。
 
 ## 運用メモ
 

@@ -1,1 +1,0 @@
-{"baseline": {"trade_count": 12, "win_rate": 50, "avg_win_pct": 3.0, "avg_loss_pct": -3.0, "sharpe_ratio": 0.0, "kurtosis": 3.2}, "walk_forward": {"overfit_detected": false, "consensus": {"verdict": "unstable", "n_passed": 0, "n_total": 4}}}

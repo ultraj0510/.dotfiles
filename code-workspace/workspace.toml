@@ -19,6 +19,8 @@ stock_results = "runtime/stock-price-analyze-results"
 [projects]
 stock_price_analyze = "repo/stock-price-analyze"
 playground_repo = "repo/playground"
+nikkei_research_os = "repo/nikkei-research-os"
+nikkei225_factor_lab = "repo/nikkei225-factor-lab"
 
 [repos]
 stock_price_analyze = "repo/stock-price-analyze"
@@ -26,6 +28,8 @@ playground = "repo/playground"
 tradingagents = "repo/tradingagents"
 claude_code_best_practice = "repo/claude-code-best-practice"
 codexpro = "repo/codexpro"
+nikkei_research_os = "repo/nikkei-research-os"
+nikkei225_factor_lab = "repo/nikkei225-factor-lab"
 
 [references]
 claude_code_best_practice = "repo/claude-code-best-practice"

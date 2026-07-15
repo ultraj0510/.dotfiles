@@ -1,7 +1,0 @@
-{
-  "correlation": {
-    "avg_correlation": 0.194,
-    "risk_concentration": "low",
-    "max_correlation": {"pair": ["8473.T", "8729.T"], "value": 0.47}
-  }
-}

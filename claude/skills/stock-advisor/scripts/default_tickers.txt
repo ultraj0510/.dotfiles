@@ -1,5 +1,0 @@
-# Default tickers for morning check (one per line)
-# Update with actual portfolio holdings. Lines starting with # are skipped.
-1515.T
-7974.T
-285A.T

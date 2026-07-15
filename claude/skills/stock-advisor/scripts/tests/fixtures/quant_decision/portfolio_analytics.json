@@ -1,7 +1,0 @@
-{
-  "correlation": {
-    "risk_concentration": "high",
-    "max_correlation": {"pair": ["7203.T", "8306.T"], "value": 0.9}
-  },
-  "stress_test": {}
-}

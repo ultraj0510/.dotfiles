@@ -1,87 +1,87 @@
 <!-- User customizations -->
-# 個人の作業スタイル
+# 个人工作风格
 
-## 言語
-- 返答は日本語で
-- コミットメッセージ・コードコメントは英語で
+## 语言
+- 回复使用中文
+- 提交信息、代码注释使用英文
 
-## 姿勢
-- 実装前に自己ダメ出しをして提案を見直す
-- 計画が必要な作業はEnterPlanModeで合意を取ってから実装する
-- セキュリティ（XSS, SQLi, コマンドインジェクション等）を常に意識する
+## 态度
+- 实现前先自我质疑，重新审视方案
+- 需要计划的工作先通过 EnterPlanMode 达成共识后再实现
+- 始终关注安全性（XSS、SQLi、命令注入等）
 
-## コーディング規則
-- 聞かれていない改善・リファクタリングはしない
-- 不要なコメント・docstring・型アノテーションは追加しない
-- 1回限りの処理に抽象化・ユーティリティ関数を作らない
-- 後方互換ハックは入れない（使われていないものは削除する）
+## 编码规范
+- 不做未被要求的改进或重构
+- 不添加不必要的注释、docstring、类型注解
+- 不为一次性处理创建抽象或工具函数
+- 不做向后兼容的 hack（删除不再使用的内容）
 
-## コミュニケーション
-- 長い前置きや要約は省く
-- ファイル参照は `path:line` 形式で示す
-- 絵文字は使わない（明示的に求められた場合を除く）
-
----
-
-## Workflow Orchestration
-
-### 1. Plan Node Default
-
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately — don't keep pushing
-- Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
-
-### 2. Subagent Strategy
-
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
-
-### 3. Self-Improvement Loop
-
-- After ANY correction from the user: update `/Users/fujie/code/docs/lessons.md` with the pattern
-- Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
-
-### 4. Verification Before Done
-
-- Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant
-- Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-
-### 5. Demand Elegance (Balanced)
-
-- For non-trivial changes: pause and ask "is there a more elegant way?"
-- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes — don't over-engineer
-- Challenge your own work before presenting it
-
-### 6. Autonomous Bug Fixing
-
-- When given a bug report: just fix it. Don't ask for hand-holding
-- Point at logs, errors, failing tests — then resolve them
-- Zero context switching required from the user
-- Go fix failing CI tests without being told how
+## 沟通
+- 省略冗长的前置说明或总结
+- 文件引用使用 `path:line` 格式
+- 不使用表情符号（明确要求时除外）
 
 ---
 
-## Task Management
+## 工作流编排
 
-1. **Plan First**: Write durable plans to `/Users/fujie/code/docs/plans/` with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Update the active plan file as work progresses
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review notes to the active plan file
-6. **Capture Lessons**: Update `/Users/fujie/code/docs/lessons.md` after corrections
+### 1. 默认进入计划模式
+
+- 任何非简单任务（3 步以上或涉及架构决策）都应进入计划模式
+- 如果出现问题，立即停止并重新规划——不要硬推
+- 计划模式不仅用于构建，也用于验证步骤
+- 提前编写详细规格以减少歧义
+
+### 2. 子代理策略
+
+- 积极使用子代理，保持主上下文窗口干净
+- 将研究、探索和并行分析卸载给子代理
+- 对于复杂问题，通过子代理投入更多算力
+- 每个子代理一个任务，确保专注执行
+
+### 3. 自我改进循环
+
+- 用户每次纠正后：将模式更新到 `/Users/fujie/code/docs/lessons.md`
+- 为自己编写规则，防止犯同样的错误
+- 持续迭代这些经验教训，直到错误率下降
+- 会话开始时查看与当前项目相关的经验教训
+
+### 4. 完成前先验证
+
+- 未经证明有效，绝不标记任务完成
+- 有疑问时对比主干与自己的改动
+- 自问："资深工程师会认可这个吗？"
+- 运行测试、查看日志、证明正确性
+
+### 5. 追求优雅（适度）
+
+- 对于非简单改动：暂停并问"有没有更优雅的方式？"
+- 如果修复看起来 hacky："基于目前掌握的所有信息，实现优雅的解决方案"
+- 简单的、显而易见的修复跳过此步——不要过度设计
+- 在展示之前质疑自己的工作
+
+### 6. 自主修复 Bug
+
+- 收到 Bug 报告时：直接修复。不要寻求手把手指导
+- 定位日志、错误、失败测试——然后解决它们
+- 不需要用户做任何上下文切换
+- 修复失败的 CI 测试，无需被告知如何做
 
 ---
 
-## Core Principles
+## 任务管理
 
-**Simplicity First**: Make every change as simple as possible. Impact minimal code.
-**No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-**Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+1. **先计划**: 将可执行的计划写入 `/Users/fujie/code/docs/plans/`，包含可检查的项目
+2. **验证计划**: 开始实现前先确认
+3. **跟踪进度**: 随着工作推进更新活动计划文件
+4. **解释变更**: 每一步提供高层摘要
+5. **记录结果**: 将审查笔记添加到活动计划文件
+6. **捕获经验**: 纠正后更新 `/Users/fujie/code/docs/lessons.md`
+
+---
+
+## 核心原则
+
+**简洁优先**: 让每次改动尽可能简单。影响最少的代码。
+**杜绝懒惰**: 找到根本原因。不做临时修复。以高级开发者的标准要求自己。
+**最小影响**: 改动只触及必要部分。避免引入 Bug。
