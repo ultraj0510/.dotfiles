@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SOURCE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SOURCE_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 
 if [ "${1:-}" != "--target-root" ] || [ -z "${2:-}" ] || [ "${3:-}" != "" ]; then
   echo "usage: install-links --target-root PATH" >&2
@@ -9,17 +9,27 @@ if [ "${1:-}" != "--target-root" ] || [ -z "${2:-}" ] || [ "${3:-}" != "" ]; the
 fi
 
 TARGET_ROOT=$2
-SOURCE_PATH="$SOURCE_ROOT/scripts"
-TARGET_PATH="$TARGET_ROOT/scripts"
-RELATIVE_PATH=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_PATH" "$TARGET_PATH")
 
 mkdir -p "$TARGET_ROOT"
-if [ -L "$TARGET_PATH" ] && [ "$(readlink "$TARGET_PATH")" = "$RELATIVE_PATH" ]; then
-  exit 0
-fi
-if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
-  echo "BLOCKED: target exists and is not the expected symlink: $TARGET_PATH" >&2
-  exit 2
-fi
 
-ln -s "$RELATIVE_PATH" "$TARGET_PATH"
+for NAME in scripts templates; do
+  SOURCE_PATH="$SOURCE_ROOT/$NAME"
+  TARGET_PATH="$TARGET_ROOT/$NAME"
+  RELATIVE_PATH=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_PATH" "$TARGET_PATH")
+  if [ -L "$TARGET_PATH" ] && [ "$(readlink "$TARGET_PATH")" = "$RELATIVE_PATH" ]; then
+    continue
+  fi
+  if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
+    echo "BLOCKED: target exists and is not the expected symlink: $TARGET_PATH" >&2
+    exit 2
+  fi
+done
+
+for NAME in scripts templates; do
+  SOURCE_PATH="$SOURCE_ROOT/$NAME"
+  TARGET_PATH="$TARGET_ROOT/$NAME"
+  RELATIVE_PATH=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_PATH" "$TARGET_PATH")
+  if [ ! -L "$TARGET_PATH" ]; then
+    ln -s "$RELATIVE_PATH" "$TARGET_PATH"
+  fi
+done

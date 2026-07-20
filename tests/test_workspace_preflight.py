@@ -459,6 +459,8 @@ def test_install_links_is_idempotent_and_never_overwrites(tmp_path):
     assert first.returncode == second.returncode == 0
     assert (target / "scripts").is_symlink()
     assert (target / "scripts").resolve() == (ROOT / "code-workspace" / "scripts").resolve()
+    assert (target / "templates").is_symlink()
+    assert (target / "templates").resolve() == (ROOT / "code-workspace" / "templates").resolve()
 
     blocked_target = tmp_path / "blocked"
     (blocked_target / "scripts").mkdir(parents=True)
@@ -472,6 +474,17 @@ def test_install_links_is_idempotent_and_never_overwrites(tmp_path):
     )
     assert blocked.returncode == 2
     assert marker.read_text() == "keep\n"
+
+    template_conflict = tmp_path / "template-conflict"
+    (template_conflict / "templates").mkdir(parents=True)
+    blocked_before_create = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(template_conflict),
+        check=False,
+    )
+    assert blocked_before_create.returncode == 2
+    assert not (template_conflict / "scripts").exists()
 
 
 def test_installed_preflight_resolves_implementation_through_symlink(tmp_path):

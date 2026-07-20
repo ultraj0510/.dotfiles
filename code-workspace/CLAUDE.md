@@ -9,6 +9,8 @@
 - 以 `/Users/fujie/code/workspace.toml` 作为机器可读工作区事实的权威来源。
 - `.claude/` 仅用于 Claude 专属的代理、规则、钩子和本地设置。
 - 除非 Claude 需要不同的行为，否则不要在此处重复 Codex 专属的指令。
+- 非平凡任务从 `templates/task.md` 创建定义，并运行 `scripts/taskctl start <task-file>`。
+- 不手写 `COMPLETE`；使用 `scripts/taskctl close <task-file> --evidence <evidence-file>` 重新推导结论。
 
 ## 股票分析系统
 

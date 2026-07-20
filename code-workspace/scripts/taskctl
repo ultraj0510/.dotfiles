@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
+WORKSPACE_ROOT=$(CDPATH= cd -P -- "$SCRIPT_DIR/.." && pwd -P)
+
+exec python3 "$WORKSPACE_ROOT/ai/governance/task_protocol.py" "$@"

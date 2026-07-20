@@ -48,4 +48,7 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 - Do not move files across git repository boundaries without checking `git status` and recording the rollback path.
 - Generated daily analysis outputs belong under `runtime/` or ignored result directories, not mixed with source unless explicitly curated as fixtures.
 - 新任务状态、持久化计划和归档分别使用 manifest 声明的默认目录；旧 `tasks/` 仅作历史内容，不再作为入口。
+- 非平凡任务使用 `templates/task.md` 和 `scripts/taskctl`。完成状态由当前风险、preflight 与绑定当前 Git/工作树指纹的证据重新推导，不接受任务 Markdown 中手写的完成声明。
+- 任务 Markdown 是可编辑定义；repository Git metadata 内的 task registry、任务旁的 sidecar 与 evidence JSON 由程序管理，不手工编辑。登记键由 repository identity 与 task ID 共同决定，不依赖可切换的 workspace root；已登记任务移动定义或缺少 sidecar 时拒绝重新初始化。任务定义、branch、HEAD、staged/unstaged diff、相关 untracked 文件或验收命令变化后，旧证据失效；重新执行并通过当前验收后可恢复关闭流程。
+- 该机制处于本地信任边界：它防止手写完成、复用失效证据和跳过结构化强制门，但不声称具有密码学签名、远程身份认证或不可变存储保证。
 - Claude Code automatically loads `~/.claude/CLAUDE.md` for user-level rules. This workspace file covers project-level rules only.

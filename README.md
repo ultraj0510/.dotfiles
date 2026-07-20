@@ -103,10 +103,12 @@ bash ~/.dotfiles/install.sh
 - `code-workspace/docs/plans/`: durable plans
 - `code-workspace/docs/lessons.md`: correction lessons
 - `code-workspace/scripts/preflight`: manifest 登録対象だけを検査する人間向け・JSON兼用の入口
+- `code-workspace/scripts/taskctl`: リスク分類、acceptance実行、完成証拠の再導出
+- `code-workspace/templates/task.md`: 編集可能なタスク定義テンプレート
 
 `install.sh` は `code-workspace/scripts/install-links` を使い、実行ビューの
 `/Users/fujie/code/scripts` を原本へsymlinkします。既存の通常ディレクトリや異なる
-symlinkは上書きしません。
+symlinkは上書きしません。`templates` も同じ規則で配備します。
 
 `scripts/preflight` が唯一の権威あるpreflight入口です。従来の
 `ai/checks/check_workspace.py` は同じ実装を直接起動する互換入口であり、別の走査規則は
@@ -117,6 +119,27 @@ symlinkは上書きしません。
 /Users/fujie/code/scripts/preflight --json
 /Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/nikkei225-factor-lab
 ```
+
+`taskctl` はタスクMarkdownの手書き状態を信頼せず、現在のrisk trigger、preflight JSON、
+Git/working-tree fingerprint、acceptance command証拠から `COMPLETE` / `PARTIAL` /
+`BLOCKED` を再導出します。
+タスクMarkdownは編集可能な定義です。repository Git metadata 内の task registry、タスク
+に隣接する sidecar、evidence JSON はプログラム管理領域であり、手動編集すると整合性検査
+で拒否されます。登録済みタスクの定義を移動した場合や sidecar が欠けている場合は、新規
+タスクとして再初期化せず fail closed します。
+
+```bash
+cp /Users/fujie/code/templates/task.md /path/to/current-task.md
+/Users/fujie/code/scripts/taskctl start /path/to/current-task.md
+/Users/fujie/code/scripts/taskctl run /path/to/current-task.md \
+  --evidence /path/to/evidence.json --kind focused_test \
+  --acceptance focused-test -- python3 -m pytest tests/replace_me.py -q
+/Users/fujie/code/scripts/taskctl close /path/to/current-task.md \
+  --evidence /path/to/evidence.json
+```
+
+これはローカル信頼モデルです。手書きの完成宣言、古い証拠の再利用、必須gateの省略を
+防ぎますが、暗号学的署名、対抗的な本人確認、不変ストレージは提供しません。
 
 実行中タスクの一時状態、永続化する計画、完了済み計画、教訓の既定位置は
 `workspace.toml` の `[workspace]` を参照します。旧 `tasks/` は非権威の履歴です。
