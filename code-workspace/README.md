@@ -40,18 +40,19 @@ stock-advisor（daily runner）
 
 ```
 /Users/fujie/code/
-├── README.md                    ← このファイル
+├── README.md                    ← このファイル（~/.dotfiles から配備される実行ビュー）
 ├── CLAUDE.md                    ← Claude Code ワークスペースエントリポイント
-├── workspace.md                 ← 共有ルール・エリアマップ（全ツール共通の信頼できる情報源）
-├── workspace.toml               ← 機械可読パスマッピング
-├── docs/                        ← 計画書・教訓・レビュー
-│   └── superpowers/
-│       ├── specs/               ← 設計仕様書
-│       └── plans/               ← 実装計画
+├── workspace.md                 ← 人向けの共有ガイド・責務境界
+├── workspace.toml               ← 機械可読な構造・パス・既定値・ルールの権威
+├── docs/                        ← 永続化する計画・教訓・レビュー
+│   ├── plans/                   ← 現行の実装計画
+│   ├── archive/                 ← 完了した計画
+│   └── lessons.md               ← 継続的な教訓
 ├── runtime/
+│   ├── tasks/                   ← 実行中タスクの一時状態
 │   └── stock-company-analysis/  ← 日次分析の出力（銘柄別 latest.json + runs/）
 └── repo/                        ← 独立 git リポジトリ群
-    ├── stock-price-analyze/     ← 分析コアモジュール
+    ├── stock-analysis/          ← 分析コアモジュール
     └── tradingagents/           ← TradingAgents 実装
 
 ~/.dotfiles/claude/skills/
@@ -68,6 +69,10 @@ stock-advisor（daily runner）
 ├── portfolio-auth/              ← SBI証券セッションCookie管理
 └── portfolio-update/            ← 売買記録・ポートフォリオ更新
 ```
+
+この構成のGit管理上の原本は `/Users/fujie/.dotfiles/code-workspace` にある。
+パス、既定ディレクトリ、コマンド、ルール値は `workspace.toml`（特に
+`[workspace]` と `[rules]`）を参照し、このREADMEには重複定義しない。
 
 ## 毎朝のワークフロー
 

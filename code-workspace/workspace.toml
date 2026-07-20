@@ -1,8 +1,15 @@
 [workspace]
 root = "/Users/fujie/code"
-source_of_truth = "workspace.md"
+runtime_view = "/Users/fujie/code"
+source_repository = "/Users/fujie/.dotfiles"
+human_documentation = "workspace.md"
+default_task_dir = "runtime/tasks"
 default_plan_dir = "docs/plans"
+default_archive_dir = "docs/archive"
 default_lessons_file = "docs/lessons.md"
+
+[rules]
+commit_language = "zh"
 
 [tools]
 codex_entrypoint = "AGENTS.md"
@@ -16,18 +23,11 @@ omc = "runtime/omc"
 stock_advisor_workspace = "runtime/stock-advisor/workspace"
 stock_results = "runtime/stock-price-analyze-results"
 
-[projects]
-stock_price_analyze = "repo/stock-price-analyze"
-playground_repo = "repo/playground"
-nikkei_research_os = "repo/nikkei-research-os"
-nikkei225_factor_lab = "repo/nikkei225-factor-lab"
-
 [repos]
-stock_price_analyze = "repo/stock-price-analyze"
+stock_analysis = "repo/stock-analysis"
 playground = "repo/playground"
 tradingagents = "repo/tradingagents"
 claude_code_best_practice = "repo/claude-code-best-practice"
-codexpro = "repo/codexpro"
 nikkei_research_os = "repo/nikkei-research-os"
 nikkei225_factor_lab = "repo/nikkei225-factor-lab"
 
@@ -37,3 +37,27 @@ claude_code_best_practice = "repo/claude-code-best-practice"
 [generated]
 claude_agents = ".claude/agents"
 codex_agents = ".codex/agents"
+
+[verification.nikkei225_factor_lab]
+test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
+
+[verification.nikkei_research_os]
+test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
+
+[verification.stock_analysis]
+test_command = []
+verify_command = []
+
+[verification.playground]
+test_command = []
+verify_command = []
+
+[verification.tradingagents]
+test_command = []
+verify_command = []
+
+[verification.claude_code_best_practice]
+test_command = []
+verify_command = []

@@ -94,16 +94,17 @@ bash ~/.dotfiles/install.sh
 
 ## Code workspace
 
-`code-workspace/` は `/Users/fujie/code` 向けの Codex / Claude Code 共通設定です。
+`code-workspace/` は Git 管理上の原本で、`/Users/fujie/code` は Codex / Claude Code が利用する実行ビューです。
 
 - `code-workspace/workspace.md`: 人間向けの構造・運用ルール
-- `code-workspace/workspace.toml`: ツール向けの manifest
+- `code-workspace/workspace.toml`: パス、既定ディレクトリ、コマンド、ルール値の機械可読な唯一の manifest
 - `code-workspace/AGENTS.md`: Codex entrypoint
 - `code-workspace/CLAUDE.md`: Claude Code project entrypoint
 - `code-workspace/docs/plans/`: durable plans
 - `code-workspace/docs/lessons.md`: correction lessons
 
-`tasks/` は廃止済みです。作業計画や教訓は `code-workspace/docs/` に集約します。
+実行中タスクの一時状態、永続化する計画、完了済み計画、教訓の既定位置は
+`workspace.toml` の `[workspace]` を参照します。旧 `tasks/` は非権威の履歴です。
 
 ## セキュリティ方針
 
@@ -119,4 +120,5 @@ Cookie更新まわりの回帰テストと Python 構文チェックは [stock-a
 
 - READMEは公開repoの入口なので、個人情報や運用中の証券データを書かない。
 - `code-workspace/workspace.toml` を先に更新し、その後に `workspace.md` やREADMEを更新する。
-- 完了済みの一時計画は `tasks/` ではなく `code-workspace/docs/archive/` に残す。
+- 新しいタスクや計画の保存先をREADME側で再定義せず、`workspace.toml` の `[workspace]` に従う。
+- 提交语言などの機械可判定ルールは `workspace.toml` の `[rules]` に従う。
