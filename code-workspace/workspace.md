@@ -18,8 +18,8 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | Path | Purpose |
 |------|---------|
 | `/Users/fujie/code/repo/stock-analysis` | Stock analysis research module, CLI, and backtesting. Independent git repository. |
-| `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance. No new strategy research. |
-| `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary active repository for factor research, portfolio simulation, paper trading, and strategy operations. |
+| `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance, plus the external-factor incubation governance control plane. It owns preregistration, immutable requests, evidence verification, and admission records, not strategy execution. |
+| `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary execution plane for strategy and factor research, portfolio simulation, paper trading, and strategy operations. Its isolated incubation adapter computes and reports preregistered factors without changing active F. |
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
 | `/Users/fujie/code/repo/playground` | Playground/scratch git repo for experiments and temporary work. |
 | `/Users/fujie/code/repo/tradingagents` | TradingAgents implementation and tests. Independent git repository. |
@@ -46,7 +46,18 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 - Default Codex/Claude split for implementation work: Codex owns design, planning, review, and verification; implementation edits should be delegated to Claude Code unless the user explicitly asks Codex to edit directly or the change is a small urgent fix.
 - Prefer one source of truth and generated tool-specific files over duplicated manual definitions.
 - Do not move files across git repository boundaries without checking `git status` and recording the rollback path.
+- Before adding cross-repository research behavior, identify the owning plane:
+  Research OS owns incubation governance and immutable provenance; Factor Lab
+  owns factor computation, evaluation, portfolio replay, and active strategy
+  workflows. Exchange versioned artifacts only. Do not duplicate engines or
+  import runtime modules across these repositories.
 - Generated daily analysis outputs belong under `runtime/` or ignored result directories, not mixed with source unless explicitly curated as fixtures.
+- Avoid overdevelopment across all projects. Prefer the smallest extension that
+  satisfies the approved requirement and reuse existing states, commands,
+  schemas, artifact contracts, evaluators, and registries. Add a new abstraction,
+  engine, lifecycle state, CLI family, or authoritative artifact type only when
+  the current mechanism cannot express the requirement cleanly; record that
+  concrete limitation in the design first.
 - 新任务状态、持久化计划和归档分别使用 manifest 声明的默认目录；旧 `tasks/` 仅作历史内容，不再作为入口。
 - 非平凡任务使用 `templates/task.md` 和 `scripts/taskctl`。完成状态由当前风险、preflight 与绑定当前 Git/工作树指纹的证据重新推导，不接受任务 Markdown 中手写的完成声明。
 - 任务 Markdown 是可编辑定义；repository Git metadata 内的 task registry、任务旁的 sidecar 与 evidence JSON 由程序管理，不手工编辑。登记键由 repository identity 与 task ID 共同决定，不依赖可切换的 workspace root；已登记任务移动定义或缺少 sidecar 时拒绝重新初始化。任务定义、branch、HEAD、staged/unstaged diff、相关 untracked 文件或验收命令变化后，旧证据失效；重新执行并通过当前验收后可恢复关闭流程。
