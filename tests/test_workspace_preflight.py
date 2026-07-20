@@ -22,13 +22,14 @@ def load_checker():
     return module
 
 
-def run(*args, cwd=None, check=True):
+def run(*args, cwd=None, check=True, env=None):
     return subprocess.run(
         args,
         cwd=cwd,
         text=True,
         capture_output=True,
         check=check,
+        env=env,
     )
 
 
@@ -46,6 +47,24 @@ def init_repo(path, *, commit=True):
         git(path, "add", "tracked.txt")
         git(path, "commit", "-qm", "base")
     return path
+
+
+def create_install_source(tmp_path):
+    source = init_repo(tmp_path / "persistent source", commit=False)
+    workspace = source / "code-workspace"
+    scripts = workspace / "scripts"
+    templates = workspace / "templates"
+    scripts.mkdir(parents=True)
+    templates.mkdir()
+    shutil.copy2(INSTALL_LINKS, scripts / "install-links")
+    (workspace / "workspace.toml").write_text(
+        "[workspace]\n"
+        f"source_repository = {json.dumps(str(source.resolve()))}\n"
+    )
+    git(source, "add", "code-workspace")
+    git(source, "commit", "-qm", "test source")
+
+    return source
 
 
 def write_manifest(tmp_path, repos, verification=None):
@@ -713,19 +732,84 @@ def test_install_links_rolls_back_when_second_link_fails(tmp_path):
     assert not (target / "templates").exists()
 
 
-def test_install_links_rejects_non_persistent_source_by_default(tmp_path):
-    result = run(
-        str(INSTALL_LINKS),
+def test_install_links_accepts_declared_persistent_source_by_default(tmp_path):
+    source = create_install_source(tmp_path)
+    target = tmp_path / "runtime view"
+    state = tmp_path / "evidence" / "install.json"
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = dict(os.environ, HOME=str(home))
+
+    installed = run(
+        str(source / "code-workspace" / "scripts" / "install-links"),
         "--target-root",
-        str(tmp_path / "target"),
+        str(target),
         "--state-file",
-        str(tmp_path / "state.json"),
+        str(state),
         check=False,
+        env=environment,
+    )
+
+    assert installed.returncode == 0
+    assert (target / "scripts").resolve() == (
+        source / "code-workspace" / "scripts"
+    ).resolve()
+    assert (target / "templates").resolve() == (
+        source / "code-workspace" / "templates"
+    ).resolve()
+    assert state.is_file()
+
+    removed = run(
+        str(source / "code-workspace" / "scripts" / "install-links"),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(state),
+        "--remove",
+        check=False,
+        env=environment,
+    )
+
+    assert removed.returncode == 0
+    assert not (target / "scripts").exists()
+    assert not (target / "templates").exists()
+    state.unlink()
+    assert not state.exists()
+
+
+def test_install_links_rejects_explicit_non_persistent_linked_worktree(tmp_path):
+    source = create_install_source(tmp_path)
+    linked = tmp_path / "linked source"
+    git(source, "worktree", "add", "--detach", str(linked), "HEAD")
+    target = tmp_path / "runtime view"
+    target.mkdir()
+    external = tmp_path / "external scripts"
+    external.mkdir()
+    (target / "scripts").symlink_to(external, target_is_directory=True)
+    state = tmp_path / "evidence" / "install.json"
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = dict(os.environ, HOME=str(home))
+
+    result = run(
+        str(linked / "code-workspace" / "scripts" / "install-links"),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(state),
+        check=False,
+        env=environment,
     )
 
     assert result.returncode == 2
     assert result.stderr.startswith("BLOCKED:")
-    assert "linked worktree" in result.stderr or "workspace manifest" in result.stderr
+    assert "linked worktree" in result.stderr
+    assert git(source, "rev-parse", "--absolute-git-dir") == str(source / ".git")
+    assert git(linked, "rev-parse", "--absolute-git-dir") != str(linked / ".git")
+    assert (target / "scripts").is_symlink()
+    assert (target / "scripts").readlink() == external
+    assert not (target / "templates").exists()
+    assert not state.exists()
 
 
 def test_install_sh_refuses_to_replace_external_symlink(tmp_path):
