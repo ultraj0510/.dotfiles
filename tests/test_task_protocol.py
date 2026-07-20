@@ -63,7 +63,7 @@ def init_repo(path):
     return path
 
 
-def make_preflight(path, status="WARN", schema_version=1, valid_json=True):
+def make_preflight(path, status="WARN", schema_version=1, valid_json=True, delay=0):
     exit_codes = {"PASS": 0, "WARN": 1, "BLOCKED": 2, "ERROR": 3}
     if valid_json:
         payload = json.dumps(
@@ -76,7 +76,10 @@ def make_preflight(path, status="WARN", schema_version=1, valid_json=True):
                 "findings": [],
             }
         )
-        body = f"print({payload!r})\nraise SystemExit({exit_codes[status]})\n"
+        body = (
+            f"import time\ntime.sleep({delay!r})\n"
+            f"print({payload!r})\nraise SystemExit({exit_codes[status]})\n"
+        )
     else:
         body = "print('not-json')\nraise SystemExit(0)\n"
     path.write_text(f"#!/usr/bin/env python3\n{body}")
@@ -244,6 +247,15 @@ def test_task_schema_rejects_missing_trigger_duplicate_acceptance_and_path_escap
         protocol.load_task(task, tmp_path)
 
 
+def test_task_definition_must_be_outside_target_repository(tmp_path):
+    protocol = load_protocol()
+    repo = init_repo(tmp_path / "repo")
+    task = write_task(repo, repo)
+
+    with pytest.raises(protocol.TaskSchemaError):
+        protocol.load_task(task, tmp_path)
+
+
 def test_empty_acceptance_command_is_not_vacuous_success(tmp_path):
     protocol = load_protocol()
     repo = init_repo(tmp_path / "repo")
@@ -345,6 +357,31 @@ def test_run_records_auditable_item_bound_to_current_workspace(tmp_path):
     assert item["workspace"]["branch"] == git(repo, "branch", "--show-current")
     assert item["workspace"]["head"] == git(repo, "rev-parse", "HEAD")
     assert item["preflight"]["schema_version"] == 1
+
+
+@pytest.mark.parametrize("location", ["evidence", "archive"])
+def test_evidence_and_archive_must_be_outside_target_repository(tmp_path, location):
+    repo = init_repo(tmp_path / "repo")
+    task = write_task(tmp_path, repo, level="L3" if location == "archive" else "L1")
+    preflight = make_preflight(tmp_path / "preflight")
+    evidence = repo / "evidence.json" if location == "evidence" else tmp_path / "evidence.json"
+    archive = repo / "archive" if location == "archive" else None
+    if archive is not None:
+        archive.mkdir()
+    start(preflight, tmp_path, task)
+
+    result = run_acceptance(
+        preflight,
+        tmp_path,
+        task,
+        evidence,
+        "full_test" if location == "archive" else "focused_test",
+        [sys.executable, "-c", "print('ok')"],
+        archive,
+    )
+
+    assert result.returncode == 3
+    assert result.stdout.startswith("Result: ERROR\n")
 
 
 @pytest.mark.parametrize(
@@ -816,6 +853,216 @@ def test_managed_state_uses_atomic_replace_and_detects_manual_edit(tmp_path, mon
         protocol.load_managed_state(target)
 
 
+def test_twenty_concurrent_starts_do_not_lose_registry_entries(tmp_path):
+    protocol = load_protocol()
+    repo = init_repo(tmp_path / "repo")
+    preflight = make_preflight(tmp_path / "preflight", delay=0.2)
+    tasks = [write_task(tmp_path, repo, task_id=f"task-{index}") for index in range(20)]
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(PROTOCOL),
+                "--workspace-root",
+                str(tmp_path),
+                "--preflight",
+                str(preflight),
+                "start",
+                str(task),
+                "--json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for task in tasks
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    registry = protocol.load_registry(protocol.registry_path_for(repo))
+
+    assert all(process.returncode == 0 for process in processes), results
+    assert set(registry["tasks"][str(repo.resolve())]) == {
+        f"task-{index}" for index in range(20)
+    }
+
+
+def test_concurrent_same_id_start_has_one_registration(tmp_path):
+    protocol = load_protocol()
+    repo = init_repo(tmp_path / "repo")
+    preflight = make_preflight(tmp_path / "preflight", delay=0.2)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    tasks = [write_task(first_dir, repo), write_task(second_dir, repo)]
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(PROTOCOL),
+                "--workspace-root",
+                str(tmp_path),
+                "--preflight",
+                str(preflight),
+                "start",
+                str(task),
+                "--json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for task in tasks
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    registry = protocol.load_registry(protocol.registry_path_for(repo))
+
+    assert sorted(process.returncode for process in processes) == [0, 2], results
+    assert list(registry["tasks"][str(repo.resolve())]) == ["task-1"]
+    assert sum(protocol.state_path_for(task, "task-1").exists() for task in tasks) == 1
+
+
+def test_concurrent_runs_preserve_both_evidence_records(tmp_path):
+    protocol = load_protocol()
+    repo = init_repo(tmp_path / "repo")
+    command = [sys.executable, "-c", "import time; time.sleep(0.2)"]
+    acceptance = [
+        {"id": "accept-1", "description": "one", "command": command},
+        {"id": "accept-2", "description": "two", "command": command},
+    ]
+    task = write_task(tmp_path, repo, acceptance=acceptance)
+    evidence = tmp_path / "evidence.json"
+    preflight = make_preflight(tmp_path / "preflight")
+    assert start(preflight, tmp_path, task).returncode == 0
+    base = [
+        sys.executable,
+        str(PROTOCOL),
+        "--workspace-root",
+        str(tmp_path),
+        "--preflight",
+        str(preflight),
+        "run",
+        str(task),
+        "--evidence",
+        str(evidence),
+        "--kind",
+        "focused_test",
+    ]
+    processes = [
+        subprocess.Popen(
+            [*base, "--acceptance", identifier, "--", *command],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for identifier in ("accept-1", "accept-2")
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    payload = json.loads(evidence.read_text())
+    state = protocol.load_managed_state(protocol.state_path_for(task, "task-1"))
+
+    assert all(process.returncode == 0 for process in processes), results
+    assert [record["id"] for record in payload["commands"]] == ["command:0", "command:1"]
+    assert {tuple(record["acceptance_ids"]) for record in payload["commands"]} == {
+        ("accept-1",),
+        ("accept-2",),
+    }
+    assert state["evidence_sha256"] == protocol.file_sha256(evidence)
+
+
+def test_concurrent_l3_close_preserves_complementary_gates(tmp_path):
+    repo = init_repo(tmp_path / "repo")
+    task = write_task(tmp_path, repo, level="L3")
+    evidence = tmp_path / "evidence.json"
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    preflight = make_preflight(tmp_path / "preflight")
+    command = [sys.executable, "-c", "print('ok')"]
+    start(preflight, tmp_path, task)
+    run_acceptance(preflight, tmp_path, task, evidence, "full_test", command, archive)
+    base = [
+        sys.executable,
+        str(PROTOCOL),
+        "--workspace-root",
+        str(tmp_path),
+        "--preflight",
+        str(preflight),
+        "close",
+        str(task),
+        "--evidence",
+        str(evidence),
+        "--json",
+    ]
+    processes = [
+        subprocess.Popen(
+            [*base, "--approval-ref", "approval:user:2026-07-20"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ),
+        subprocess.Popen(
+            [
+                *base,
+                "--reviewer",
+                "reviewer-b",
+                "--review-ref",
+                "review:task-1:final",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ),
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    reports = [json.loads(stdout) for stdout, _ in results]
+    final = cli(
+        preflight, tmp_path, "close", task, "--evidence", evidence, "--json"
+    )
+
+    assert sorted(report["result"]["status"] for report in reports) == [
+        "BLOCKED",
+        "COMPLETE",
+    ]
+    assert json.loads(final.stdout)["result"]["status"] == "COMPLETE"
+
+
+def test_writer_lock_is_released_after_holder_process_is_killed(tmp_path):
+    protocol = load_protocol()
+    repo = init_repo(tmp_path / "repo")
+    task = write_task(tmp_path, repo)
+    preflight = make_preflight(tmp_path / "preflight")
+    lock_path = protocol.registry_path_for(repo).with_name("writer.lock")
+    holder_code = (
+        "import fcntl,os,sys,time; "
+        "p=sys.argv[1]; os.makedirs(os.path.dirname(p),exist_ok=True); "
+        "f=open(p,'a+b'); fcntl.flock(f,fcntl.LOCK_EX); "
+        "print('locked',flush=True); time.sleep(30)"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", holder_code, str(lock_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert holder.stdout.readline().strip() == "locked"
+    blocked = cli(
+        preflight,
+        tmp_path,
+        "--lock-timeout",
+        "0.05",
+        "start",
+        task,
+        "--json",
+    )
+    holder.kill()
+    holder.wait(timeout=10)
+    recovered = start(preflight, tmp_path, task)
+
+    assert blocked.returncode == 3
+    assert "writer lock timed out" in blocked.stdout
+    assert recovered.returncode == 0
+
+
 def test_close_is_idempotent(tmp_path):
     repo = init_repo(tmp_path / "repo")
     task = write_task(tmp_path, repo)
@@ -839,7 +1086,15 @@ def test_installed_taskctl_works_from_temporary_runtime_view(tmp_path):
     task = write_task(tmp_path, repo)
     preflight = make_preflight(tmp_path / "preflight")
     installed = tmp_path / "installed"
-    assert run(str(INSTALL_LINKS), "--target-root", str(installed), check=False).returncode == 0
+    assert run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(installed),
+        "--state-file",
+        str(tmp_path / "install-state.json"),
+        "--allow-linked-worktree",
+        check=False,
+    ).returncode == 0
 
     result = run(
         str(installed / "scripts" / "taskctl"),

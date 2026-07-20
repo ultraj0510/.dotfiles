@@ -127,6 +127,14 @@ Git/working-tree fingerprint、acceptance command証拠から `COMPLETE` / `PART
 に隣接する sidecar、evidence JSON はプログラム管理領域であり、手動編集すると整合性検査
 で拒否されます。登録済みタスクの定義を移動した場合や sidecar が欠けている場合は、新規
 タスクとして再初期化せず fail closed します。
+repository ごとの writer lock が `start` / `run` / `close` の read-modify-write 全体を直列化し、
+競合は指定時間後に明示的な `ERROR` になります。プロセス終了時にはOSがlockを解放します。
+task definition、evidence、archive は fingerprint 対象repoの外に置く必要があります。
+
+task definition の acceptance command は信頼済みローカルコードとして実行されます。`run` は
+配列argvを直接実行し、暗黙のshell解釈は行いませんが、`sh -c` 等をargvに指定すれば任意コード
+実行になります。未審査のPR、外部分岐、ダウンロードしたtask definitionを自動実行しないで
+ください。
 
 ```bash
 cp /Users/fujie/code/templates/task.md /path/to/current-task.md
@@ -140,6 +148,25 @@ cp /Users/fujie/code/templates/task.md /path/to/current-task.md
 
 これはローカル信頼モデルです。手書きの完成宣言、古い証拠の再利用、必須gateの省略を
 防ぎますが、暗号学的署名、対抗的な本人確認、不変ストレージは提供しません。
+
+`install-links` は通常の配備ではlinked worktreeを拒否します。統合後の永続 `.dotfiles` から
+実行し、`scripts` と `templates` の双方が永続ソースへ解決することを確認してください。
+install時の `--state-file` は各linkの変更前状態を0600のJSONとして記録します。同じ
+`--state-file` を指定した `--remove` は本runで新設したlinkだけを削除し、以前から正しかった
+linkは保持します。journal の canonical SHA-256 は通常の手動編集を検出しますが、ローカル
+書込権限を持つ相手への暗号学的保証ではありません。開発用の `--allow-linked-worktree` は
+一時ビュー検証専用です。
+
+```bash
+/Users/fujie/.dotfiles/code-workspace/scripts/install-links \
+  --target-root /Users/fujie/code \
+  --state-file /path/to/workspace-links-install.json
+# rollback
+/Users/fujie/.dotfiles/code-workspace/scripts/install-links \
+  --target-root /Users/fujie/code \
+  --state-file /path/to/workspace-links-install.json \
+  --remove
+```
 
 実行中タスクの一時状態、永続化する計画、完了済み計画、教訓の既定位置は
 `workspace.toml` の `[workspace]` を参照します。旧 `tasks/` は非権威の履歴です。

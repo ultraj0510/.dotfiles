@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -452,15 +453,50 @@ def test_cli_exit_codes_are_derived_from_structured_status(tmp_path):
 def test_install_links_is_idempotent_and_never_overwrites(tmp_path):
     target = tmp_path / "target"
     target.mkdir()
+    first_state = tmp_path / "first-install.json"
+    second_state = tmp_path / "second-install.json"
 
-    first = run(str(INSTALL_LINKS), "--target-root", str(target), check=False)
-    second = run(str(INSTALL_LINKS), "--target-root", str(target), check=False)
+    first = run(str(INSTALL_LINKS), "--target-root", str(target), "--state-file", str(first_state), "--allow-linked-worktree", check=False)
+    second = run(str(INSTALL_LINKS), "--target-root", str(target), "--state-file", str(first_state), "--allow-linked-worktree", check=False)
 
     assert first.returncode == second.returncode == 0
+    assert first_state.stat().st_mode & 0o777 == 0o600
     assert (target / "scripts").is_symlink()
     assert (target / "scripts").resolve() == (ROOT / "code-workspace" / "scripts").resolve()
     assert (target / "templates").is_symlink()
     assert (target / "templates").resolve() == (ROOT / "code-workspace" / "templates").resolve()
+
+    preserved_baseline = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(second_state),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert preserved_baseline.returncode == 0
+    original_second_state = second_state.read_bytes()
+    changed_baseline = json.loads(second_state.read_text())
+    for item in changed_baseline["links"]:
+        item["before"] = "absent"
+    second_state.write_text(json.dumps(changed_baseline))
+    second_state.chmod(0o600)
+    rejected_baseline_edit = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(second_state),
+        "--allow-linked-worktree",
+        "--remove",
+        check=False,
+    )
+    assert rejected_baseline_edit.returncode != 0
+    assert (target / "scripts").is_symlink()
+    assert (target / "templates").is_symlink()
+    second_state.write_bytes(original_second_state)
+    second_state.chmod(0o600)
 
     blocked_target = tmp_path / "blocked"
     (blocked_target / "scripts").mkdir(parents=True)
@@ -470,10 +506,45 @@ def test_install_links_is_idempotent_and_never_overwrites(tmp_path):
         str(INSTALL_LINKS),
         "--target-root",
         str(blocked_target),
+        "--state-file",
+        str(tmp_path / "blocked-state.json"),
+        "--allow-linked-worktree",
         check=False,
     )
     assert blocked.returncode == 2
     assert marker.read_text() == "keep\n"
+
+    external_target = tmp_path / "external-target"
+    external_target.mkdir()
+    external_link_root = tmp_path / "external-link"
+    external_link_root.mkdir()
+    (external_link_root / "scripts").symlink_to(external_target)
+    external = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(external_link_root),
+        "--state-file",
+        str(tmp_path / "external-state.json"),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert external.returncode == 2
+    assert (external_link_root / "scripts").readlink() == external_target
+
+    broken_root = tmp_path / "broken-link"
+    broken_root.mkdir()
+    (broken_root / "scripts").symlink_to("missing-target")
+    broken = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(broken_root),
+        "--state-file",
+        str(tmp_path / "broken-state.json"),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert broken.returncode == 2
+    assert (broken_root / "scripts").readlink() == Path("missing-target")
 
     template_conflict = tmp_path / "template-conflict"
     (template_conflict / "templates").mkdir(parents=True)
@@ -481,10 +552,226 @@ def test_install_links_is_idempotent_and_never_overwrites(tmp_path):
         str(INSTALL_LINKS),
         "--target-root",
         str(template_conflict),
+        "--state-file",
+        str(tmp_path / "conflict-state.json"),
+        "--allow-linked-worktree",
         check=False,
     )
     assert blocked_before_create.returncode == 2
     assert not (template_conflict / "scripts").exists()
+
+    preserved = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(second_state),
+        "--allow-linked-worktree",
+        "--remove",
+        check=False,
+    )
+    assert preserved.returncode == 0
+    assert (target / "scripts").is_symlink()
+    assert (target / "templates").is_symlink()
+
+    removed = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(first_state),
+        "--allow-linked-worktree",
+        "--remove",
+        check=False,
+    )
+    assert removed.returncode == 0
+    assert not (target / "scripts").exists()
+    assert not (target / "templates").exists()
+
+
+def test_install_links_rejects_tampered_or_unsafe_state_file(tmp_path):
+    target = tmp_path / "target"
+    state = tmp_path / "state.json"
+    installed = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(state),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert installed.returncode == 0
+    payload = json.loads(state.read_text())
+    victim = tmp_path / "victim"
+    victim.symlink_to("payload")
+    payload["links"].append(
+        {"name": str(victim), "before": "absent", "link_text": "payload"}
+    )
+    state.write_text(json.dumps(payload))
+    state.chmod(0o600)
+
+    tampered = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(target),
+        "--state-file",
+        str(state),
+        "--allow-linked-worktree",
+        "--remove",
+        check=False,
+    )
+
+    assert tampered.returncode != 0
+    assert victim.is_symlink()
+    assert (target / "scripts").is_symlink()
+    assert (target / "templates").is_symlink()
+
+    user_file = tmp_path / "user-file"
+    user_file.write_text("keep\n")
+    user_file.chmod(0o600)
+    other_target = tmp_path / "other-target"
+    existing = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(other_target),
+        "--state-file",
+        str(user_file),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert existing.returncode != 0
+    assert user_file.read_text() == "keep\n"
+    assert not (other_target / "scripts").exists()
+
+    unsafe_target = tmp_path / "unsafe-target"
+    inside = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(unsafe_target),
+        "--state-file",
+        str(unsafe_target / "journal.json"),
+        "--allow-linked-worktree",
+        check=False,
+    )
+    assert inside.returncode != 0
+    assert not (unsafe_target / "scripts").exists()
+
+
+def test_install_links_canonicalizes_symlink_target_root(tmp_path):
+    physical = tmp_path / "physical" / "deep"
+    physical.mkdir(parents=True)
+    view = tmp_path / "view"
+    view.symlink_to(physical, target_is_directory=True)
+
+    result = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(view),
+        "--state-file",
+        str(tmp_path / "symlink-target-state.json"),
+        "--allow-linked-worktree",
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (view / "scripts").resolve() == (ROOT / "code-workspace" / "scripts").resolve()
+    assert (view / "templates").resolve() == (ROOT / "code-workspace" / "templates").resolve()
+
+
+def test_install_links_rolls_back_when_second_link_fails(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_ln = fake_bin / "ln"
+    fake_ln.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in *templates*) exit 71;; esac\n"
+        "exec /bin/ln \"$@\"\n"
+    )
+    fake_ln.chmod(0o755)
+    target = tmp_path / "target"
+    environment = dict(os.environ)
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+
+    result = subprocess.run(
+        [
+            str(INSTALL_LINKS),
+            "--target-root",
+            str(target),
+            "--state-file",
+            str(tmp_path / "failed-install-state.json"),
+            "--allow-linked-worktree",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert result.returncode == 71
+    assert not (target / "scripts").exists()
+    assert not (target / "templates").exists()
+
+
+def test_install_links_rejects_non_persistent_source_by_default(tmp_path):
+    result = run(
+        str(INSTALL_LINKS),
+        "--target-root",
+        str(tmp_path / "target"),
+        "--state-file",
+        str(tmp_path / "state.json"),
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("BLOCKED:")
+    assert "linked worktree" in result.stderr or "workspace manifest" in result.stderr
+
+
+def test_install_sh_refuses_to_replace_external_symlink(tmp_path):
+    home = tmp_path / "home"
+    source = home / ".dotfiles"
+    (source / "code-workspace" / "scripts").mkdir(parents=True)
+    (source / "code-workspace" / "templates").mkdir(parents=True)
+    (source / "git").mkdir()
+    shutil.copy2(ROOT / "install.sh", source / "install.sh")
+    for name in ("install-links", "preflight", "taskctl"):
+        shutil.copy2(
+            ROOT / "code-workspace" / "scripts" / name,
+            source / "code-workspace" / "scripts" / name,
+        )
+    shutil.copy2(
+        ROOT / "code-workspace" / "templates" / "task.md",
+        source / "code-workspace" / "templates" / "task.md",
+    )
+    manifest = (ROOT / "code-workspace" / "workspace.toml").read_text()
+    manifest = manifest.replace(
+        'source_repository = "/Users/fujie/.dotfiles"',
+        f"source_repository = {json.dumps(str(source))}",
+    )
+    (source / "code-workspace" / "workspace.toml").write_text(manifest)
+    (source / "git" / ".gitconfig").write_text("[user]\n")
+    git(source, "init", "-q")
+    external = tmp_path / "external-gitconfig"
+    external.write_text("keep\n")
+    home.mkdir(exist_ok=True)
+    (home / ".gitconfig").symlink_to(external)
+    environment = dict(os.environ)
+    environment["HOME"] = str(home)
+    environment["PATH"] = f"{Path(sys.executable).parent}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        ["/bin/bash", str(source / "install.sh")],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert result.returncode == 2
+    assert (home / ".gitconfig").is_symlink()
+    assert (home / ".gitconfig").resolve() == external
+    assert external.read_text() == "keep\n"
 
 
 def test_installed_preflight_resolves_implementation_through_symlink(tmp_path):
@@ -497,6 +784,9 @@ def test_installed_preflight_resolves_implementation_through_symlink(tmp_path):
         str(INSTALL_LINKS),
         "--target-root",
         str(target),
+        "--state-file",
+        str(tmp_path / "installed-state.json"),
+        "--allow-linked-worktree",
         check=False,
     )
     result = run(

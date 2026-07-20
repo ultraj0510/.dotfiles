@@ -51,4 +51,6 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 - 非平凡任务使用 `templates/task.md` 和 `scripts/taskctl`。完成状态由当前风险、preflight 与绑定当前 Git/工作树指纹的证据重新推导，不接受任务 Markdown 中手写的完成声明。
 - 任务 Markdown 是可编辑定义；repository Git metadata 内的 task registry、任务旁的 sidecar 与 evidence JSON 由程序管理，不手工编辑。登记键由 repository identity 与 task ID 共同决定，不依赖可切换的 workspace root；已登记任务移动定义或缺少 sidecar 时拒绝重新初始化。任务定义、branch、HEAD、staged/unstaged diff、相关 untracked 文件或验收命令变化后，旧证据失效；重新执行并通过当前验收后可恢复关闭流程。
 - 该机制处于本地信任边界：它防止手写完成、复用失效证据和跳过结构化强制门，但不声称具有密码学签名、远程身份认证或不可变存储保证。
+- `taskctl start/run/close` 使用 repository 级单写者锁覆盖完整 read-modify-write；锁超时必须明确失败，进程退出后由操作系统释放。任务定义、evidence、archive 必须位于目标 repository 之外，避免治理元数据使 fingerprint 循环失效。
+- acceptance command 是可信本地代码。`taskctl run` 仅直接执行已声明的 argv，不做隐式 shell 解析；不得自动执行未审查 PR、外部分支或下载来源中的任务定义。L3 reviewer/implementer 仅是结构化声明字段，不构成身份认证。
 - Claude Code automatically loads `~/.claude/CLAUDE.md` for user-level rules. This workspace file covers project-level rules only.

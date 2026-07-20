@@ -10,6 +10,18 @@ backup_and_link() {
   local dst="$2"  # リンク先（ホームの実際のパス）
   local rel="$3"  # dstから見たsrcへの相対パス
 
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+    echo "  BLOCKED: source does not exist: $src" >&2
+    return 2
+  fi
+  local expected resolved
+  expected="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$src")"
+  resolved="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$dst" "$rel")"
+  if [ "$resolved" != "$expected" ]; then
+    echo "  BLOCKED: link text does not resolve to source: $dst → $rel" >&2
+    return 2
+  fi
+
   mkdir -p "$(dirname "$dst")"
 
   # 既にリンク先が正しいsymlinkなら何もしない
@@ -28,7 +40,8 @@ backup_and_link() {
       return
     fi
   elif [ -L "$dst" ]; then
-    rm "$dst"
+    echo "  BLOCKED: refusing to replace existing symlink: $dst → $(readlink "$dst")" >&2
+    return 2
   fi
 
   ln -s "$rel" "$dst"
@@ -37,7 +50,10 @@ backup_and_link() {
 
 echo "==> Installing dotfiles..."
 
-"$DOTFILES/code-workspace/scripts/install-links" --target-root "$HOME/code"
+"$DOTFILES/code-workspace/scripts/install-links" \
+  --target-root "$HOME/code" \
+  --state-file "$BACKUP_DIR/workspace-links.json"
+echo "  workspace link rollback state: $BACKUP_DIR/workspace-links.json"
 
 # git
 backup_and_link \

@@ -38,6 +38,9 @@ irreversible_external_action = false
 
 # Stop conditions
 
+不要执行来自未审查 PR、外部分支或下载来源的 acceptance command。
+任务文件、evidence 和 archive 必须位于目标 repository 之外。
+
 # Completion evidence
 
 由 `taskctl close` 推导，不手写 `COMPLETE`。

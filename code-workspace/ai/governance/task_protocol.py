@@ -2,6 +2,8 @@
 """Deterministic local task risk and completion-evidence protocol."""
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -9,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -116,6 +119,29 @@ def atomic_write_json(path, value):
     atomic_write_bytes(path, json.dumps(value, ensure_ascii=False, indent=2).encode() + b"\n")
 
 
+@contextlib.contextmanager
+def repository_writer_lock(repository, timeout):
+    lock_path = registry_path_for(repository).with_name("writer.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise CliError(
+                        f"repository writer lock timed out after {timeout:g} seconds"
+                    )
+                time.sleep(0.05)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def load_managed_state(path):
     path = Path(path)
     try:
@@ -210,6 +236,14 @@ def resolve_repository(value, workspace_root):
     return path
 
 
+def require_outside_repository(path, repository, label):
+    resolved = Path(path).resolve()
+    repository = Path(repository).resolve()
+    if resolved == repository or repository in resolved.parents:
+        raise TaskSchemaError(f"{label} must be outside the target repository")
+    return resolved
+
+
 def load_task(path, workspace_root):
     data = parse_front_matter(path)
     required = {
@@ -270,6 +304,7 @@ def load_task(path, workspace_root):
     if len(identifiers) != len(set(identifiers)):
         raise TaskSchemaError("acceptance ids must be unique")
     repo = resolve_repository(data["repo"], workspace_root)
+    task_path = require_outside_repository(path, repo, "task definition")
     normalized = {
         "schema_version": SCHEMA_VERSION,
         "id": task_id,
@@ -282,7 +317,7 @@ def load_task(path, workspace_root):
     }
     return {
         **normalized,
-        "path": str(Path(path).resolve()),
+        "path": str(task_path),
         "triggers": triggers,
         "risk_result": risk_result,
         "definition_digest": sha256_json(normalized),
@@ -498,6 +533,11 @@ def command_exit_code(returncode, execution_error):
 
 def command_start(args, context):
     task = load_task(args.task, context.workspace_root)
+    with repository_writer_lock(task["repo"], context.lock_timeout):
+        return command_start_locked(args, context, task)
+
+
+def command_start_locked(args, context, task):
     state_path = state_path_for(args.task, task["id"])
     registry_path = registry_path_for(task["repo"])
     try:
@@ -576,6 +616,11 @@ def command_classify(args, context):
 
 def command_run(args, context):
     task = load_task(args.task, context.workspace_root)
+    with repository_writer_lock(task["repo"], context.lock_timeout):
+        return command_run_locked(args, context, task)
+
+
+def command_run_locked(args, context, task):
     state_path = state_path_for(args.task, task["id"])
     try:
         state = load_managed_state(state_path)
@@ -606,11 +651,18 @@ def command_run(args, context):
         raise CliError("unsupported evidence kind")
     if risk["level"] == "L3" and (args.archive_dir is None or not Path(args.archive_dir).is_dir()):
         raise CliError("L3 run requires an existing --archive-dir")
+    archive_dir = None
+    if args.archive_dir is not None:
+        archive_dir = require_outside_repository(
+            args.archive_dir, task["repo"], "archive directory"
+        )
     try:
         preflight = invoke_preflight(context.preflight, task["repo"])
     except PreflightInterfaceError as exc:
         return error_output("run", task["id"], str(exc), risk)
-    evidence_path = Path(args.evidence).resolve()
+    evidence_path = require_outside_repository(
+        args.evidence, task["repo"], "evidence file"
+    )
     if state.get("evidence_path"):
         evidence = load_evidence(evidence_path, state, task["id"])
     else:
@@ -631,8 +683,8 @@ def command_run(args, context):
     snapshot = workspace_snapshot(task["repo"], task["allowed_paths"])
     index = len(evidence["commands"])
     archive = None
-    if args.archive_dir is not None:
-        archive_root = Path(args.archive_dir).resolve() / task["id"]
+    if archive_dir is not None:
+        archive_root = archive_dir / task["id"]
         stdout_path = archive_root / f"command-{index:03d}.stdout"
         stderr_path = archive_root / f"command-{index:03d}.stderr"
         atomic_write_bytes(stdout_path, stdout)
@@ -731,6 +783,11 @@ def valid_command_records(evidence, task, snapshot):
 
 def command_close(args, context):
     task = load_task(args.task, context.workspace_root)
+    with repository_writer_lock(task["repo"], context.lock_timeout):
+        return command_close_locked(args, context, task)
+
+
+def command_close_locked(args, context, task):
     state_path = state_path_for(args.task, task["id"])
     try:
         state = load_managed_state(state_path)
@@ -755,7 +812,10 @@ def command_close(args, context):
     valid_records = []
     invalid = []
     try:
-        evidence = load_evidence(args.evidence, state, task["id"])
+        evidence_path = require_outside_repository(
+            args.evidence, task["repo"], "evidence file"
+        )
+        evidence = load_evidence(evidence_path, state, task["id"])
         valid_records, invalid = valid_command_records(evidence, task, snapshot)
     except EvidenceError:
         reasons.append("EVIDENCE_MISSING_OR_INVALID")
@@ -881,6 +941,17 @@ def render_human(report):
     return "\n".join(lines) + "\n"
 
 
+def configured_workspace_root(source_root):
+    manifest = Path(source_root) / "workspace.toml"
+    try:
+        value = tomllib.loads(manifest.read_text())["workspace"]["root"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+        raise TaskSchemaError(f"cannot read workspace root from {manifest}: {exc}") from exc
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise TaskSchemaError("workspace.root must be an absolute path")
+    return Path(value)
+
+
 def parse_args(argv):
     command_argv = []
     parseable = list(argv)
@@ -890,8 +961,11 @@ def parse_args(argv):
         parseable = parseable[:separator]
     source_root = Path(__file__).resolve().parents[2]
     parser = Parser()
-    parser.add_argument("--workspace-root", type=Path, default=Path("/Users/fujie/code"))
+    parser.add_argument(
+        "--workspace-root", type=Path, default=configured_workspace_root(source_root)
+    )
     parser.add_argument("--preflight", type=Path, default=source_root / "scripts" / "preflight")
+    parser.add_argument("--lock-timeout", type=float, default=30.0)
     subparsers = parser.add_subparsers(dest="operation", required=True)
     classify = subparsers.add_parser("classify")
     classify.add_argument("task", type=Path)
@@ -915,6 +989,8 @@ def parse_args(argv):
     close.add_argument("--review-ref")
     close.add_argument("--json", action="store_true")
     args = parser.parse_args(parseable)
+    if args.lock_timeout <= 0:
+        raise CliError("--lock-timeout must be greater than zero")
     if args.operation == "run":
         args.argv = command_argv
     return args

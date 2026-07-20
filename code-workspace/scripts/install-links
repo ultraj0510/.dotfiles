@@ -3,14 +3,70 @@ set -eu
 
 SOURCE_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 
-if [ "${1:-}" != "--target-root" ] || [ -z "${2:-}" ] || [ "${3:-}" != "" ]; then
-  echo "usage: install-links --target-root PATH" >&2
+if [ "${1:-}" != "--target-root" ] || [ -z "${2:-}" ]; then
+  echo "usage: install-links --target-root PATH --state-file FILE [--allow-linked-worktree] [--remove]" >&2
   exit 3
 fi
 
-TARGET_ROOT=$2
+TARGET_INPUT=$2
+shift 2
+ALLOW_LINKED_WORKTREE=false
+REMOVE=false
+STATE_FILE=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --allow-linked-worktree) ALLOW_LINKED_WORKTREE=true ;;
+    --remove) REMOVE=true ;;
+    --state-file)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "ERROR: --state-file requires a path" >&2
+        exit 3
+      fi
+      STATE_FILE=$1
+      ;;
+    *)
+      echo "usage: install-links --target-root PATH --state-file FILE [--allow-linked-worktree] [--remove]" >&2
+      exit 3
+      ;;
+  esac
+  shift
+done
 
-mkdir -p "$TARGET_ROOT"
+if [ -z "$STATE_FILE" ]; then
+  echo "ERROR: --state-file is required for recoverable installation" >&2
+  exit 3
+fi
+
+REPOSITORY_ROOT=$(git -C "$SOURCE_ROOT" rev-parse --show-toplevel 2>/dev/null) || {
+  echo "ERROR: source is not inside a Git repository: $SOURCE_ROOT" >&2
+  exit 3
+}
+GIT_DIR=$(git -C "$SOURCE_ROOT" rev-parse --absolute-git-dir 2>/dev/null) || exit 3
+if [ "$ALLOW_LINKED_WORKTREE" = false ] && [ "$GIT_DIR" != "$REPOSITORY_ROOT/.git" ]; then
+  echo "BLOCKED: refusing to install permanent links from a linked worktree: $SOURCE_ROOT" >&2
+  exit 2
+fi
+EXPECTED_REPOSITORY=$(python3 -c 'import pathlib,sys,tomllib; print(pathlib.Path(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["workspace"]["source_repository"]).resolve())' "$SOURCE_ROOT/workspace.toml") || {
+  echo "ERROR: cannot read workspace.source_repository" >&2
+  exit 3
+}
+if [ "$ALLOW_LINKED_WORKTREE" = false ] && [ "$REPOSITORY_ROOT" != "$EXPECTED_REPOSITORY" ]; then
+  echo "BLOCKED: source repository does not match workspace manifest: $REPOSITORY_ROOT" >&2
+  exit 2
+fi
+
+mkdir -p "$TARGET_INPUT"
+TARGET_ROOT=$(CDPATH= cd -P -- "$TARGET_INPUT" && pwd -P)
+python3 -c '
+import os, sys
+state_path, source_root, target_root = sys.argv[1:]
+parent = os.path.realpath(os.path.dirname(os.path.abspath(state_path)))
+resolved = os.path.join(parent, os.path.basename(state_path))
+for forbidden in (os.path.realpath(source_root), os.path.realpath(target_root)):
+    if os.path.commonpath((resolved, forbidden)) == forbidden:
+        raise SystemExit(f"BLOCKED: state file must be outside source and target roots: {resolved}")
+' "$STATE_FILE" "$SOURCE_ROOT" "$TARGET_ROOT"
 
 for NAME in scripts templates; do
   SOURCE_PATH="$SOURCE_ROOT/$NAME"
@@ -25,11 +81,172 @@ for NAME in scripts templates; do
   fi
 done
 
+SCRIPTS_PATH="$TARGET_ROOT/scripts"
+TEMPLATES_PATH="$TARGET_ROOT/templates"
+SCRIPTS_RELATIVE=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_ROOT/scripts" "$SCRIPTS_PATH")
+TEMPLATES_RELATIVE=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_ROOT/templates" "$TEMPLATES_PATH")
+
+if [ "$REMOVE" = true ]; then
+  python3 -c '
+import hashlib, json, os, stat, sys
+state_path, source_root, target_root, scripts_text, templates_text = sys.argv[1:]
+if os.path.islink(state_path) or not os.path.isfile(state_path):
+    raise SystemExit("BLOCKED: install state is not a regular file")
+if stat.S_IMODE(os.stat(state_path).st_mode) != 0o600:
+    raise SystemExit("BLOCKED: install state permissions must be 0600")
+with open(state_path) as handle:
+    state = json.load(handle)
+if set(state) != {"schema_version", "source_root", "target_root", "links", "integrity_sha256"} or state["schema_version"] != 1:
+    raise SystemExit("ERROR: install state schema is invalid")
+unsigned = {key: value for key, value in state.items() if key != "integrity_sha256"}
+digest = hashlib.sha256(json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+if state["integrity_sha256"] != digest:
+    raise SystemExit("BLOCKED: install state integrity check failed")
+if os.path.realpath(state["source_root"]) != os.path.realpath(source_root):
+    raise SystemExit("BLOCKED: install state source does not match")
+if os.path.realpath(state["target_root"]) != os.path.realpath(target_root):
+    raise SystemExit("BLOCKED: install state target does not match")
+expected = {"scripts": scripts_text, "templates": templates_text}
+links = state["links"]
+if not isinstance(links, list) or len(links) != 2:
+    raise SystemExit("ERROR: install state must contain exactly two links")
+by_name = {}
+for item in links:
+    if not isinstance(item, dict) or set(item) != {"name", "before", "link_text"}:
+        raise SystemExit("ERROR: install state link schema is invalid")
+    name = item["name"]
+    if name not in expected or name in by_name:
+        raise SystemExit("ERROR: install state link names are invalid")
+    if item["before"] not in {"absent", "correct"} or item["link_text"] != expected[name]:
+        raise SystemExit("ERROR: install state link values are invalid")
+    by_name[name] = item
+if set(by_name) != set(expected):
+    raise SystemExit("ERROR: install state link set is invalid")
+operations = []
+for name in ("scripts", "templates"):
+    item = by_name[name]
+    path = os.path.join(target_root, name)
+    exists = os.path.lexists(path)
+    correct = os.path.islink(path) and os.readlink(path) == expected[name]
+    if exists and not correct:
+        raise SystemExit(f"BLOCKED: target changed since installation: {path}")
+    if item["before"] == "absent" and correct:
+        operations.append(("remove", path, expected[name]))
+    elif item["before"] == "correct" and not exists:
+        operations.append(("create", path, expected[name]))
+completed = []
+try:
+    for operation, path, link_text in operations:
+        if operation == "remove":
+            os.unlink(path)
+        else:
+            os.symlink(link_text, path)
+        completed.append((operation, path, link_text))
+except Exception:
+    for operation, path, link_text in reversed(completed):
+        if operation == "remove":
+            os.symlink(link_text, path)
+        elif os.path.islink(path) and os.readlink(path) == link_text:
+            os.unlink(path)
+    raise
+' "$STATE_FILE" "$SOURCE_ROOT" "$TARGET_ROOT" "$SCRIPTS_RELATIVE" "$TEMPLATES_RELATIVE"
+  exit 0
+fi
+
+SCRIPTS_BEFORE=absent
+TEMPLATES_BEFORE=absent
+if [ -L "$SCRIPTS_PATH" ]; then SCRIPTS_BEFORE=correct; fi
+if [ -L "$TEMPLATES_PATH" ]; then TEMPLATES_BEFORE=correct; fi
+python3 -c '
+import hashlib, json, os, stat, sys, tempfile
+path, source, target, scripts_text, scripts_before, templates_text, templates_before = sys.argv[1:]
+value = {
+    "schema_version": 1,
+    "source_root": source,
+    "target_root": target,
+    "links": [
+        {"name": "scripts", "before": scripts_before, "link_text": scripts_text},
+        {"name": "templates", "before": templates_before, "link_text": templates_text},
+    ],
+}
+value["integrity_sha256"] = hashlib.sha256(
+    json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+def validate(existing):
+    if set(existing) != set(value) or existing["schema_version"] != 1:
+        raise SystemExit("BLOCKED: existing state file is not an install-links journal")
+    unsigned = {key: item for key, item in existing.items() if key != "integrity_sha256"}
+    digest = hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if existing["integrity_sha256"] != digest:
+        raise SystemExit("BLOCKED: existing state integrity check failed")
+    if os.path.realpath(existing["source_root"]) != os.path.realpath(source):
+        raise SystemExit("BLOCKED: existing state source does not match")
+    if os.path.realpath(existing["target_root"]) != os.path.realpath(target):
+        raise SystemExit("BLOCKED: existing state target does not match")
+    if not isinstance(existing["links"], list) or len(existing["links"]) != 2:
+        raise SystemExit("BLOCKED: existing state link set is invalid")
+    expected = {item["name"]: item["link_text"] for item in value["links"]}
+    seen = set()
+    for item in existing["links"]:
+        if not isinstance(item, dict) or set(item) != {"name", "before", "link_text"}:
+            raise SystemExit("BLOCKED: existing state link schema is invalid")
+        name = item["name"]
+        if name not in expected or name in seen or item["link_text"] != expected[name]:
+            raise SystemExit("BLOCKED: existing state link values are invalid")
+        if item["before"] not in {"absent", "correct"}:
+            raise SystemExit("BLOCKED: existing state before value is invalid")
+        seen.add(name)
+    if seen != set(expected):
+        raise SystemExit("BLOCKED: existing state link names are invalid")
+parent = os.path.dirname(os.path.abspath(path))
+os.makedirs(parent, exist_ok=True)
+if os.path.lexists(path):
+    if os.path.islink(path) or not os.path.isfile(path):
+        raise SystemExit("BLOCKED: existing state path is not a regular file")
+    if stat.S_IMODE(os.stat(path).st_mode) != 0o600:
+        raise SystemExit("BLOCKED: existing state permissions must be 0600")
+    with open(path) as handle:
+        validate(json.load(handle))
+    raise SystemExit(0)
+descriptor, temporary = tempfile.mkstemp(prefix=".install-links.", dir=parent)
+try:
+    with os.fdopen(descriptor, "w") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.link(temporary, path)
+    except FileExistsError:
+        raise SystemExit("BLOCKED: state file appeared concurrently")
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+' "$STATE_FILE" "$SOURCE_ROOT" "$TARGET_ROOT" "$SCRIPTS_RELATIVE" "$SCRIPTS_BEFORE" "$TEMPLATES_RELATIVE" "$TEMPLATES_BEFORE"
+
+SCRIPTS_CREATED=false
 for NAME in scripts templates; do
   SOURCE_PATH="$SOURCE_ROOT/$NAME"
   TARGET_PATH="$TARGET_ROOT/$NAME"
   RELATIVE_PATH=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_PATH" "$TARGET_PATH")
-  if [ ! -L "$TARGET_PATH" ]; then
-    ln -s "$RELATIVE_PATH" "$TARGET_PATH"
+  if [ -L "$TARGET_PATH" ]; then
+    continue
+  fi
+  if ln -s "$RELATIVE_PATH" "$TARGET_PATH"; then
+    if [ "$NAME" = scripts ]; then
+      SCRIPTS_CREATED=true
+    fi
+  else
+    STATUS=$?
+    if [ "$SCRIPTS_CREATED" = true ]; then
+      SCRIPTS_PATH="$TARGET_ROOT/scripts"
+      SCRIPTS_RELATIVE=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))' "$SOURCE_ROOT/scripts" "$SCRIPTS_PATH")
+      if [ -L "$SCRIPTS_PATH" ] && [ "$(readlink "$SCRIPTS_PATH")" = "$SCRIPTS_RELATIVE" ]; then
+        rm "$SCRIPTS_PATH"
+      fi
+    fi
+    exit "$STATUS"
   fi
 done

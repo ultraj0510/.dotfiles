@@ -4,6 +4,20 @@ Shared lessons for Codex and Claude Code work in `/Users/fujie/code`.
 
 Tool-specific lessons may point here instead of duplicating content.
 
+## 2026-07-20
+
+### 原子替换不等于并发安全
+- `mkstemp + fsync + os.replace` 只能避免半截文件，不能保护 read-modify-write；多 Agent 工具必须用覆盖完整临界区的 writer lock，或机械拒绝第二个 writer。
+- 并发验收至少覆盖多 task `start`、同 ID 登记、共享 evidence 的 `run`、互补 gate 的 `close` 和持锁进程异常退出。
+
+### 安装验证必须覆盖物理路径、半安装和运行态回滚
+- 相对 symlink 必须基于 physical target root 计算；词法 target path 含 symlink 时会生成错误链接。
+- 创建多个入口前记录安装前状态；中途失败要回滚本次创建项，rollback 只能恢复该次 run 改变的链接。
+- 永久入口默认拒绝 linked worktree，并核对 manifest 声明的持久 source repository。
+
+### 作者证据与独立代码审计是不同状态
+- 测试数量、clean worktree 和审查摘要只能支持作者完成声明；未直接读取完整 diff 时不能声明独立审计或批准集成。
+
 ## 2026-05-29
 
 ### SBI auth: JSESSIONID domain matters
