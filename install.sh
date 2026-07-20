@@ -37,6 +37,8 @@ backup_and_link() {
 
 echo "==> Installing dotfiles..."
 
+"$DOTFILES/code-workspace/scripts/install-links" --target-root "$HOME/code"
+
 # git
 backup_and_link \
   "$DOTFILES/git/.gitconfig" \

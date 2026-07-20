@@ -102,6 +102,21 @@ bash ~/.dotfiles/install.sh
 - `code-workspace/CLAUDE.md`: Claude Code project entrypoint
 - `code-workspace/docs/plans/`: durable plans
 - `code-workspace/docs/lessons.md`: correction lessons
+- `code-workspace/scripts/preflight`: manifest 登録対象だけを検査する人間向け・JSON兼用の入口
+
+`install.sh` は `code-workspace/scripts/install-links` を使い、実行ビューの
+`/Users/fujie/code/scripts` を原本へsymlinkします。既存の通常ディレクトリや異なる
+symlinkは上書きしません。
+
+`scripts/preflight` が唯一の権威あるpreflight入口です。従来の
+`ai/checks/check_workspace.py` は同じ実装を直接起動する互換入口であり、別の走査規則は
+持ちません。検査範囲は `workspace.toml` の登録対象に限定され、実行ビュー全体を再帰走査しません。
+
+```bash
+/Users/fujie/code/scripts/preflight
+/Users/fujie/code/scripts/preflight --json
+/Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/nikkei225-factor-lab
+```
 
 実行中タスクの一時状態、永続化する計画、完了済み計画、教訓の既定位置は
 `workspace.toml` の `[workspace]` を参照します。旧 `tasks/` は非権威の履歴です。
