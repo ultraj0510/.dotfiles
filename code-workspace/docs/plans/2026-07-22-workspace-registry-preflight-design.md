@@ -74,7 +74,9 @@ remote_policy = "required"
 | `claude_code_best_practice` | `external_reference` | `reference` | `required` |
 | `cc_connect` | `external_tool` | `reference` | `required` |
 
-`required` 只要求至少存在一个 remote，不要求 remote 名为 `origin`；因此 `tradingagents` 的 `upstream` 可以满足合同。已废弃的 `285a-factor-lab` 已移出 `repo/`，不进入 manifest，也不再接受 workspace 管理。
+`required` 只要求至少存在一个 remote，不要求 remote 名为 `origin`；因此任意
+已配置的 remote 都可以满足合同。已废弃且不再处于工作区维护范围的项目不进入
+manifest，也不再接受 workspace 管理。
 
 ## Preflight 行为
 
@@ -118,6 +120,15 @@ remote_policy = "required"
 - 未登记一级 Git 根必须阻断；repository root 外目录和嵌套 Git/worktree 不应进入扫描。
 - required/optional/upstream remote 三种情况均有测试。
 - 空 verification 静默，非空无效命令继续 WARN。
+
+## 面向使用者的操作说明
+
+- `workspace.md` 说明八个受管项目的职责分类、metadata 合同、managed links 与
+  一级仓库漂移门禁；不复制会随工作树变化的 Git 状态。
+- README 提供 JSON preflight 命令，并明确它同时覆盖登记项目和 `repo/` 一级
+  仓库发现。
+- 空 `test_command` 或 `verify_command` 只表示未声明统一的工作区级命令，不能
+  被解释为项目已经验证通过；使用者仍须遵循项目自身的验收合同。
 - 完整测试：`python3 -m pytest tests/test_workspace_manifest.py tests/test_workspace_preflight.py tests/test_task_protocol.py -q`。
 
 ## 发布与回滚

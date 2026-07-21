@@ -27,7 +27,7 @@
 **Interfaces:**
 - Produces: `workspace.repository_root`、`managed_links`、`repository_metadata`，供 Task 2 的 checker 消费。
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 在 `test_workspace_ownership_and_default_locations_are_explicit` 中断言：
 
@@ -41,23 +41,23 @@ assert data["managed_links"] == {
 
 扩展 registry 测试，断言 `[repos]`、`[verification]`、`[repository_metadata]` key 相同且包含当前 8 个项目。
 
-- [ ] **Step 2: 验证测试先失败**
+- [x] **Step 2: 验证测试先失败**
 
 Run: `python3 -m pytest tests/test_workspace_manifest.py -q`
 
 Expected: FAIL，缺少 `repository_root`、`managed_links`、metadata 与 2 个仍在维护范围内的仓库。
 
-- [ ] **Step 3: 最小实现 manifest**
+- [x] **Step 3: 最小实现 manifest**
 
 在 `workspace.toml` 增加 `download_photos`、`cc_connect` 及对应 verification，并按设计文档登记 8 个 metadata。未固定统一命令的新增项目使用空数组。
 
-- [ ] **Step 4: 运行 manifest 测试**
+- [x] **Step 4: 运行 manifest 测试**
 
 Run: `python3 -m pytest tests/test_workspace_manifest.py -q`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add code-workspace/workspace.toml tests/test_workspace_manifest.py
@@ -76,7 +76,7 @@ git commit -m "治理：补全工作区项目台账"
 - Consumes: Task 1 的 manifest 合同。
 - Produces: `MANAGED_LINK_MISSING`、`MANAGED_LINK_INVALID`、`UNREGISTERED_REPOSITORY`、`REPOSITORY_REQUIRED_REMOTE_MISSING` findings。
 
-- [ ] **Step 1: 扩展测试 manifest helper**
+- [x] **Step 1: 扩展测试 manifest helper**
 
 让 `write_manifest()` 创建 `repository_root`、managed-link source/target 和默认 metadata；允许测试覆盖 metadata 与 links。默认 metadata 为：
 
@@ -84,7 +84,7 @@ git commit -m "治理：补全工作区项目台账"
 {"kind": "test", "lifecycle": "active", "remote_policy": "optional"}
 ```
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 新增以下独立测试：
 
@@ -98,13 +98,13 @@ def test_empty_verification_commands_are_silent(...): ...
 def test_invalid_repository_metadata_is_manifest_error(...): ...
 ```
 
-- [ ] **Step 3: 验证测试先失败**
+- [x] **Step 3: 验证测试先失败**
 
 Run: `python3 -m pytest tests/test_workspace_preflight.py -q`
 
 Expected: FAIL，缺少新 manifest 校验和 findings。
 
-- [ ] **Step 4: 实现严格 manifest 校验**
+- [x] **Step 4: 实现严格 manifest 校验**
 
 在 `validate_manifest()`：
 
@@ -113,25 +113,25 @@ Expected: FAIL，缺少新 manifest 校验和 findings。
 - 要求 metadata 与 repos/verification 同 key；
 - 校验 `lifecycle` 和 `remote_policy` 枚举。
 
-- [ ] **Step 5: 实现 managed-link 收集与判断**
+- [x] **Step 5: 实现 managed-link 收集与判断**
 
 在 workspace report 中加入每条 link 的 `path/source/status`，并在 `evaluate_report()` 将缺失或错误目标转成 BLOCKED finding。不得创建或修复链接。
 
-- [ ] **Step 6: 实现一级仓库发现**
+- [x] **Step 6: 实现一级仓库发现**
 
 新增只遍历 `runtime_view / repository_root` 一级子目录的函数。仅当子目录自身为 Git top-level 且未登记时生成 `UNREGISTERED_REPOSITORY`。
 
-- [ ] **Step 7: 实现 remote 与空 verification 语义**
+- [x] **Step 7: 实现 remote 与空 verification 语义**
 
 `collect_repository()` 记录 `git remote` 列表；required 且列表为空时阻断。只对非空 verification 命令执行 `command_exists()` 和 unavailable finding。
 
-- [ ] **Step 8: 运行定向测试**
+- [x] **Step 8: 运行定向测试**
 
 Run: `python3 -m pytest tests/test_workspace_preflight.py -q`
 
 Expected: PASS。
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```bash
 git add code-workspace/ai/checks/check_workspace.py tests/test_workspace_preflight.py
@@ -152,15 +152,15 @@ git commit -m "治理：阻断未登记仓库与失效入口"
 - Consumes: Tasks 1-2 的最终 manifest 与 preflight 行为。
 - Produces: GitHub 审阅者可理解的边界与操作说明。
 
-- [ ] **Step 1: 更新项目台账说明**
+- [x] **Step 1: 更新项目台账说明**
 
 在 `workspace.md` 说明 repository metadata、managed links、一级未登记仓库门禁，并补齐两个遗漏项目的职责分类。明确已废弃项目不进入台账。不得复制机器规则值之外的动态 Git 状态。
 
-- [ ] **Step 2: 更新 preflight 操作说明**
+- [x] **Step 2: 更新 preflight 操作说明**
 
 在 README 明确 preflight 同时检查登记仓库与 `repo/` 一级漂移；空 verification 表示未声明统一命令，不表示验证通过。
 
-- [ ] **Step 3: 自检文档**
+- [x] **Step 3: 自检文档**
 
 Run:
 
@@ -170,19 +170,19 @@ rg -n "TBD|TODO|projects/|只检查.*manifest" code-workspace/workspace.md code-
 
 Expected: 无未解释的占位符或失效 `projects/` 路径。
 
-- [ ] **Step 4: 运行完整测试**
+- [x] **Step 4: 运行完整测试**
 
 Run: `python3 -m pytest tests/test_workspace_manifest.py tests/test_workspace_preflight.py tests/test_task_protocol.py -q`
 
 Expected: PASS，exit code 0。
 
-- [ ] **Step 5: 运行源码视图 preflight**
+- [x] **Step 5: 运行源码视图 preflight**
 
 Run: `code-workspace/scripts/preflight --manifest code-workspace/workspace.toml --json`
 
 Expected: 在链接尚未部署到 `/Users/fujie/code` 时明确返回 `MANAGED_LINK_MISSING` / BLOCKED；不得错误返回 PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add code-workspace/workspace.md code-workspace/README.md code-workspace/docs/plans/2026-07-22-workspace-registry-preflight-design.md code-workspace/docs/plans/2026-07-22-workspace-registry-preflight.md

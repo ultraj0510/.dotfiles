@@ -74,6 +74,24 @@ stock-advisor（daily runner）
 パス、既定ディレクトリ、コマンド、ルール値は `workspace.toml`（特に
 `[workspace]` と `[rules]`）を参照し、このREADMEには重複定義しない。
 
+## 工作区 preflight
+
+在运行视图中执行：
+
+```bash
+code-workspace/scripts/preflight --manifest code-workspace/workspace.toml --json
+```
+
+preflight 除了检查 manifest 已登记的项目，还会检查 `repo/` 下的一级 Git
+根是否全部登记；未登记一级仓库、受管 `scripts/` 或 `templates/` 链接缺失或
+指向错误、以及 `remote_policy = "required"` 却没有 remote，都会返回
+`BLOCKED`。它不递归扫描项目内部目录，也不会自动修复链接、创建 remote 或
+修改项目仓库。
+
+`[verification.<项目>]` 中的空 `test_command` 或 `verify_command` 表示该项目
+未声明统一的工作区级命令；这不是验证通过，也不替代该项目自身的验收要求。
+只有非空命令会被检查其在项目内是否可用。
+
 ## 毎朝のワークフロー
 
 ```bash

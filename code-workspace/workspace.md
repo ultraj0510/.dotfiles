@@ -32,6 +32,37 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | `/Users/fujie/code/runtime` | Generated state and run outputs that are not source code. |
 | `/Users/fujie/code/scratch` | Temporary experiments. |
 
+## 项目台账与预检边界
+
+`workspace.toml` 中的 `[repos]` 是受管项目的路径台账；
+`[repository_metadata.<name>]` 为同名项目声明 `kind`、`lifecycle` 与
+`remote_policy`。`[repos]`、`[verification]` 与 `[repository_metadata]` 的键集
+必须一致。当前受管项目及职责如下：
+
+| 项目 | 职责分类 |
+|------|----------|
+| `stock_analysis` | 日本股票分析研究模块与回测。 |
+| `nikkei_research_os` | 研究孵化治理与不可变证据控制平面。 |
+| `nikkei225_factor_lab` | 因子计算、评估与组合回放执行平面。 |
+| `download_photos` | 照片下载工具。 |
+| `playground` | 受维护的实验沙盒。 |
+| `tradingagents` | 外部参考实现。 |
+| `claude_code_best_practice` | Claude Code/Codex 工作流外部参考。 |
+| `cc_connect` | 外部连接工具参考。 |
+
+已废弃、且不再处于工作区维护范围的项目不进入台账；重新纳入前必须先明确其
+所有权和 metadata，而不是依赖历史目录或 Git 状态。
+
+`[managed_links]` 声明运行视图中的 `scripts/`、`templates/` 与持久源之间
+应有的符号链接。preflight 只验证这些链接是否存在并解析到声明源，不会创建、
+替换或修复链接。
+
+preflight 同时检查已登记项目，并只枚举 `repository_root`（当前为 `repo/`）
+的一级目录。某一级目录自身是 Git 根但不在台账中时，产生
+`UNREGISTERED_REPOSITORY` 并以 `BLOCKED` 失败；它不会递归扫描项目内部的
+worktree、fixture 或 vendor 目录。`remote_policy = "required"` 只要求至少有
+一个 remote，不把特定 remote 名称写成合同。
+
 ## Shared Rules
 
 - 使用中文回复用户。
