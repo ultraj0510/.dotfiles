@@ -76,11 +76,20 @@ stock-advisor（daily runner）
 
 ## 工作区 preflight
 
-在运行视图中执行：
+受管链接已经部署时，在运行视图 `/Users/fujie/code` 中执行：
+
+```bash
+scripts/preflight --json
+```
+
+部署前，或在持久源/源码检出根验证时，执行：
 
 ```bash
 code-workspace/scripts/preflight --manifest code-workspace/workspace.toml --json
 ```
+
+第二个命令使用源码检出中的脚本与 manifest；在运行视图的受管链接尚未部署时，
+不要把它误当作运行视图入口。
 
 preflight 除了检查 manifest 已登记的项目，还会检查 `repo/` 下的一级 Git
 根是否全部登记；未登记一级仓库、受管 `scripts/` 或 `templates/` 链接缺失或

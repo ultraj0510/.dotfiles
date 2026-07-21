@@ -84,9 +84,15 @@ manifest，也不再接受 workspace 管理。
 
 对每个 `managed_links` 项验证：
 
-1. `runtime_view / path` 存在；
-2. 它是符号链接；
-3. 解析结果等于 `source_repository / source`。
+1. `runtime_view / path` 的父目录解析后仍在 `runtime_view` 内；否则为
+   `INVALID`。
+2. `source_repository / source` 必须存在，且解析后仍在 `source_repository`
+   内；否则为 `INVALID`。
+3. target 存在、是符号链接，且其解析结果等于 source 的解析结果。
+
+因此，target 父目录或 source 路径中的中间符号链接若逃逸各自的受限根目录，
+即使最终路径存在也属于 `INVALID`；只有受限检查通过但 target 缺失时才属于
+`MISSING`。
 
 任一失败产生 `MANAGED_LINK_MISSING` 或 `MANAGED_LINK_INVALID`，严重度为 `BLOCKED`。
 
@@ -94,8 +100,9 @@ manifest，也不再接受 workspace 管理。
 
 只对 `runtime_view / repository_root` 执行一级 `iterdir()`：
 
-- 跳过非目录、符号链接和名为 `.worktrees` 的目录；
-- 用 `git rev-parse --is-inside-work-tree` 与 `--show-toplevel` 确认该一级目录自身就是 Git 根；
+- 跳过非目录；候选路径解析后，其父目录必须仍是 `repository_root`；
+- 对候选调用 `git rev-parse --show-toplevel`，并要求输出解析后恰等于候选路径，
+  以确认候选自身就是 Git 根；
 - Git 根不在 `[repos]` 路径集合时产生 `UNREGISTERED_REPOSITORY` / `BLOCKED`；
 - 不递归扫描项目内部 worktree、fixture 或 vendor 目录。
 
