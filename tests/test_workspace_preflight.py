@@ -279,6 +279,61 @@ def test_managed_links_must_exist_and_resolve_to_persistent_source(tmp_path):
     assert "MANAGED_LINK_INVALID" in {item["code"] for item in invalid["findings"]}
 
 
+def test_managed_links_reject_intermediate_symlink_escapes(tmp_path):
+    checker = load_checker()
+    target_root = tmp_path / "target escape"
+    target_runtime = target_root / "runtime view"
+    target_repo = init_repo(target_runtime / "repo" / "sample")
+    target_manifest = write_manifest(
+        target_root,
+        {"sample": target_repo},
+        links={
+            "scripts": {
+                "path": "target-parent/scripts",
+                "source": "code-workspace/scripts",
+            }
+        },
+    )
+    target_source = target_root / "dotfiles source" / "code-workspace" / "scripts"
+    target_link = target_runtime / "target-parent" / "scripts"
+    target_link.unlink()
+    (target_runtime / "target-parent").rmdir()
+    outside_target = target_root / "outside target"
+    outside_target.mkdir()
+    (outside_target / "scripts").symlink_to(target_source)
+    (target_runtime / "target-parent").symlink_to(outside_target)
+
+    target_report = checker.build_report(target_manifest)
+
+    assert target_report["workspace"]["managed_links"][0]["status"] == "INVALID"
+    assert "MANAGED_LINK_INVALID" in {item["code"] for item in target_report["findings"]}
+
+    source_root = tmp_path / "source escape"
+    source_runtime = source_root / "runtime view"
+    source_repo = init_repo(source_runtime / "repo" / "sample")
+    source_manifest = write_manifest(
+        source_root,
+        {"sample": source_repo},
+        links={
+            "scripts": {
+                "path": "scripts",
+                "source": "code-workspace/source-parent/scripts",
+            }
+        },
+    )
+    source_parent = source_root / "dotfiles source" / "code-workspace" / "source-parent"
+    (source_parent / "scripts").rmdir()
+    source_parent.rmdir()
+    outside_source = source_root / "outside source"
+    (outside_source / "scripts").mkdir(parents=True)
+    source_parent.symlink_to(outside_source)
+
+    source_report = checker.build_report(source_manifest)
+
+    assert source_report["workspace"]["managed_links"][0]["status"] == "INVALID"
+    assert "MANAGED_LINK_INVALID" in {item["code"] for item in source_report["findings"]}
+
+
 def test_unregistered_direct_repository_is_blocked(tmp_path):
     checker = load_checker()
     runtime = tmp_path / "runtime view"
@@ -311,6 +366,28 @@ def test_repository_discovery_does_not_recurse_or_scan_outside_root(tmp_path):
     assert str(outside) not in encoded
 
 
+def test_repository_root_symlink_escape_is_blocked(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+    outside = tmp_path / "outside repository root"
+    init_repo(outside / "unregistered")
+    (runtime / "escaped-root").symlink_to(outside)
+    source_manifest = manifest.resolve()
+    source_manifest.write_text(
+        source_manifest.read_text().replace(
+            'repository_root = "repo"',
+            'repository_root = "escaped-root"',
+        )
+    )
+
+    report = checker.build_report(manifest)
+
+    assert "REPOSITORY_ROOT_INVALID" in {item["code"] for item in report["findings"]}
+    assert report["status"] == "BLOCKED"
+
+
 def test_required_remote_is_blocked_and_optional_remote_is_allowed(tmp_path):
     checker = load_checker()
     runtime = tmp_path / "runtime view"
@@ -340,8 +417,8 @@ def test_upstream_remote_satisfies_required_policy(tmp_path):
     repo = init_repo(runtime / "repo" / "sample")
     remote = tmp_path / "remote.git"
     run("git", "init", "--bare", "-q", str(remote))
-    git(repo, "remote", "add", "origin", str(remote))
-    git(repo, "push", "-qu", "origin", "HEAD")
+    git(repo, "remote", "add", "upstream", str(remote))
+    git(repo, "push", "-qu", "upstream", "HEAD")
     manifest = write_manifest(
         tmp_path,
         {"sample": repo},
@@ -352,7 +429,7 @@ def test_upstream_remote_satisfies_required_policy(tmp_path):
 
     report = checker.build_report(manifest)
 
-    assert report["repositories"][0]["remotes"] == ["origin"]
+    assert report["repositories"][0]["remotes"] == ["upstream"]
     assert "REPOSITORY_REQUIRED_REMOTE_MISSING" not in {
         item["code"] for item in report["findings"]
     }
@@ -387,6 +464,25 @@ def test_invalid_repository_metadata_is_manifest_error(tmp_path, metadata):
     runtime = tmp_path / "runtime view"
     repo = init_repo(runtime / "repo" / "sample")
     manifest = write_manifest(tmp_path, {"sample": repo}, metadata={"sample": metadata})
+
+    report = checker.build_report(manifest)
+
+    assert report["status"] == "ERROR"
+    assert [item["code"] for item in report["findings"]] == ["MANIFEST_INVALID"]
+
+
+def test_scalar_verification_entry_is_manifest_error(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+    source_manifest = manifest.resolve()
+    content = source_manifest.read_text()
+    start = content.index("[verification.sample]")
+    end = content.index("[repository_metadata.sample]")
+    source_manifest.write_text(
+        content[:start] + "[verification]\nsample = 1\n\n" + content[end:]
+    )
 
     report = checker.build_report(manifest)
 
