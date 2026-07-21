@@ -103,8 +103,9 @@ def parse_status(output):
     return sorted(staged), sorted(unstaged), sorted(untracked)
 
 
-def collect_repository(name, repo_path, verification):
+def collect_repository(name, repo_path, verification, metadata=None):
     repo_path = Path(repo_path)
+    metadata = metadata or {}
     base = {
         "name": name,
         "path": str(repo_path),
@@ -112,6 +113,8 @@ def collect_repository(name, repo_path, verification):
         "branch": None,
         "detached": False,
         "upstream": None,
+        "remotes": [],
+        "remote_policy": metadata.get("remote_policy"),
         "ahead": None,
         "behind": None,
         "dirty": False,
@@ -182,6 +185,12 @@ def collect_repository(name, repo_path, verification):
             ).stdout.split()
             base["ahead"], base["behind"] = map(int, counts)
 
+        base["remotes"] = sorted(
+            remote
+            for remote in run_git(repo_path, "remote").stdout.splitlines()
+            if remote
+        )
+
         status = run_git(
             repo_path,
             "status",
@@ -194,12 +203,14 @@ def collect_repository(name, repo_path, verification):
         base["unstaged"] = unstaged
         base["untracked"] = untracked
         base["dirty"] = bool(staged or unstaged or untracked)
-        base["verification"]["test_command_exists"] = command_exists(
-            repo_path, base["verification"]["test_command"]
-        )
-        base["verification"]["verify_command_exists"] = command_exists(
-            repo_path, base["verification"]["verify_command"]
-        )
+        if base["verification"]["test_command"]:
+            base["verification"]["test_command_exists"] = command_exists(
+                repo_path, base["verification"]["test_command"]
+            )
+        if base["verification"]["verify_command"]:
+            base["verification"]["verify_command_exists"] = command_exists(
+                repo_path, base["verification"]["verify_command"]
+            )
     except GitCollectionError as exc:
         base["collection_status"] = "ERROR"
         base["collection_error"] = str(exc)
@@ -212,6 +223,13 @@ def workspace_registered_paths(data):
     for section in ("tools", "runtime", "references", "generated"):
         paths.extend(data.get(section, {}).values())
     return paths
+
+
+def is_nonempty_relative_path(value):
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and path != Path(".") and ".." not in path.parts
 
 
 def collect_workspace(data, manifest_path):
@@ -229,6 +247,23 @@ def collect_workspace(data, manifest_path):
         runtime_manifest.is_symlink()
         and runtime_manifest.resolve() == expected_manifest.resolve()
     )
+    managed_links = []
+    for link in data["managed_links"].values():
+        target = runtime_view / link["path"]
+        source = source_repository / link["source"]
+        if not target.exists() and not target.is_symlink():
+            status = "MISSING"
+        elif (
+            not target.is_symlink()
+            or not source.exists()
+            or target.resolve() != source.resolve()
+        ):
+            status = "INVALID"
+        else:
+            status = "VALID"
+        managed_links.append(
+            {"path": link["path"], "source": link["source"], "status": status}
+        )
     return {
         "manifest": str(Path(manifest_path)),
         "manifest_valid": True,
@@ -237,8 +272,41 @@ def collect_workspace(data, manifest_path):
         "source_repository_exists": source_repository.is_dir(),
         "missing_paths": sorted(missing_paths),
         "source_link_valid": source_link_valid,
+        "managed_links": managed_links,
+        "unregistered_repositories": [],
         "scanned_repositories": [],
     }
+
+
+def discover_unregistered_repositories(runtime_view, repository_root, registered_paths):
+    runtime_view = Path(runtime_view).resolve()
+    repository_root = (runtime_view / repository_root).resolve()
+    try:
+        repository_root.relative_to(runtime_view)
+    except ValueError:
+        return []
+    if not repository_root.is_dir():
+        return []
+    registered = {Path(path).resolve() for path in registered_paths}
+    discovered = []
+    for candidate in repository_root.iterdir():
+        if not candidate.is_dir() or candidate.resolve().parent != repository_root:
+            continue
+        try:
+            top_level = run_git(
+                candidate,
+                "rev-parse",
+                "--show-toplevel",
+                allowed_returncodes=(0, 128),
+            )
+        except GitCollectionError:
+            continue
+        if top_level.returncode != 0:
+            continue
+        path = Path(top_level.stdout.strip()).resolve()
+        if path == candidate.resolve() and path not in registered:
+            discovered.append(str(path))
+    return sorted(discovered)
 
 
 def classify_artifact(repository, path):
@@ -299,6 +367,37 @@ def evaluate_report(workspace, repositories, initial_findings=None):
                 "workspace",
                 "Declared source repository does not exist",
                 {"path": workspace.get("source_repository")},
+            )
+        )
+    for link in workspace.get("managed_links", []):
+        if link["status"] == "MISSING":
+            findings.append(
+                make_finding(
+                    "MANAGED_LINK_MISSING",
+                    "BLOCKED",
+                    "workspace",
+                    "Manifest-managed link is missing",
+                    {"path": link["path"], "source": link["source"]},
+                )
+            )
+        elif link["status"] == "INVALID":
+            findings.append(
+                make_finding(
+                    "MANAGED_LINK_INVALID",
+                    "BLOCKED",
+                    "workspace",
+                    "Manifest-managed link does not resolve to its declared source",
+                    {"path": link["path"], "source": link["source"]},
+                )
+            )
+    for path in workspace.get("unregistered_repositories", []):
+        findings.append(
+            make_finding(
+                "UNREGISTERED_REPOSITORY",
+                "BLOCKED",
+                "workspace",
+                "Direct repository under repository_root is not registered in the manifest",
+                {"path": path},
             )
         )
 
@@ -378,6 +477,15 @@ def evaluate_report(workspace, repositories, initial_findings=None):
                         {"behind": repo["behind"]},
                     )
                 )
+        if repo["remote_policy"] == "required" and not repo["remotes"]:
+            findings.append(
+                make_finding(
+                    "REPOSITORY_REQUIRED_REMOTE_MISSING",
+                    "BLOCKED",
+                    name,
+                    "Repository requires at least one configured remote",
+                )
+            )
         if repo["dirty"]:
             findings.append(
                 make_finding(
@@ -393,7 +501,7 @@ def evaluate_report(workspace, repositories, initial_findings=None):
                 )
             )
         verification = repo["verification"]
-        if not verification["test_command_exists"]:
+        if verification["test_command"] and not verification["test_command_exists"]:
             findings.append(
                 make_finding(
                     "TEST_COMMAND_UNAVAILABLE",
@@ -403,7 +511,7 @@ def evaluate_report(workspace, repositories, initial_findings=None):
                     {"command": verification["test_command"]},
                 )
             )
-        if not verification["verify_command_exists"]:
+        if verification["verify_command"] and not verification["verify_command_exists"]:
             findings.append(
                 make_finding(
                     "VERIFY_COMMAND_UNAVAILABLE",
@@ -450,6 +558,8 @@ def error_report(manifest_path, code, message, details=None):
         "source_repository_exists": None,
         "missing_paths": [],
         "source_link_valid": None,
+        "managed_links": [],
+        "unregistered_repositories": [],
         "scanned_repositories": [],
     }
     return evaluate_report(
@@ -462,7 +572,13 @@ def error_report(manifest_path, code, message, details=None):
 def validate_manifest(data):
     if not isinstance(data, dict):
         raise ValueError("manifest root must be a table")
-    for section in ("workspace", "repos", "verification"):
+    for section in (
+        "workspace",
+        "managed_links",
+        "repos",
+        "repository_metadata",
+        "verification",
+    ):
         if not isinstance(data.get(section), dict):
             raise ValueError(f"missing or invalid [{section}] table")
     workspace = data["workspace"]
@@ -471,6 +587,16 @@ def validate_manifest(data):
             raise ValueError(f"workspace.{field} must be a non-empty string")
     if workspace["root"] != workspace["runtime_view"]:
         raise ValueError("workspace.root must equal workspace.runtime_view")
+    if not is_nonempty_relative_path(workspace.get("repository_root")):
+        raise ValueError("workspace.repository_root must be a non-empty relative path")
+    managed_links = data["managed_links"]
+    if not managed_links:
+        raise ValueError("[managed_links] must not be empty")
+    for name, link in managed_links.items():
+        if not isinstance(link, dict) or set(link) != {"path", "source"}:
+            raise ValueError(f"managed_links.{name} must define path and source")
+        if not all(is_nonempty_relative_path(link[field]) for field in ("path", "source")):
+            raise ValueError(f"managed_links.{name} paths must be non-empty relative paths")
     for section in ("tools", "runtime", "references", "generated"):
         values = data.get(section, {})
         if not isinstance(values, dict) or not all(
@@ -481,8 +607,11 @@ def validate_manifest(data):
         isinstance(value, str) and value for value in data["repos"].values()
     ):
         raise ValueError("[repos] paths must be non-empty strings")
-    if set(data["repos"]) != set(data["verification"]):
-        raise ValueError("[verification] keys must match [repos] keys")
+    if (
+        set(data["repos"]) != set(data["verification"])
+        or set(data["repos"]) != set(data["repository_metadata"])
+    ):
+        raise ValueError("[verification] and [repository_metadata] keys must match [repos] keys")
     for name, commands in data["verification"].items():
         if set(commands) != {"test_command", "verify_command"}:
             raise ValueError(f"verification.{name} must define test_command and verify_command")
@@ -494,6 +623,21 @@ def validate_manifest(data):
             for part in command
         ):
             raise ValueError(f"verification.{name} command parts must be strings")
+    for name, metadata in data["repository_metadata"].items():
+        if not isinstance(metadata, dict) or set(metadata) != {
+            "kind",
+            "lifecycle",
+            "remote_policy",
+        }:
+            raise ValueError(
+                f"repository_metadata.{name} must define kind, lifecycle, and remote_policy"
+            )
+        if not isinstance(metadata["kind"], str) or not metadata["kind"]:
+            raise ValueError(f"repository_metadata.{name}.kind must be a non-empty string")
+        if metadata["lifecycle"] not in {"active", "maintenance", "reference", "archived"}:
+            raise ValueError(f"repository_metadata.{name}.lifecycle is invalid")
+        if metadata["remote_policy"] not in {"required", "optional"}:
+            raise ValueError(f"repository_metadata.{name}.remote_policy is invalid")
 
 
 def build_report(manifest_path, repo_path=None):
@@ -517,6 +661,11 @@ def build_report(manifest_path, repo_path=None):
 
     workspace = collect_workspace(data, manifest_path)
     runtime_view = Path(data["workspace"]["runtime_view"])
+    workspace["unregistered_repositories"] = discover_unregistered_repositories(
+        runtime_view,
+        data["workspace"]["repository_root"],
+        [runtime_view / relative for relative in data["repos"].values()],
+    )
     selected = list(data["repos"])
     initial_findings = []
     if repo_path is not None:
@@ -541,6 +690,7 @@ def build_report(manifest_path, repo_path=None):
             name,
             runtime_view / data["repos"][name],
             data["verification"][name],
+            data["repository_metadata"][name],
         )
         for name in selected
     ]

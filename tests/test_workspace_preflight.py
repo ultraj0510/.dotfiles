@@ -67,7 +67,7 @@ def create_install_source(tmp_path):
     return source
 
 
-def write_manifest(tmp_path, repos, verification=None):
+def write_manifest(tmp_path, repos, verification=None, metadata=None, links=None):
     runtime = tmp_path / "runtime view"
     source = tmp_path / "dotfiles source"
     source_workspace = source / "code-workspace"
@@ -77,15 +77,34 @@ def write_manifest(tmp_path, repos, verification=None):
     for relative in ("runtime/tasks", "docs/plans", "docs/archive"):
         (runtime / relative).mkdir(parents=True)
     (runtime / "docs/lessons.md").write_text("lessons\n")
+    repository_root = runtime / "repo"
+    repository_root.mkdir(exist_ok=True)
+    if links is None:
+        links = {
+            "scripts": {"path": "scripts", "source": "code-workspace/scripts"},
+            "templates": {"path": "templates", "source": "code-workspace/templates"},
+        }
+    for link in links.values():
+        target = runtime / link["path"]
+        source_path = source / link["source"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source_path.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(source_path)
 
     repo_lines = "\n".join(
         f'{name} = "{path.relative_to(runtime).as_posix()}"'
         for name, path in repos.items()
     )
-    verification = verification or {
-        name: {"test_command": ["git", "status"], "verify_command": ["git", "status"]}
-        for name in repos
-    }
+    if verification is None:
+        verification = {
+            name: {"test_command": ["git", "status"], "verify_command": ["git", "status"]}
+            for name in repos
+        }
+    if metadata is None:
+        metadata = {
+            name: {"kind": "test", "lifecycle": "active", "remote_policy": "optional"}
+            for name in repos
+        }
     verification_lines = []
     for name, commands in verification.items():
         verification_lines.extend(
@@ -96,6 +115,21 @@ def write_manifest(tmp_path, repos, verification=None):
                 "",
             ]
         )
+    metadata_lines = []
+    for name, values in metadata.items():
+        metadata_lines.extend(
+            [
+                f"[repository_metadata.{name}]",
+                f'kind = {json.dumps(values["kind"])}',
+                f'lifecycle = {json.dumps(values["lifecycle"])}',
+                f'remote_policy = {json.dumps(values["remote_policy"])}',
+                "",
+            ]
+        )
+    link_lines = "\n".join(
+        f'{name} = {{ path = {json.dumps(link["path"])}, source = {json.dumps(link["source"]) } }}'
+        for name, link in links.items()
+    )
 
     manifest = source_workspace / "workspace.toml"
     manifest.write_text(
@@ -103,11 +137,15 @@ def write_manifest(tmp_path, repos, verification=None):
 root = "{runtime}"
 runtime_view = "{runtime}"
 source_repository = "{source}"
+repository_root = "repo"
 human_documentation = "workspace.md"
 default_task_dir = "runtime/tasks"
 default_plan_dir = "docs/plans"
 default_archive_dir = "docs/archive"
 default_lessons_file = "docs/lessons.md"
+
+[managed_links]
+{link_lines}
 
 [rules]
 commit_language = "zh"
@@ -115,7 +153,8 @@ commit_language = "zh"
 [repos]
 {repo_lines}
 
-{"\n".join(verification_lines)}'''
+{"\n".join(verification_lines)}
+{"\n".join(metadata_lines)}'''
     )
     os.symlink(manifest, runtime / "workspace.toml")
     return runtime / "workspace.toml"
@@ -209,6 +248,150 @@ def test_non_executable_verification_command_is_unavailable(tmp_path):
     )
 
     assert facts["verification"]["test_command_exists"] is False
+
+
+def test_managed_links_must_exist_and_resolve_to_persistent_source(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+
+    (runtime / "scripts").unlink()
+    missing = checker.build_report(manifest)
+
+    assert missing["workspace"]["managed_links"] == [
+        {
+            "path": "scripts",
+            "source": "code-workspace/scripts",
+            "status": "MISSING",
+        },
+        {
+            "path": "templates",
+            "source": "code-workspace/templates",
+            "status": "VALID",
+        },
+    ]
+    assert "MANAGED_LINK_MISSING" in {item["code"] for item in missing["findings"]}
+
+    (runtime / "scripts").symlink_to(runtime / "workspace.md")
+    invalid = checker.build_report(manifest)
+
+    assert "MANAGED_LINK_INVALID" in {item["code"] for item in invalid["findings"]}
+
+
+def test_unregistered_direct_repository_is_blocked(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+    unregistered = init_repo(runtime / "repo" / "unregistered")
+
+    report = checker.build_report(manifest)
+
+    finding = next(
+        item for item in report["findings"] if item["code"] == "UNREGISTERED_REPOSITORY"
+    )
+    assert finding["severity"] == "BLOCKED"
+    assert finding["details"] == {"path": str(unregistered)}
+
+
+def test_repository_discovery_does_not_recurse_or_scan_outside_root(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+    nested = init_repo(runtime / "repo" / "container" / "nested")
+    outside = init_repo(runtime / "outside")
+
+    report = checker.build_report(manifest)
+
+    assert "UNREGISTERED_REPOSITORY" not in {item["code"] for item in report["findings"]}
+    encoded = json.dumps(report)
+    assert str(nested) not in encoded
+    assert str(outside) not in encoded
+
+
+def test_required_remote_is_blocked_and_optional_remote_is_allowed(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    required = init_repo(runtime / "repo" / "required")
+    optional = init_repo(runtime / "repo" / "optional")
+    manifest = write_manifest(
+        tmp_path,
+        {"required": required, "optional": optional},
+        metadata={
+            "required": {"kind": "test", "lifecycle": "active", "remote_policy": "required"},
+            "optional": {"kind": "test", "lifecycle": "active", "remote_policy": "optional"},
+        },
+    )
+
+    report = checker.build_report(manifest)
+
+    assert [
+        item["subject"]
+        for item in report["findings"]
+        if item["code"] == "REPOSITORY_REQUIRED_REMOTE_MISSING"
+    ] == ["required"]
+
+
+def test_upstream_remote_satisfies_required_policy(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    remote = tmp_path / "remote.git"
+    run("git", "init", "--bare", "-q", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-qu", "origin", "HEAD")
+    manifest = write_manifest(
+        tmp_path,
+        {"sample": repo},
+        metadata={
+            "sample": {"kind": "test", "lifecycle": "active", "remote_policy": "required"}
+        },
+    )
+
+    report = checker.build_report(manifest)
+
+    assert report["repositories"][0]["remotes"] == ["origin"]
+    assert "REPOSITORY_REQUIRED_REMOTE_MISSING" not in {
+        item["code"] for item in report["findings"]
+    }
+
+
+def test_empty_verification_commands_are_silent(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(
+        tmp_path,
+        {"sample": repo},
+        verification={"sample": {"test_command": [], "verify_command": []}},
+    )
+
+    report = checker.build_report(manifest)
+
+    assert {item["code"] for item in report["findings"]}.isdisjoint(
+        {"TEST_COMMAND_UNAVAILABLE", "VERIFY_COMMAND_UNAVAILABLE"}
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"kind": "test", "lifecycle": "invalid", "remote_policy": "optional"},
+        {"kind": "test", "lifecycle": "active", "remote_policy": "invalid"},
+    ],
+)
+def test_invalid_repository_metadata_is_manifest_error(tmp_path, metadata):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo}, metadata={"sample": metadata})
+
+    report = checker.build_report(manifest)
+
+    assert report["status"] == "ERROR"
+    assert [item["code"] for item in report["findings"]] == ["MANIFEST_INVALID"]
 
 
 def test_collect_repository_ahead_and_behind(tmp_path):
