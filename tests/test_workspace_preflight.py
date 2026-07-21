@@ -384,7 +384,10 @@ def test_repository_root_symlink_escape_is_blocked(tmp_path):
 
     report = checker.build_report(manifest)
 
-    assert "REPOSITORY_ROOT_INVALID" in {item["code"] for item in report["findings"]}
+    finding = next(
+        item for item in report["findings"] if item["code"] == "REPOSITORY_ROOT_INVALID"
+    )
+    assert finding["details"] == {"path": "escaped-root"}
     assert report["status"] == "BLOCKED"
 
 
