@@ -1,12 +1,17 @@
 [workspace]
 root = "/Users/fujie/code"
 runtime_view = "/Users/fujie/code"
+repository_root = "repo"
 source_repository = "/Users/fujie/.dotfiles"
 human_documentation = "workspace.md"
 default_task_dir = "runtime/tasks"
 default_plan_dir = "docs/plans"
 default_archive_dir = "docs/archive"
 default_lessons_file = "docs/lessons.md"
+
+[managed_links]
+scripts = { path = "scripts", source = "code-workspace/scripts" }
+templates = { path = "templates", source = "code-workspace/templates" }
 
 [rules]
 commit_language = "zh"
@@ -30,6 +35,8 @@ tradingagents = "repo/tradingagents"
 claude_code_best_practice = "repo/claude-code-best-practice"
 nikkei_research_os = "repo/nikkei-research-os"
 nikkei225_factor_lab = "repo/nikkei225-factor-lab"
+download_photos = "repo/download-photos"
+cc_connect = "repo/cc-connect"
 
 [references]
 claude_code_best_practice = "repo/claude-code-best-practice"
@@ -61,3 +68,51 @@ verify_command = []
 [verification.claude_code_best_practice]
 test_command = []
 verify_command = []
+
+[verification.download_photos]
+test_command = []
+verify_command = []
+
+[verification.cc_connect]
+test_command = []
+verify_command = []
+
+[repository_metadata.stock_analysis]
+kind = "research"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.nikkei_research_os]
+kind = "research_control_plane"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.nikkei225_factor_lab]
+kind = "research_execution_plane"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.download_photos]
+kind = "utility"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.playground]
+kind = "sandbox"
+lifecycle = "maintenance"
+remote_policy = "required"
+
+[repository_metadata.tradingagents]
+kind = "external_reference"
+lifecycle = "reference"
+remote_policy = "required"
+
+[repository_metadata.claude_code_best_practice]
+kind = "external_reference"
+lifecycle = "reference"
+remote_policy = "required"
+
+[repository_metadata.cc_connect]
+kind = "external_tool"
+lifecycle = "reference"
+remote_policy = "required"
