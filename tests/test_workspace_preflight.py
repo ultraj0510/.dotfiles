@@ -366,7 +366,9 @@ def test_repository_discovery_does_not_recurse_or_scan_outside_root(tmp_path):
     assert str(outside) not in encoded
 
 
-def test_repository_root_symlink_escape_is_blocked(tmp_path):
+def test_repository_root_symlink_escape_is_blocked_without_running_git_outside_runtime(
+    tmp_path, monkeypatch
+):
     checker = load_checker()
     runtime = tmp_path / "runtime view"
     repo = init_repo(runtime / "repo" / "sample")
@@ -379,8 +381,16 @@ def test_repository_root_symlink_escape_is_blocked(tmp_path):
         source_manifest.read_text().replace(
             'repository_root = "repo"',
             'repository_root = "escaped-root"',
-        )
+        ).replace('sample = "repo/sample"', 'sample = "escaped-root/sample"')
     )
+    git_calls = []
+    original_run_git = checker.run_git
+
+    def record_git_call(repo_path, *args, **kwargs):
+        git_calls.append(Path(repo_path).resolve())
+        return original_run_git(repo_path, *args, **kwargs)
+
+    monkeypatch.setattr(checker, "run_git", record_git_call)
 
     report = checker.build_report(manifest)
 
@@ -389,6 +399,61 @@ def test_repository_root_symlink_escape_is_blocked(tmp_path):
     )
     assert finding["details"] == {"path": "escaped-root"}
     assert report["status"] == "BLOCKED"
+    assert git_calls == []
+
+
+@pytest.mark.parametrize(
+    "registered_path",
+    [
+        '"/absolute/repository"',
+        '"repo/../outside"',
+        '"repo/sample/nested"',
+    ],
+)
+def test_repository_registry_paths_must_be_direct_children_of_repository_root(
+    tmp_path, registered_path
+):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo})
+    source_manifest = manifest.resolve()
+    source_manifest.write_text(
+        source_manifest.read_text().replace(
+            'sample = "repo/sample"', f"sample = {registered_path}"
+        )
+    )
+
+    report = checker.build_report(manifest)
+
+    assert report["status"] == "ERROR"
+    assert [item["code"] for item in report["findings"]] == ["MANIFEST_INVALID"]
+
+
+def test_repository_symlink_escape_is_blocked_without_running_git_outside_root(
+    tmp_path, monkeypatch
+):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    registered = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": registered})
+    outside = init_repo(tmp_path / "outside")
+    shutil.rmtree(registered)
+    registered.symlink_to(outside)
+    git_calls = []
+    original_run_git = checker.run_git
+
+    def record_git_call(repo_path, *args, **kwargs):
+        git_calls.append(Path(repo_path).resolve())
+        return original_run_git(repo_path, *args, **kwargs)
+
+    monkeypatch.setattr(checker, "run_git", record_git_call)
+
+    report = checker.build_report(manifest)
+
+    assert report["status"] == "BLOCKED"
+    assert "REPOSITORY_PATH_INVALID" in {item["code"] for item in report["findings"]}
+    assert git_calls == []
 
 
 def test_required_remote_is_blocked_and_optional_remote_is_allowed(tmp_path):
@@ -463,6 +528,25 @@ def test_empty_verification_commands_are_silent(tmp_path):
     ],
 )
 def test_invalid_repository_metadata_is_manifest_error(tmp_path, metadata):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    repo = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": repo}, metadata={"sample": metadata})
+
+    report = checker.build_report(manifest)
+
+    assert report["status"] == "ERROR"
+    assert [item["code"] for item in report["findings"]] == ["MANIFEST_INVALID"]
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"kind": "test", "lifecycle": ["active"], "remote_policy": "optional"},
+        {"kind": "test", "lifecycle": "active", "remote_policy": ["optional"]},
+    ],
+)
+def test_array_repository_metadata_enums_are_manifest_errors(tmp_path, metadata):
     checker = load_checker()
     runtime = tmp_path / "runtime view"
     repo = init_repo(runtime / "repo" / "sample")

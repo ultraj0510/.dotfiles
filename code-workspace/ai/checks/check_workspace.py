@@ -103,7 +103,7 @@ def parse_status(output):
     return sorted(staged), sorted(unstaged), sorted(untracked)
 
 
-def collect_repository(name, repo_path, verification, metadata=None):
+def collect_repository(name, repo_path, verification, metadata=None, repository_root=None):
     repo_path = Path(repo_path)
     metadata = metadata or {}
     base = {
@@ -128,6 +128,11 @@ def collect_repository(name, repo_path, verification, metadata=None):
             "verify_command_exists": False,
         },
     }
+    if repository_root is not None and not resolves_as_direct_child(
+        repository_root, repo_path
+    ):
+        base["collection_status"] = "INVALID"
+        return base
     if not repo_path.exists():
         base["collection_status"] = "MISSING"
         return base
@@ -238,6 +243,13 @@ def resolves_within(root, path):
     except (OSError, RuntimeError, ValueError):
         return False
     return True
+
+
+def resolves_as_direct_child(root, path):
+    try:
+        return Path(path).resolve().parent == Path(root).resolve()
+    except (OSError, RuntimeError):
+        return False
 
 
 def collect_workspace(data, manifest_path):
@@ -450,6 +462,17 @@ def evaluate_report(workspace, repositories, initial_findings=None):
                 )
             )
             continue
+        if collection_status == "INVALID":
+            findings.append(
+                make_finding(
+                    "REPOSITORY_PATH_INVALID",
+                    "BLOCKED",
+                    name,
+                    "Manifest-registered repository resolves outside repository_root",
+                    {"path": repo["path"]},
+                )
+            )
+            continue
         if collection_status == "ERROR":
             findings.append(
                 make_finding(
@@ -629,10 +652,17 @@ def validate_manifest(data):
             isinstance(value, str) and value for value in values.values()
         ):
             raise ValueError(f"[{section}] paths must be non-empty strings")
-    if not all(
-        isinstance(value, str) and value for value in data["repos"].values()
-    ):
-        raise ValueError("[repos] paths must be non-empty strings")
+    repository_root = Path(workspace["repository_root"])
+    for name, value in data["repos"].items():
+        if not is_nonempty_relative_path(value):
+            raise ValueError(f"repos.{name} must be a non-empty relative path")
+        path = Path(value)
+        if path.parts[:-1] != repository_root.parts or len(path.parts) != len(
+            repository_root.parts
+        ) + 1:
+            raise ValueError(
+                f"repos.{name} must be a direct child of workspace.repository_root"
+            )
     if (
         set(data["repos"]) != set(data["verification"])
         or set(data["repos"]) != set(data["repository_metadata"])
@@ -662,9 +692,17 @@ def validate_manifest(data):
             )
         if not isinstance(metadata["kind"], str) or not metadata["kind"]:
             raise ValueError(f"repository_metadata.{name}.kind must be a non-empty string")
-        if metadata["lifecycle"] not in {"active", "maintenance", "reference", "archived"}:
+        if not isinstance(metadata["lifecycle"], str) or metadata["lifecycle"] not in {
+            "active",
+            "maintenance",
+            "reference",
+            "archived",
+        }:
             raise ValueError(f"repository_metadata.{name}.lifecycle is invalid")
-        if metadata["remote_policy"] not in {"required", "optional"}:
+        if not isinstance(metadata["remote_policy"], str) or metadata["remote_policy"] not in {
+            "required",
+            "optional",
+        }:
             raise ValueError(f"repository_metadata.{name}.remote_policy is invalid")
 
 
@@ -689,11 +727,7 @@ def build_report(manifest_path, repo_path=None):
 
     workspace = collect_workspace(data, manifest_path)
     runtime_view = Path(data["workspace"]["runtime_view"])
-    workspace["unregistered_repositories"] = discover_unregistered_repositories(
-        runtime_view,
-        data["workspace"]["repository_root"],
-        [runtime_view / relative for relative in data["repos"].values()],
-    )
+    repository_root = runtime_view / data["workspace"]["repository_root"]
     selected = list(data["repos"])
     initial_findings = []
     if repo_path is not None:
@@ -713,16 +747,25 @@ def build_report(manifest_path, repo_path=None):
                 )
             )
 
-    repositories = [
-        collect_repository(
-            name,
-            runtime_view / data["repos"][name],
-            data["verification"][name],
-            data["repository_metadata"][name],
+    if workspace["repository_root_valid"]:
+        workspace["unregistered_repositories"] = discover_unregistered_repositories(
+            runtime_view,
+            data["workspace"]["repository_root"],
+            [runtime_view / relative for relative in data["repos"].values()],
         )
-        for name in selected
-    ]
-    workspace["scanned_repositories"] = selected
+        repositories = [
+            collect_repository(
+                name,
+                runtime_view / data["repos"][name],
+                data["verification"][name],
+                data["repository_metadata"][name],
+                repository_root,
+            )
+            for name in selected
+        ]
+        workspace["scanned_repositories"] = selected
+    else:
+        repositories = []
     return evaluate_report(workspace, repositories, initial_findings)
 
 
