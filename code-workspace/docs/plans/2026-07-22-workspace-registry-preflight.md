@@ -39,23 +39,17 @@ assert data["managed_links"] == {
 }
 ```
 
-扩展 registry 测试，断言 `[repos]`、`[verification]`、`[repository_metadata]` key 相同且包含 9 个项目。
+扩展 registry 测试，断言 `[repos]`、`[verification]`、`[repository_metadata]` key 相同且包含当前 8 个项目。
 
 - [ ] **Step 2: 验证测试先失败**
 
 Run: `python3 -m pytest tests/test_workspace_manifest.py -q`
 
-Expected: FAIL，缺少 `repository_root`、`managed_links`、metadata 与 3 个仓库。
+Expected: FAIL，缺少 `repository_root`、`managed_links`、metadata 与 2 个仍在维护范围内的仓库。
 
 - [ ] **Step 3: 最小实现 manifest**
 
-在 `workspace.toml` 增加 3 个 repo、对应空或已验证的 verification，并按设计文档登记 9 个 metadata。`285a_factor_lab.test_command` 使用：
-
-```toml
-test_command = [".venv/bin/python", "-m", "pytest"]
-```
-
-其他未固定统一命令的新增项目使用空数组。
+在 `workspace.toml` 增加 `download_photos`、`cc_connect` 及对应 verification，并按设计文档登记 8 个 metadata。未固定统一命令的新增项目使用空数组。
 
 - [ ] **Step 4: 运行 manifest 测试**
 
@@ -160,7 +154,7 @@ git commit -m "治理：阻断未登记仓库与失效入口"
 
 - [ ] **Step 1: 更新项目台账说明**
 
-在 `workspace.md` 说明 repository metadata、managed links、一级未登记仓库门禁，并补齐三个遗漏项目的职责分类。不得复制机器规则值之外的动态 Git 状态。
+在 `workspace.md` 说明 repository metadata、managed links、一级未登记仓库门禁，并补齐两个遗漏项目的职责分类。明确已废弃项目不进入台账。不得复制机器规则值之外的动态 Git 状态。
 
 - [ ] **Step 2: 更新 preflight 操作说明**
 

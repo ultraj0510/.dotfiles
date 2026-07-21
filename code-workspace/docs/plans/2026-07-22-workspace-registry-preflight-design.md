@@ -10,7 +10,7 @@
 - 新增 `workspace.repository_root = "repo"`，限定仓库发现范围。
 - 新增 `[managed_links]`，登记 `scripts/` 与 `templates/` 的运行视图链接和持久源路径。
 - 新增 `[repository_metadata.<name>]`，为每个仓库记录 `kind`、`lifecycle` 和 `remote_policy`。
-- 补登记 `285a-factor-lab`、`download-photos`、`cc-connect`。
+- 补登记仍在维护范围内但尚未入表的 `download-photos`、`cc-connect`。
 - preflight 只扫描 `repository_root` 的一级目录；发现未登记 Git 根时阻断。
 - 空 verification 数组表示工作区没有统一验收命令，不再产生无意义 WARN。
 
@@ -68,14 +68,13 @@ remote_policy = "required"
 | `stock_analysis` | `research` | `active` | `required` |
 | `nikkei_research_os` | `research_control_plane` | `active` | `required` |
 | `nikkei225_factor_lab` | `research_execution_plane` | `active` | `required` |
-| `285a_factor_lab` | `research` | `active` | `optional` |
 | `download_photos` | `utility` | `active` | `required` |
 | `playground` | `sandbox` | `maintenance` | `required` |
 | `tradingagents` | `external_reference` | `reference` | `required` |
 | `claude_code_best_practice` | `external_reference` | `reference` | `required` |
 | `cc_connect` | `external_tool` | `reference` | `required` |
 
-`required` 只要求至少存在一个 remote，不要求 remote 名为 `origin`；因此 `tradingagents` 的 `upstream` 可以满足合同。`285a-factor-lab` 当前没有 remote，显式标为 `optional`，避免靠遗漏台账隐藏事实。
+`required` 只要求至少存在一个 remote，不要求 remote 名为 `origin`；因此 `tradingagents` 的 `upstream` 可以满足合同。已废弃的 `285a-factor-lab` 已移出 `repo/`，不进入 manifest，也不再接受 workspace 管理。
 
 ## Preflight 行为
 
@@ -114,7 +113,7 @@ remote_policy = "required"
 
 ## 验证
 
-- Manifest 测试覆盖 9 个仓库和三张严格同 key 表。
+- Manifest 测试覆盖当前 8 个仓库和三张严格同 key 表。
 - Preflight 测试覆盖正确、缺失、错误目标的 managed link。
 - 未登记一级 Git 根必须阻断；repository root 外目录和嵌套 Git/worktree 不应进入扫描。
 - required/optional/upstream remote 三种情况均有测试。
@@ -124,4 +123,3 @@ remote_policy = "required"
 ## 发布与回滚
 
 代码合并后，从持久源 `/Users/fujie/.dotfiles/code-workspace/scripts/install-links` 安装 `scripts/`、`templates/`，安装 journal 放在目标目录和源仓库之外。安装前后分别运行 JSON preflight；若安装失败，使用 journal 执行可恢复移除，不手工覆盖已有路径。
-
