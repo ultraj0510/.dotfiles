@@ -26,6 +26,8 @@ bash ~/.dotfiles/install.sh
 
 ```text
 ~/.dotfiles/
+├── agent-guidance/
+│   └── personal-workstyle.md    # Codex / Claude 共用个人规则
 ├── bootstrap.sh                 # 新環境向け bootstrap
 ├── install.sh                   # symlink 作成と Claude Code plugin セットアップ
 ├── bash/
@@ -53,11 +55,15 @@ bash ~/.dotfiles/install.sh
 
 | Source | Link |
 |--------|------|
+| `agent-guidance/personal-workstyle.md` | `~/.codex/AGENTS.md` |
 | `git/.gitconfig` | `~/.gitconfig` |
 | `bash/aliases.sh` | `~/.claude/bash_aliases.sh` |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
 | `claude/skills/` | `~/.claude/skills` |
+
+`claude/CLAUDE.md` は
+`@~/.dotfiles/agent-guidance/personal-workstyle.md` を読み込み、Codex と同じ個人ルールを使用します。
 
 ## Claude Code plugins
 

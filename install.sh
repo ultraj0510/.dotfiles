@@ -61,6 +61,13 @@ backup_and_link \
   "$HOME/.gitconfig" \
   ".dotfiles/git/.gitconfig"
 
+# Codex 全局指令
+mkdir -p "$HOME/.codex"
+backup_and_link \
+  "$DOTFILES/agent-guidance/personal-workstyle.md" \
+  "$HOME/.codex/AGENTS.md" \
+  "../.dotfiles/agent-guidance/personal-workstyle.md"
+
 # claude aliases & settings（相対symlinkでホスト・コンテナ両対応）
 mkdir -p "$HOME/.claude"
 backup_and_link \
