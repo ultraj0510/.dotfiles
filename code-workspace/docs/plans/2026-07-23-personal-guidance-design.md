@@ -2,15 +2,15 @@
 
 ## 目标
 
-将用户提供的 417 行个人工作规则完整纳入 dotfiles，并让 Codex 与 Claude Code
+将用户提供的完整个人工作规则纳入 dotfiles，并让 Codex 与 Claude Code
 在所有仓库中加载同一份规则。项目级说明继续只承载项目事实与局部约束，不复制个人规则。
 
 ## 范围
 
 - 新增一份 Git 管理的个人规则权威源，内容与用户附件一致。
 - 通过安装脚本将该权威源链接为 `~/.codex/AGENTS.md`，供 Codex 全局加载。
-- 在 `~/.claude/CLAUDE.md` 的 dotfiles 源文件中导入同一权威源，同时保留现有
-  Claude 专属股票分析说明。
+- 在 `~/.claude/CLAUDE.md` 的 dotfiles 源文件中导入同一权威源；项目级
+  `code-workspace/CLAUDE.md` 中的 Claude 专属股票分析说明保持不变。
 - 修正工作区共享说明中与新个人规则冲突的“内部源码标识使用中文”规则，使其与
   “源码标识默认使用英文”一致。
 - 更新 dotfiles 说明与回归测试，覆盖权威源、两个加载入口和安装链接。

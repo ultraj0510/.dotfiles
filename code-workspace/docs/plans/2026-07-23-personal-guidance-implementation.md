@@ -12,7 +12,7 @@
 
 - 个人规则移除标准 EOF 换行后的 SHA-256 必须为 `e77c16838ce1f632a9be4d1c1dfe3922e9d6d184f8a7e00089508efd35aaf40a`。
 - Codex 与 Claude 必须读取同一份规则源，不维护两份手工副本。
-- 保留 `claude/CLAUDE.md` 中现有股票分析系统说明。
+- 保留 `code-workspace/CLAUDE.md` 中现有股票分析系统说明。
 - 保留 `workspace.toml` 的 `commit_language = "zh"`。
 - 不修改技能、插件、权限、代理定义或股票分析流程。
 - 不覆盖来源不明的现有 `~/.codex/AGENTS.md` 符号链接。
@@ -184,14 +184,14 @@ backup_and_link \
 
 - [ ] **Step 3: 用单一导入替换 Claude 旧个人规则副本**
 
-将 `claude/CLAUDE.md:1-90` 替换为：
+将用户级 `claude/CLAUDE.md:1-90` 的旧个人规则摘要整体替换为：
 
 ```markdown
 @~/.dotfiles/agent-guidance/personal-workstyle.md
 
 ```
 
-并紧接保留原文件从 `## 股票分析系统` 开始的 Claude 专属内容。
+项目级 `code-workspace/CLAUDE.md` 不修改，其 `## 股票分析系统` 内容保持不变。
 
 - [ ] **Step 4: 修正工作区源码标识语言冲突**
 
