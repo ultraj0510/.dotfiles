@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 个人规则必须与附件逐字一致，SHA-256 为 `e77c16838ce1f632a9be4d1c1dfe3922e9d6d184f8a7e00089508efd35aaf40a`。
+- 个人规则移除标准 EOF 换行后的 SHA-256 必须为 `e77c16838ce1f632a9be4d1c1dfe3922e9d6d184f8a7e00089508efd35aaf40a`。
 - Codex 与 Claude 必须读取同一份规则源，不维护两份手工副本。
 - 保留 `claude/CLAUDE.md` 中现有股票分析系统说明。
 - 保留 `workspace.toml` 的 `commit_language = "zh"`。
@@ -44,14 +44,16 @@ EXPECTED_SHA256 = "e77c16838ce1f632a9be4d1c1dfe3922e9d6d184f8a7e00089508efd35aaf
 
 
 def test_personal_guidance_matches_approved_content():
-    assert hashlib.sha256(GUIDANCE.read_bytes()).hexdigest() == EXPECTED_SHA256
+    content = GUIDANCE.read_bytes().removesuffix(b"\n")
+    assert hashlib.sha256(content).hexdigest() == EXPECTED_SHA256
 
 
 def test_claude_imports_the_shared_guidance_without_legacy_copy():
     text = (DOTFILES / "claude" / "CLAUDE.md").read_text()
     assert "@~/.dotfiles/agent-guidance/personal-workstyle.md" in text
     assert "<!-- User customizations -->" not in text
-    assert "## 股票分析系统" in text
+    project_text = (DOTFILES / "code-workspace" / "CLAUDE.md").read_text()
+    assert "## 股票分析系统" in project_text
 
 
 def test_workspace_has_no_conflicting_identifier_language_rule():

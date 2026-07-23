@@ -68,9 +68,10 @@ worktree、fixture 或 vendor 目录。`remote_policy = "required"` 只要求至
 - 使用中文回复用户。
 - 计划、进度更新、审查意见、技术说明、代码相关信息和面向用户的标签均使用中文。
 - 代码注释在确有助于理解时使用中文，避免添加显而易见的注释。
-- 在语言、运行时和工具链支持的情况下，新增或修改的内部源码标识使用中文。外部定义或
-  已冻结的 API 名称、协议与 Schema 键、枚举与状态值、CLI 参数、文件路径、第三方名称
-  及兼容性敏感标识必须保持其规定形式。不得为统一语言而批量重命名无关的既存标识。
+- 变量名、函数名、类型名、模块名等源码标识默认使用英文。只有领域术语无法准确翻译且
+  仓库已有明确约定时才使用中文标识。外部定义或已冻结的 API 名称、协议与 Schema 键、
+  枚举与状态值、CLI 参数、文件路径、第三方名称及兼容性敏感标识必须保持其规定形式。
+  不得为统一语言而批量重命名无关的既存标识。
 - 提交语言等机器可判定的规则值以 `workspace.toml` 的 `[rules]` 为唯一事实来源；旧计划或任务文档中的复制值不具权威性。
 - Security-sensitive files, credentials, brokerage Cookies, and personal portfolio data must not be committed.
 - For non-trivial work, write or update a plan before implementation.

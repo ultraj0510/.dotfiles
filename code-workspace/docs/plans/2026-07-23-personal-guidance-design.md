@@ -26,8 +26,8 @@
 
 ### 单一权威源
 
-新增 `agent-guidance/personal-workstyle.md`，逐字保存用户批准的个人规则。Codex 与
-Claude 不各自维护副本，避免后续规则漂移。
+新增 `agent-guidance/personal-workstyle.md`，逐字保存用户批准的个人规则，仅增加
+Git 文本文件的标准 EOF 换行。Codex 与 Claude 不各自维护副本，避免后续规则漂移。
 
 ### Codex 加载
 
@@ -48,8 +48,9 @@ fail closed，不覆盖来源不明的配置。
 @~/.dotfiles/agent-guidance/personal-workstyle.md
 ```
 
-删除现有 `<!-- User customizations -->` 下已被新规则覆盖且存在冲突的旧摘要，
-保留 Claude 专属股票分析系统说明。Claude 用户级导入不要求项目级外部文件审批。
+用该导入替换现有 `<!-- User customizations -->` 下已被新规则覆盖且存在冲突的旧摘要。
+项目级 `code-workspace/CLAUDE.md` 中的 Claude 专属股票分析系统说明保持不变。
+Claude 用户级导入不要求项目级外部文件审批。
 
 ### 项目规则冲突
 
@@ -67,7 +68,7 @@ fail closed，不覆盖来源不明的配置。
 
 ## 验证
 
-- 校验个人规则权威源与附件内容完全一致。
+- 校验个人规则权威源除标准 EOF 换行外与附件内容完全一致。
 - 校验 Claude 用户级文件导入权威源，且旧个人规则摘要已移除。
 - 在临时目录中执行安装器现有 `backup_and_link` 函数，确认 Codex 链接创建与
   重复执行幂等，并确认冲突符号链接被阻断。完整安装在变更进入持久主工作区后执行，
