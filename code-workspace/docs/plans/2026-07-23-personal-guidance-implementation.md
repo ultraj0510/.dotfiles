@@ -27,13 +27,13 @@
 
 **Interfaces:**
 - Consumes: 现有 `install.sh` 的 `backup_and_link(src, dst, rel)` 行为。
-- Produces: 权威源哈希、Claude 导入、工作区冲突消除和临时 HOME 安装行为的回归合同。
+- Produces: 权威源哈希、Claude 导入、工作区冲突消除、Codex 链接声明和
+  `backup_and_link` 幂等/冲突行为的回归合同。
 
 - [ ] **Step 1: 写入失败测试**
 
 ```python
 import hashlib
-import os
 import subprocess
 from pathlib import Path
 
@@ -60,64 +60,63 @@ def test_workspace_has_no_conflicting_identifier_language_rule():
     assert "变量名、函数名、类型名、模块名等源码标识默认使用英文" in text
 
 
-def prepare_home(home: Path):
-    home.mkdir()
-    (home / ".dotfiles").symlink_to(DOTFILES, target_is_directory=True)
-
-
-def run_installer(home: Path):
-    env = {
-        **os.environ,
-        "HOME": str(home),
-        "PATH": "/usr/bin:/bin",
-    }
+def run_backup_and_link(source: Path, destination: Path, relative: str):
+    installer = (DOTFILES / "install.sh").read_text()
+    function_definition = installer.split('echo "==> Installing dotfiles..."', 1)[0]
+    script = function_definition + '\nbackup_and_link "$1" "$2" "$3"\n'
     return subprocess.run(
-        ["/bin/bash", str(DOTFILES / "install.sh")],
+        [
+            "/bin/bash",
+            "-c",
+            script,
+            "backup_and_link",
+            str(source),
+            str(destination),
+            relative,
+        ],
         cwd=DOTFILES,
-        env=env,
         check=False,
         capture_output=True,
         text=True,
     )
 
 
-def test_installer_links_codex_and_claude_to_managed_sources(tmp_path):
-    home = tmp_path / "home"
-    prepare_home(home)
-    result = run_installer(home)
+def test_installer_declares_codex_global_guidance_link():
+    text = (DOTFILES / "install.sh").read_text()
 
-    assert result.returncode == 0, result.stderr
-    codex_guidance = home / ".codex" / "AGENTS.md"
-    claude_guidance = home / ".claude" / "CLAUDE.md"
-    assert codex_guidance.is_symlink()
-    assert codex_guidance.resolve() == GUIDANCE.resolve()
-    assert claude_guidance.is_symlink()
-    assert claude_guidance.resolve() == (DOTFILES / "claude" / "CLAUDE.md").resolve()
+    assert '"$DOTFILES/agent-guidance/personal-workstyle.md"' in text
+    assert '"$HOME/.codex/AGENTS.md"' in text
+    assert '"../.dotfiles/agent-guidance/personal-workstyle.md"' in text
 
 
-def test_installer_is_idempotent(tmp_path):
-    home = tmp_path / "home"
-    prepare_home(home)
+def test_backup_and_link_creates_and_reuses_codex_link(tmp_path):
+    destination = tmp_path / ".codex" / "AGENTS.md"
+    relative = "../dotfiles/agent-guidance/personal-workstyle.md"
+    source = tmp_path / "dotfiles" / "agent-guidance" / "personal-workstyle.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(GUIDANCE.read_bytes())
 
-    first = run_installer(home)
-    second = run_installer(home)
+    first = run_backup_and_link(source, destination, relative)
+    second = run_backup_and_link(source, destination, relative)
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
+    assert destination.is_symlink()
+    assert destination.resolve() == source.resolve()
     assert "skip (already linked):" in second.stdout
 
 
-def test_installer_refuses_unknown_codex_symlink(tmp_path):
-    home = tmp_path / "home"
-    prepare_home(home)
-    codex_home = home / ".codex"
+def test_backup_and_link_refuses_unknown_codex_symlink(tmp_path):
+    codex_home = tmp_path / ".codex"
     codex_home.mkdir()
-    other = home / "other-agents.md"
+    source = tmp_path / "managed-agents.md"
+    source.write_text("# Managed")
+    other = tmp_path / "other-agents.md"
     other.write_text("# Other")
     agents = codex_home / "AGENTS.md"
     agents.symlink_to(other)
 
-    result = run_installer(home)
+    result = run_backup_and_link(source, agents, "../managed-agents.md")
 
     assert result.returncode == 2
     assert agents.resolve() == other.resolve()
