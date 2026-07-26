@@ -91,12 +91,16 @@ def test_repository_registry_has_one_current_name_per_repository():
         "claude_code_best_practice",
         "nikkei_research_os",
         "nikkei225_factor_lab",
+        "signal_nest",
+        "presentation_20260904",
         "download_photos",
         "cc_connect",
     }
 
     assert "projects" not in data
     assert data["repos"]["stock_analysis"] == "repo/stock-analysis"
+    assert data["repos"]["signal_nest"] == "repo/signal-nest"
+    assert data["repos"]["presentation_20260904"] == "repo/20260904-ppt"
     assert "stock_price_analyze" not in data["repos"]
     assert "codexpro" not in data["repos"]
     assert len(data["repos"].values()) == len(set(data["repos"].values()))

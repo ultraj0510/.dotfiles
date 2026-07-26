@@ -67,6 +67,77 @@ def run_git(repo_path, *args, allowed_returncodes=(0,)):
     return result
 
 
+def git_worktree_identity(repo_path):
+    repo_path = Path(repo_path).resolve()
+    try:
+        top_level = Path(
+            run_git(repo_path, "rev-parse", "--show-toplevel").stdout.strip()
+        ).resolve()
+        if top_level != repo_path:
+            return None
+        common_value = run_git(
+            repo_path, "rev-parse", "--git-common-dir"
+        ).stdout.strip()
+    except (GitCollectionError, OSError):
+        return None
+    common_dir = Path(common_value)
+    if not common_dir.is_absolute():
+        common_dir = repo_path / common_dir
+    return top_level, common_dir.resolve()
+
+
+def resolve_requested_repository(data, requested):
+    runtime_view = Path(data["workspace"]["runtime_view"])
+    repository_root = runtime_view / data["workspace"]["repository_root"]
+    requested = Path(requested).resolve()
+    registered = []
+    for name, relative in data["repos"].items():
+        path = runtime_view / relative
+        if not resolves_as_direct_child(repository_root, path):
+            continue
+        registered.append(
+            (
+                name,
+                path.resolve(),
+                data["verification"][name],
+                data["repository_metadata"][name],
+            )
+        )
+    for name, path, verification, metadata in registered:
+        if path == requested:
+            return name, requested, verification, metadata, True
+
+    requested_identity = git_worktree_identity(requested)
+    if requested_identity is None:
+        return None
+    _, requested_common_dir = requested_identity
+    for name, path, verification, metadata in registered:
+        identity = git_worktree_identity(path)
+        if identity is not None and identity[1] == requested_common_dir:
+            return name, requested, verification, metadata, False
+
+    source_repository = Path(
+        data["workspace"]["source_repository"]
+    ).resolve()
+    source_identity = git_worktree_identity(source_repository)
+    if (
+        source_identity is not None
+        and source_identity[1] == requested_common_dir
+    ):
+        return (
+            "workspace_source",
+            requested,
+            {"test_command": [], "verify_command": []},
+            {
+                "kind": "workspace_source",
+                "lifecycle": "active",
+                "remote_policy": "required",
+            },
+            False,
+        )
+    return None
+
+
 def command_exists(repo_path, command):
     if not command:
         return False
@@ -729,15 +800,17 @@ def build_report(manifest_path, repo_path=None):
     runtime_view = Path(data["workspace"]["runtime_view"])
     repository_root = runtime_view / data["workspace"]["repository_root"]
     selected = list(data["repos"])
+    requested_repository = None
     initial_findings = []
     if repo_path is not None:
         requested = Path(repo_path).resolve()
-        selected = [
-            name
-            for name, relative in data["repos"].items()
-            if (runtime_view / relative).resolve() == requested
-        ]
-        if not selected:
+        requested_repository = resolve_requested_repository(data, requested)
+        selected = (
+            [requested_repository[0]]
+            if requested_repository is not None
+            else []
+        )
+        if requested_repository is None:
             initial_findings.append(
                 make_finding(
                     "REPOSITORY_NOT_REGISTERED",
@@ -753,16 +826,34 @@ def build_report(manifest_path, repo_path=None):
             data["workspace"]["repository_root"],
             [runtime_view / relative for relative in data["repos"].values()],
         )
-        repositories = [
-            collect_repository(
+        if requested_repository is not None:
+            (
                 name,
-                runtime_view / data["repos"][name],
-                data["verification"][name],
-                data["repository_metadata"][name],
-                repository_root,
-            )
-            for name in selected
-        ]
+                path,
+                verification,
+                metadata,
+                require_direct_child,
+            ) = requested_repository
+            repositories = [
+                collect_repository(
+                    name,
+                    path,
+                    verification,
+                    metadata,
+                    repository_root if require_direct_child else None,
+                )
+            ]
+        else:
+            repositories = [
+                collect_repository(
+                    name,
+                    runtime_view / data["repos"][name],
+                    data["verification"][name],
+                    data["repository_metadata"][name],
+                    repository_root,
+                )
+                for name in selected
+            ]
         workspace["scanned_repositories"] = selected
     else:
         repositories = []
