@@ -35,6 +35,8 @@ tradingagents = "repo/tradingagents"
 claude_code_best_practice = "repo/claude-code-best-practice"
 nikkei_research_os = "repo/nikkei-research-os"
 nikkei225_factor_lab = "repo/nikkei225-factor-lab"
+signal_nest = "repo/signal-nest"
+presentation_20260904 = "repo/20260904-ppt"
 download_photos = "repo/download-photos"
 cc_connect = "repo/cc-connect"
 
@@ -51,6 +53,14 @@ verify_command = []
 
 [verification.nikkei_research_os]
 test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
+
+[verification.signal_nest]
+test_command = []
+verify_command = []
+
+[verification.presentation_20260904]
+test_command = []
 verify_command = []
 
 [verification.stock_analysis]
@@ -90,6 +100,16 @@ remote_policy = "required"
 [repository_metadata.nikkei225_factor_lab]
 kind = "research_execution_plane"
 lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.signal_nest]
+kind = "notification_execution_ledger"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.presentation_20260904]
+kind = "presentation_project"
+lifecycle = "maintenance"
 remote_policy = "required"
 
 [repository_metadata.download_photos]

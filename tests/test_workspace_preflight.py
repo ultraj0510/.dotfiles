@@ -350,6 +350,91 @@ def test_unregistered_direct_repository_is_blocked(tmp_path):
     assert finding["details"] == {"path": str(unregistered)}
 
 
+def test_explicit_registered_linked_worktree_uses_requested_checkout(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    primary = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": primary})
+    linked = tmp_path / "linked sample"
+    git(
+        primary,
+        "worktree",
+        "add",
+        "-b",
+        "feature/linked-preflight",
+        str(linked),
+        "HEAD",
+    )
+    (linked / "worktree-only.txt").write_text("dirty\n")
+
+    report = checker.build_report(manifest, linked)
+
+    assert "REPOSITORY_NOT_REGISTERED" not in {
+        item["code"] for item in report["findings"]
+    }
+    assert report["workspace"]["scanned_repositories"] == ["sample"]
+    assert len(report["repositories"]) == 1
+    repository = report["repositories"][0]
+    assert repository["path"] == str(linked.resolve())
+    assert repository["branch"] == "feature/linked-preflight"
+    assert repository["dirty"] is True
+    assert repository["untracked"] == ["worktree-only.txt"]
+
+
+def test_explicit_workspace_source_linked_worktree_is_accepted(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    primary = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": primary})
+    source = manifest.resolve().parents[1]
+    git(source, "init", "-q")
+    git(source, "config", "user.email", "preflight@example.invalid")
+    git(source, "config", "user.name", "Preflight Test")
+    git(source, "remote", "add", "origin", "https://example.invalid/source.git")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "source")
+    linked = tmp_path / "linked source"
+    git(
+        source,
+        "worktree",
+        "add",
+        "-b",
+        "feature/source-preflight",
+        str(linked),
+        "HEAD",
+    )
+
+    report = checker.build_report(manifest, linked)
+
+    assert "REPOSITORY_NOT_REGISTERED" not in {
+        item["code"] for item in report["findings"]
+    }
+    assert report["workspace"]["scanned_repositories"] == [
+        "workspace_source"
+    ]
+    assert report["repositories"][0]["path"] == str(linked.resolve())
+    assert report["repositories"][0]["branch"] == "feature/source-preflight"
+
+
+def test_explicit_unrelated_repository_remains_blocked(tmp_path):
+    checker = load_checker()
+    runtime = tmp_path / "runtime view"
+    registered = init_repo(runtime / "repo" / "sample")
+    manifest = write_manifest(tmp_path, {"sample": registered})
+    unrelated = init_repo(tmp_path / "unrelated")
+
+    report = checker.build_report(manifest, unrelated)
+
+    finding = next(
+        item
+        for item in report["findings"]
+        if item["code"] == "REPOSITORY_NOT_REGISTERED"
+    )
+    assert finding["severity"] == "BLOCKED"
+    assert finding["subject"] == str(unrelated)
+    assert report["repositories"] == []
+
+
 def test_repository_discovery_does_not_recurse_or_scan_outside_root(tmp_path):
     checker = load_checker()
     runtime = tmp_path / "runtime view"

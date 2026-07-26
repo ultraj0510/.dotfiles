@@ -20,6 +20,8 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | `/Users/fujie/code/repo/stock-analysis` | Stock analysis research module, CLI, and backtesting. Independent git repository. |
 | `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance, plus the external-factor incubation governance control plane. It owns preregistration, immutable requests, evidence verification, and admission records, not strategy execution. |
 | `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary execution plane for strategy and factor research, portfolio simulation, paper trading, and strategy operations. Its isolated incubation adapter computes and reports preregistered factors without changing active F. |
+| `/Users/fujie/code/repo/signal-nest` | Signal monitoring and research-only execution-ledger workflow. Independent git repository. |
+| `/Users/fujie/code/repo/20260904-ppt` | Maintained presentation project retained in the workspace registry. Independent git repository. |
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
 | `/Users/fujie/code/repo/playground` | Playground/scratch git repo for experiments and temporary work. |
 | `/Users/fujie/code/repo/tradingagents` | TradingAgents implementation and tests. Independent git repository. |
@@ -44,6 +46,8 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | `stock_analysis` | 日本股票分析研究模块与回测。 |
 | `nikkei_research_os` | 研究孵化治理与不可变证据控制平面。 |
 | `nikkei225_factor_lab` | 因子计算、评估与组合回放执行平面。 |
+| `signal_nest` | 信号监控与研究限定的执行账本工作流。 |
+| `presentation_20260904` | 以 maintenance 生命周期保留的演示文稿项目。 |
 | `download_photos` | 照片下载工具。 |
 | `playground` | 受维护的实验沙盒。 |
 | `tradingagents` | 外部参考实现。 |
@@ -62,6 +66,12 @@ preflight 同时检查已登记项目，并只枚举 `repository_root`（当前�
 `UNREGISTERED_REPOSITORY` 并以 `BLOCKED` 失败；它不会递归扫描项目内部的
 worktree、fixture 或 vendor 目录。`remote_policy = "required"` 只要求至少有
 一个 remote，不把特定 remote 名称写成合同。
+
+显式使用 `preflight --repo <path>` 时，`<path>` 可以是受管仓库或
+`source_repository` 的 linked worktree。preflight 先要求该路径自身是 Git
+worktree 根，再以解析后的 Git common-dir 绑定受管主仓；报告中的 branch、
+dirty、remote 与 verification 状态来自请求的 worktree。仅路径相似、同名目录、
+符号链接或独立 Git 仓库不能通过该身份检查。
 
 ## Shared Rules
 
