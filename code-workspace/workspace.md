@@ -85,7 +85,7 @@ dirty、remote 与 verification 状态来自请求的 worktree。仅路径相似
 - 提交语言等机器可判定的规则值以 `workspace.toml` 的 `[rules]` 为唯一事实来源；旧计划或任务文档中的复制值不具权威性。
 - Security-sensitive files, credentials, brokerage Cookies, and personal portfolio data must not be committed.
 - For non-trivial work, write or update a plan before implementation.
-- Default Codex/Claude split for implementation work: Codex owns design, planning, review, and verification; implementation edits should be delegated to Claude Code unless the user explicitly asks Codex to edit directly or the change is a small urgent fix.
+- 当前承接任务的 Agent 可直接完成已授权的实现、检查和交付；有独立边界且有益时才委派，不把 Claude Code 或其他 Agent 的可用性作为实施前置条件。
 - Prefer one source of truth and generated tool-specific files over duplicated manual definitions.
 - Do not move files across git repository boundaries without checking `git status` and recording the rollback path.
 - Before adding cross-repository research behavior, identify the owning plane:
@@ -100,10 +100,22 @@ dirty、remote 与 verification 状态来自请求的 worktree。仅路径相似
   engine, lifecycle state, CLI family, or authoritative artifact type only when
   the current mechanism cannot express the requirement cleanly; record that
   concrete limitation in the design first.
-- 新任务状态、持久化计划和归档分别使用 manifest 声明的默认目录；旧 `tasks/` 仅作历史内容，不再作为入口。
-- 非平凡任务使用 `templates/task.md` 和 `scripts/taskctl`。完成状态由当前风险、preflight 与绑定当前 Git/工作树指纹的证据重新推导，不接受任务 Markdown 中手写的完成声明。
+- 采用受管任务机制时，任务状态、持久化计划和归档分别使用 manifest 声明的默认目录；旧 `tasks/` 仅作历史内容，不再作为入口。其他项目沿用自身记录机制，不为登记新建流程文件。
+- `taskctl` 仅按下方“任务治理适用范围”使用。采用该机制的任务，其完成状态由当前风险、preflight 与绑定当前 Git/工作树指纹的证据重新推导，不接受任务 Markdown 中手写的完成声明。
 - 任务 Markdown 是可编辑定义；repository Git metadata 内的 task registry、任务旁的 sidecar 与 evidence JSON 由程序管理，不手工编辑。登记键由 repository identity 与 task ID 共同决定，不依赖可切换的 workspace root；已登记任务移动定义或缺少 sidecar 时拒绝重新初始化。任务定义、branch、HEAD、staged/unstaged diff、相关 untracked 文件或验收命令变化后，旧证据失效；重新执行并通过当前验收后可恢复关闭流程。
 - 该机制处于本地信任边界：它防止手写完成、复用失效证据和跳过结构化强制门，但不声称具有密码学签名、远程身份认证或不可变存储保证。
 - `taskctl start/run/close` 使用 repository 级单写者锁覆盖完整 read-modify-write；锁超时必须明确失败，进程退出后由操作系统释放。任务定义、evidence、archive 必须位于目标 repository 之外，避免治理元数据使 fingerprint 循环失效。
 - acceptance command 是可信本地代码。`taskctl run` 仅直接执行已声明的 argv，不做隐式 shell 解析；不得自动执行未审查 PR、外部分支或下载来源中的任务定义。L3 reviewer/implementer 仅是结构化声明字段，不构成身份认证。
 - Claude Code automatically loads `~/.claude/CLAUDE.md` for user-level rules. This workspace file covers project-level rules only.
+
+## 任务治理适用范围
+
+工作区台账声明受管范围，不是所有本地开发任务的授权清单。计划、任务登记、执行授权与验收结论分别判断。
+
+- 对 `[repos]` 中的受管仓库、manifest 声明的 `source_repository` 及经 Git common-dir 验证归属上述仓库的 linked worktree，非平凡任务继续使用 `templates/task.md` 和 `taskctl start/run/close`。项目明确要求的研究准入、冻结、权限或发布门禁继续有效。
+- 对未登记的独立仓库，先读取适用的项目指令并核对当前分支、工作树及已有授权。项目没有明确要求该治理流程时，已授权的本地可逆开发采用项目已有 Issue/计划与定向测试、真实 diff 审查、适用构建等验收，不以登记或取得一次性豁免作为前置条件，也不自动修改台账。
+- 用户要求只做规格、设计或分析时，保持该范围；仓库未登记本身不能把已批准的实施任务改为仅交付规格。
+- 若已经调用工具并得到 `REPOSITORY_NOT_REGISTERED`，核对是否确属未登记独立仓库。满足上述未登记仓库的本地开发适用条件时，记录“未纳入 taskctl 管理，按项目验收”并继续；保留工具原始失败结果，不宣称 `taskctl` 通过或手写其受管状态。
+- 不将上述情况推广为所有 `BLOCKED` 的兜底。受管仓库的身份异常、锁冲突、证据失效、验收失败、无效 manifest、访问权限或项目明确门禁仍需定位处理。无法确认治理归属或具体授权时，只暂停依赖该判断的操作，继续独立工作。
+- 整个工作区的 preflight 仍可因 `UNREGISTERED_REPOSITORY` 报告不完整台账；该结果用于工作区治理验收，不能单独推导出每个未登记项目的本地开发都未获授权。不得把降级验收冒充工作区治理通过。
+- 公开发布、远程写入、生产操作、破坏性操作、研究准入或恢复已冻结/终止工作，继续依据具体授权和项目规则，不由本地开发路径授予权限。
