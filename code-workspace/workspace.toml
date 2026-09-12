@@ -19,8 +19,6 @@ commit_language = "zh"
 [tools]
 codex_entrypoint = "AGENTS.md"
 claude_entrypoint = "CLAUDE.md"
-shared_agent_source = "ai/agents/stock-analysis"
-sync_agents = "ai/tools/sync_agents.py"
 
 [runtime]
 root = "runtime"
@@ -44,8 +42,6 @@ cc_connect = "repo/cc-connect"
 claude_code_best_practice = "repo/claude-code-best-practice"
 
 [generated]
-claude_agents = ".claude/agents"
-codex_agents = ".codex/agents"
 
 [verification.nikkei225_factor_lab]
 test_command = [".venv/bin/python", "-m", "pytest"]
