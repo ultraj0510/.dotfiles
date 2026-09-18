@@ -100,7 +100,7 @@ bash ~/.dotfiles/install.sh
 
 ## 自定义 Codex Skills 与 Agents
 
-完整源码、运行链接和恢复说明见 [agent-guidance/README.md](agent-guidance/README.md)。`install.sh` 安装其中声明的两个 Skills 和两个 Agents；已有 `skill-overrides/` 仍为指令覆盖文件。
+完整源码、运行链接和恢复说明见 [agent-guidance/README.md](agent-guidance/README.md)。`install.sh` 安装其中声明的三个 Skills 和两个 Agents；Skills 为 `equity-opportunity`、`sbi-research-data`、`luna-orchestrator`，已有 `skill-overrides/` 仍为指令覆盖文件。
 
 ## Code workspace
 

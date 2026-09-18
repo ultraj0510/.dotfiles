@@ -1,21 +1,22 @@
 # 自定义 Skills 与 Agents
 
-本目录维护共享个人规则、两个完整 Skill 和两个 Codex Agent。运行入口使用符号链接，日常修改直接编辑本目录的源码；不在运行目录维护第二份副本。
+本目录维护共享个人规则、三个完整 Skill 和两个 Codex Agent。运行入口使用符号链接，日常修改直接编辑本目录的源码；不在运行目录维护第二份副本。
 
 | 类型 | 源码 | 运行入口 |
 |---|---|---|
 | Skill | `skills/equity-opportunity/` | `~/.codex/skills/equity-opportunity` |
 | Skill | `skills/sbi-research-data/` | `~/.codex/skills/sbi-research-data` |
+| Skill | `skills/luna-orchestrator/` | `~/.codex/skills/luna-orchestrator` |
 | Agent | `agents/luna-worker.toml` | `~/.codex/agents/luna-worker.toml` |
 | Agent | `agents/nikkei225-opportunity.toml` | `~/.codex/agents/nikkei225-opportunity.toml` |
 
-Skills 包含 `SKILL.md`、`references/` 和 `agents/openai.yaml`。Agent 内引用的 `~/.codex/skills` 绝对路径保留现有本机配置；迁到不同用户主目录时需检查这些引用。
+每个 Skill 至少包含 `SKILL.md` 和 `agents/openai.yaml`，按需提供 `references/`。Agent 内引用的 `~/.codex/skills` 绝对路径保留现有本机配置；迁到不同用户主目录时需检查这些引用。
 
 ## 安装与恢复
 
-仓库根目录 `install.sh` 已声明上述四个链接，沿用现有 `backup_and_link` 行为：正确链接跳过，普通文件或目录先备份，未知符号链接拒绝覆盖。完整安装脚本还会安装其他 dotfiles；只维护这些文件时无需运行整个脚本。
+仓库根目录 `install.sh` 已声明上述五个链接，沿用现有 `backup_and_link` 行为：正确链接跳过，普通文件或目录先备份，未知符号链接拒绝覆盖。完整安装脚本还会安装其他 dotfiles；只维护这些文件时无需运行整个脚本。
 
-本次迁移前的原件与逐文件 SHA-256 清单保存在 `~/.dotfiles-backup/custom-skills-agents-<时间>/manifest.json`。回退时核对清单，移除仍指向本目录的四个运行链接，再将对应备份移回；若源码已更新，先保存后续修改。
+本次迁移前四个运行链接的原件与逐文件 SHA-256 清单保存在 `~/.dotfiles-backup/custom-skills-agents-<时间>/manifest.json`；新建的 `luna-orchestrator` 不在该历史清单中。回退时核对清单，移除仍指向本目录的四个历史运行链接，再将对应备份移回；新 Skill 按源目录保留或单独移除，若源码已更新先保存后续修改。
 
 ## 其他维护边界
 

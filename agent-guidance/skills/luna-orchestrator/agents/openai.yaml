@@ -1,0 +1,7 @@
+interface:
+  display_name: "Luna 任务编排"
+  short_description: "主 Agent 拆解协调，Luna worker 负责并行实施"
+  default_prompt: "使用 $luna-orchestrator 拆解当前任务并委派给可用的 Luna worker，由主 Agent 协调和验收。"
+
+policy:
+  allow_implicit_invocation: false

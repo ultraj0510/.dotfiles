@@ -69,7 +69,7 @@ backup_and_link \
   "../.dotfiles/agent-guidance/personal-workstyle.md"
 
 # 自定义 Codex Skills 与 Agents：完整源码由 dotfiles 管理
-for skill in equity-opportunity sbi-research-data; do
+for skill in equity-opportunity sbi-research-data luna-orchestrator; do
   backup_and_link \
     "$DOTFILES/agent-guidance/skills/$skill" \
     "$HOME/.codex/skills/$skill" \
