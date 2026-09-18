@@ -1,0 +1,4 @@
+interface:
+  display_name: "SBI研究取数"
+  short_description: "采集SBI股票研究数据，核对完整名单、来源口径和字段缺失"
+  default_prompt: "使用 $sbi-research-data 获取本次股票研究需要的SBI数据，保留完整目标名单、原始证据和未确认口径。"

@@ -98,6 +98,10 @@ bash ~/.dotfiles/install.sh
 [stock-analysis](~/code/repo/stock-analysis/) に独立プロジェクトとして移行済み。
 `claude/skills/` 以下のそれらは symlink で新プロジェクトを指している。
 
+## 自定义 Codex Skills 与 Agents
+
+完整源码、运行链接和恢复说明见 [agent-guidance/README.md](agent-guidance/README.md)。`install.sh` 安装其中声明的两个 Skills 和两个 Agents；已有 `skill-overrides/` 仍为指令覆盖文件。
+
 ## Code workspace
 
 `code-workspace/` は Git 管理上の原本で、`/Users/fujie/code` は Codex / Claude Code が利用する実行ビューです。

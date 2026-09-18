@@ -68,6 +68,20 @@ backup_and_link \
   "$HOME/.codex/AGENTS.md" \
   "../.dotfiles/agent-guidance/personal-workstyle.md"
 
+# 自定义 Codex Skills 与 Agents：完整源码由 dotfiles 管理
+for skill in equity-opportunity sbi-research-data; do
+  backup_and_link \
+    "$DOTFILES/agent-guidance/skills/$skill" \
+    "$HOME/.codex/skills/$skill" \
+    "../../.dotfiles/agent-guidance/skills/$skill"
+done
+for agent in luna-worker nikkei225-opportunity; do
+  backup_and_link \
+    "$DOTFILES/agent-guidance/agents/$agent.toml" \
+    "$HOME/.codex/agents/$agent.toml" \
+    "../../.dotfiles/agent-guidance/agents/$agent.toml"
+done
+
 # claude aliases & settings（相対symlinkでホスト・コンテナ両対応）
 mkdir -p "$HOME/.claude"
 backup_and_link \
