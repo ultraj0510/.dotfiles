@@ -85,11 +85,6 @@ def test_registered_workspace_paths_exist():
 def test_repository_registry_has_one_current_name_per_repository():
     data = load_manifest()
     expected_repositories = {
-        "playground",
-        "tradingagents",
-        "claude_code_best_practice",
-        "nikkei_research_os",
-        "nikkei225_factor_lab",
         "signal_nest",
         "presentation_20260904",
         "download_photos",

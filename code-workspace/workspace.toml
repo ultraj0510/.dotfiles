@@ -25,46 +25,20 @@ root = "runtime"
 omc = "runtime/omc"
 
 [repos]
-playground = "repo/playground"
-tradingagents = "repo/tradingagents"
-claude_code_best_practice = "repo/claude-code-best-practice"
-nikkei_research_os = "repo/nikkei-research-os"
-nikkei225_factor_lab = "repo/nikkei225-factor-lab"
 signal_nest = "repo/signal-nest"
 presentation_20260904 = "repo/20260904-ppt"
 download_photos = "repo/download-photos"
 cc_connect = "repo/cc-connect"
 
 [references]
-claude_code_best_practice = "repo/claude-code-best-practice"
 
 [generated]
-
-[verification.nikkei225_factor_lab]
-test_command = [".venv/bin/python", "-m", "pytest"]
-verify_command = []
-
-[verification.nikkei_research_os]
-test_command = [".venv/bin/python", "-m", "pytest"]
-verify_command = []
 
 [verification.signal_nest]
 test_command = []
 verify_command = []
 
 [verification.presentation_20260904]
-test_command = []
-verify_command = []
-
-[verification.playground]
-test_command = []
-verify_command = []
-
-[verification.tradingagents]
-test_command = []
-verify_command = []
-
-[verification.claude_code_best_practice]
 test_command = []
 verify_command = []
 
@@ -75,16 +49,6 @@ verify_command = []
 [verification.cc_connect]
 test_command = []
 verify_command = []
-
-[repository_metadata.nikkei_research_os]
-kind = "research_control_plane"
-lifecycle = "active"
-remote_policy = "required"
-
-[repository_metadata.nikkei225_factor_lab]
-kind = "research_execution_plane"
-lifecycle = "active"
-remote_policy = "required"
 
 [repository_metadata.signal_nest]
 kind = "notification_execution_ledger"
@@ -99,21 +63,6 @@ remote_policy = "required"
 [repository_metadata.download_photos]
 kind = "utility"
 lifecycle = "active"
-remote_policy = "required"
-
-[repository_metadata.playground]
-kind = "sandbox"
-lifecycle = "maintenance"
-remote_policy = "required"
-
-[repository_metadata.tradingagents]
-kind = "external_reference"
-lifecycle = "reference"
-remote_policy = "required"
-
-[repository_metadata.claude_code_best_practice]
-kind = "external_reference"
-lifecycle = "reference"
 remote_policy = "required"
 
 [repository_metadata.cc_connect]

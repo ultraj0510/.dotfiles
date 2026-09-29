@@ -17,18 +17,13 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | Path | Purpose |
 |------|---------|
-| `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance, plus the external-factor incubation governance control plane. It owns preregistration, immutable requests, evidence verification, and admission records, not strategy execution. |
-| `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary execution plane for strategy and factor research, portfolio simulation, paper trading, and strategy operations. Its isolated incubation adapter computes and reports preregistered factors without changing active F. |
 | `/Users/fujie/code/repo/signal-nest` | Signal monitoring and research-only execution-ledger workflow. Independent git repository. |
 | `/Users/fujie/code/repo/20260904-ppt` | Maintained presentation project retained in the workspace registry. Independent git repository. |
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
-| `/Users/fujie/code/repo/playground` | Playground/scratch git repo for experiments and temporary work. |
-| `/Users/fujie/code/repo/tradingagents` | TradingAgents implementation and tests. Independent git repository. |
 | `/Users/fujie/.dotfiles/claude/skills` | Git-managed Claude skill definitions. |
 | `/Users/fujie/.agents/skills` | Agent runtime skill mirror. Should not be treated as the source of truth. |
 | `/Users/fujie/code/ai` | Workspace-local source definitions for dual Codex/Claude agents. |
 | `/Users/fujie/code/docs` | Plans, lessons, and reviews. |
-| `/Users/fujie/code/repo/claude-code-best-practice` | External reference material for Claude Code/Codex workflows. Independent git repository. |
 | `/Users/fujie/code/runtime` | Generated state and run outputs that are not source code. |
 | `/Users/fujie/code/scratch` | Temporary experiments. |
 
@@ -41,14 +36,9 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | 项目 | 职责分类 |
 |------|----------|
-| `nikkei_research_os` | 研究孵化治理与不可变证据控制平面。 |
-| `nikkei225_factor_lab` | 因子计算、评估与组合回放执行平面。 |
 | `signal_nest` | 信号监控与研究限定的执行账本工作流。 |
 | `presentation_20260904` | 以 maintenance 生命周期保留的演示文稿项目。 |
 | `download_photos` | 照片下载工具。 |
-| `playground` | 受维护的实验沙盒。 |
-| `tradingagents` | 外部参考实现。 |
-| `claude_code_best_practice` | Claude Code/Codex 工作流外部参考。 |
 | `cc_connect` | 外部连接工具参考。 |
 
 已废弃、且不再处于工作区维护范围的项目不进入台账；重新纳入前必须先明确其

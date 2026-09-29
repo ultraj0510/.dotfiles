@@ -123,7 +123,7 @@ symlinkは上書きしません。`templates` も同じ規則で配備します�
 ```bash
 /Users/fujie/code/scripts/preflight
 /Users/fujie/code/scripts/preflight --json
-/Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/nikkei225-factor-lab
+/Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/signal-nest
 ```
 
 `taskctl` はタスクMarkdownの手書き状態を信頼せず、現在のrisk trigger、preflight JSON、
