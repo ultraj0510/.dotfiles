@@ -47,7 +47,6 @@ bash ~/.dotfiles/install.sh
 │   └── docs/                    # plans, lessons, archived notes
 ├── git/
 │   └── .gitconfig               # Git config
-├── portfolio-core/              # SBI portfolio auth/fetch shared implementation
 └── tests/                       # regression tests
 ```
 
@@ -183,10 +182,6 @@ linkは保持します。journal の canonical SHA-256 は通常の手動編集�
 - Cookie、token、`.env`、SBI証券のセッション情報、実ポートフォリオデータはコミットしません。
 - 生成物や一時状態は `runtime/`、`scratch/`、または ignore 済みディレクトリに置きます。
 - `portfolio.yaml` や分析結果は公開repoに含めず、必要な場合は redacted example のみ管理します。
-
-## テスト
-
-Cookie更新まわりの回帰テストと Python 構文チェックは [stock-analysis](~/code/repo/stock-analysis/) プロジェクトに移行済み。
 
 ## 運用メモ
 

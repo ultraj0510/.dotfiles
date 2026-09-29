@@ -9,7 +9,7 @@ Update that manifest first, then update prose docs and generated files.
 
 ## Purpose
 
-This workspace supports Japanese stock analysis, portfolio management, automation skills, and agent workflow experiments.
+This workspace supports Japanese market research, automation skills, and agent workflow experiments.
 
 Codex and Claude Code are both expected to operate here. Shared rules live in this file. Tool-specific entrypoints should stay thin.
 
@@ -17,7 +17,6 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | Path | Purpose |
 |------|---------|
-| `/Users/fujie/code/repo/stock-analysis` | Stock analysis research module, CLI, and backtesting. Independent git repository. |
 | `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance, plus the external-factor incubation governance control plane. It owns preregistration, immutable requests, evidence verification, and admission records, not strategy execution. |
 | `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary execution plane for strategy and factor research, portfolio simulation, paper trading, and strategy operations. Its isolated incubation adapter computes and reports preregistered factors without changing active F. |
 | `/Users/fujie/code/repo/signal-nest` | Signal monitoring and research-only execution-ledger workflow. Independent git repository. |
@@ -25,7 +24,6 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
 | `/Users/fujie/code/repo/playground` | Playground/scratch git repo for experiments and temporary work. |
 | `/Users/fujie/code/repo/tradingagents` | TradingAgents implementation and tests. Independent git repository. |
-| `/Users/fujie/.dotfiles/portfolio-core` | Shared SBI portfolio auth/fetch implementation used by Claude and agent wrappers. |
 | `/Users/fujie/.dotfiles/claude/skills` | Git-managed Claude skill definitions. |
 | `/Users/fujie/.agents/skills` | Agent runtime skill mirror. Should not be treated as the source of truth. |
 | `/Users/fujie/code/ai` | Workspace-local source definitions for dual Codex/Claude agents. |
@@ -43,7 +41,6 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | 项目 | 职责分类 |
 |------|----------|
-| `stock_analysis` | 日本股票分析研究模块与回测。 |
 | `nikkei_research_os` | 研究孵化治理与不可变证据控制平面。 |
 | `nikkei225_factor_lab` | 因子计算、评估与组合回放执行平面。 |
 | `signal_nest` | 信号监控与研究限定的执行账本工作流。 |

@@ -18,7 +18,7 @@ def test_claude_imports_the_shared_guidance_without_legacy_copy():
     assert "@~/.dotfiles/agent-guidance/personal-workstyle.md" in text
     assert "<!-- User customizations -->" not in text
     project_text = (DOTFILES / "code-workspace" / "CLAUDE.md").read_text()
-    assert "## 股票分析系统" in project_text
+    assert "## 股票分析系统" not in project_text
 
 
 def test_workspace_has_no_conflicting_identifier_language_rule():

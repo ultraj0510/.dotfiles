@@ -85,7 +85,6 @@ def test_registered_workspace_paths_exist():
 def test_repository_registry_has_one_current_name_per_repository():
     data = load_manifest()
     expected_repositories = {
-        "stock_analysis",
         "playground",
         "tradingagents",
         "claude_code_best_practice",
@@ -98,7 +97,7 @@ def test_repository_registry_has_one_current_name_per_repository():
     }
 
     assert "projects" not in data
-    assert data["repos"]["stock_analysis"] == "repo/stock-analysis"
+    assert "stock_analysis" not in data["repos"]
     assert data["repos"]["signal_nest"] == "repo/signal-nest"
     assert data["repos"]["presentation_20260904"] == "repo/20260904-ppt"
     assert "stock_price_analyze" not in data["repos"]

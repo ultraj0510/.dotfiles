@@ -23,11 +23,8 @@ claude_entrypoint = "CLAUDE.md"
 [runtime]
 root = "runtime"
 omc = "runtime/omc"
-stock_advisor_workspace = "runtime/stock-advisor/workspace"
-stock_results = "runtime/stock-price-analyze-results"
 
 [repos]
-stock_analysis = "repo/stock-analysis"
 playground = "repo/playground"
 tradingagents = "repo/tradingagents"
 claude_code_best_practice = "repo/claude-code-best-practice"
@@ -59,10 +56,6 @@ verify_command = []
 test_command = []
 verify_command = []
 
-[verification.stock_analysis]
-test_command = []
-verify_command = []
-
 [verification.playground]
 test_command = []
 verify_command = []
@@ -82,11 +75,6 @@ verify_command = []
 [verification.cc_connect]
 test_command = []
 verify_command = []
-
-[repository_metadata.stock_analysis]
-kind = "research"
-lifecycle = "active"
-remote_policy = "required"
 
 [repository_metadata.nikkei_research_os]
 kind = "research_control_plane"
