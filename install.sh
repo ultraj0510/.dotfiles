@@ -104,6 +104,11 @@ backup_and_link \
   "$HOME/.claude/skills" \
   "../.dotfiles/claude/skills"
 
+backup_and_link \
+  "$DOTFILES/claude/agents" \
+  "$HOME/.claude/agents" \
+  "../.dotfiles/claude/agents"
+
 # .bashrc に source 行を追記（重複しない）
 BASHRC="$HOME/.bashrc"
 SOURCE_LINE='[ -f ~/.dotfiles/bash/aliases.sh ] && source ~/.dotfiles/bash/aliases.sh'
