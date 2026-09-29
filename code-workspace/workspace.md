@@ -9,7 +9,7 @@ Update that manifest first, then update prose docs and generated files.
 
 ## Purpose
 
-This workspace supports Japanese stock analysis, portfolio management, automation skills, and agent workflow experiments.
+This workspace supports Japanese market research, automation skills, and agent workflow experiments.
 
 Codex and Claude Code are both expected to operate here. Shared rules live in this file. Tool-specific entrypoints should stay thin.
 
@@ -17,20 +17,13 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | Path | Purpose |
 |------|---------|
-| `/Users/fujie/code/repo/stock-analysis` | Stock analysis research module, CLI, and backtesting. Independent git repository. |
-| `/Users/fujie/code/repo/nikkei-research-os` | Frozen R001-R006 overnight-research evidence and prospective-study maintenance, plus the external-factor incubation governance control plane. It owns preregistration, immutable requests, evidence verification, and admission records, not strategy execution. |
-| `/Users/fujie/code/repo/nikkei225-factor-lab` | Primary execution plane for strategy and factor research, portfolio simulation, paper trading, and strategy operations. Its isolated incubation adapter computes and reports preregistered factors without changing active F. |
 | `/Users/fujie/code/repo/signal-nest` | Signal monitoring and research-only execution-ledger workflow. Independent git repository. |
 | `/Users/fujie/code/repo/20260904-ppt` | Maintained presentation project retained in the workspace registry. Independent git repository. |
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
-| `/Users/fujie/code/repo/playground` | Playground/scratch git repo for experiments and temporary work. |
-| `/Users/fujie/code/repo/tradingagents` | TradingAgents implementation and tests. Independent git repository. |
-| `/Users/fujie/.dotfiles/portfolio-core` | Shared SBI portfolio auth/fetch implementation used by Claude and agent wrappers. |
 | `/Users/fujie/.dotfiles/claude/skills` | Git-managed Claude skill definitions. |
 | `/Users/fujie/.agents/skills` | Agent runtime skill mirror. Should not be treated as the source of truth. |
 | `/Users/fujie/code/ai` | Workspace-local source definitions for dual Codex/Claude agents. |
 | `/Users/fujie/code/docs` | Plans, lessons, and reviews. |
-| `/Users/fujie/code/repo/claude-code-best-practice` | External reference material for Claude Code/Codex workflows. Independent git repository. |
 | `/Users/fujie/code/runtime` | Generated state and run outputs that are not source code. |
 | `/Users/fujie/code/scratch` | Temporary experiments. |
 
@@ -43,16 +36,14 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | 项目 | 职责分类 |
 |------|----------|
-| `stock_analysis` | 日本股票分析研究模块与回测。 |
-| `nikkei_research_os` | 研究孵化治理与不可变证据控制平面。 |
-| `nikkei225_factor_lab` | 因子计算、评估与组合回放执行平面。 |
 | `signal_nest` | 信号监控与研究限定的执行账本工作流。 |
 | `presentation_20260904` | 以 maintenance 生命周期保留的演示文稿项目。 |
 | `download_photos` | 照片下载工具。 |
-| `playground` | 受维护的实验沙盒。 |
-| `tradingagents` | 外部参考实现。 |
-| `claude_code_best_practice` | Claude Code/Codex 工作流外部参考。 |
 | `cc_connect` | 外部连接工具参考。 |
+| `jp_market_data` | 免费日本市场数据采集、校验与不可变 Parquet 快照发布。 |
+| `jp_market_data_postclose` | `jp-market-data` 的 worktree（收盘后行情快照刷新分支）。 |
+| `jp_quant_sandbox` | 日本股票轻量研究与人工决策支持环境。 |
+| `playcabinet` | 个人游戏收藏与资产管理网站。 |
 
 已废弃、且不再处于工作区维护范围的项目不进入台账；重新纳入前必须先明确其
 所有权和 metadata，而不是依赖历史目录或 Git 状态。

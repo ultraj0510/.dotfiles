@@ -11,4 +11,5 @@ code-simplifier@claude-plugins-official
 playwright@claude-plugins-official
 skill-creator@claude-plugins-official
 claude-md-management@claude-plugins-official
+mattpocock-skills@claude-plugins-official
 oh-my-claudecode@omc

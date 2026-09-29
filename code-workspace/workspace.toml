@@ -23,55 +23,26 @@ claude_entrypoint = "CLAUDE.md"
 [runtime]
 root = "runtime"
 omc = "runtime/omc"
-stock_advisor_workspace = "runtime/stock-advisor/workspace"
-stock_results = "runtime/stock-price-analyze-results"
 
 [repos]
-stock_analysis = "repo/stock-analysis"
-playground = "repo/playground"
-tradingagents = "repo/tradingagents"
-claude_code_best_practice = "repo/claude-code-best-practice"
-nikkei_research_os = "repo/nikkei-research-os"
-nikkei225_factor_lab = "repo/nikkei225-factor-lab"
 signal_nest = "repo/signal-nest"
 presentation_20260904 = "repo/20260904-ppt"
 download_photos = "repo/download-photos"
 cc_connect = "repo/cc-connect"
+jp_market_data = "repo/jp-market-data"
+jp_market_data_postclose = "repo/jp-market-data-postclose"
+jp_quant_sandbox = "repo/jp-quant-sandbox"
+playcabinet = "repo/playcabinet"
 
 [references]
-claude_code_best_practice = "repo/claude-code-best-practice"
 
 [generated]
-
-[verification.nikkei225_factor_lab]
-test_command = [".venv/bin/python", "-m", "pytest"]
-verify_command = []
-
-[verification.nikkei_research_os]
-test_command = [".venv/bin/python", "-m", "pytest"]
-verify_command = []
 
 [verification.signal_nest]
 test_command = []
 verify_command = []
 
 [verification.presentation_20260904]
-test_command = []
-verify_command = []
-
-[verification.stock_analysis]
-test_command = []
-verify_command = []
-
-[verification.playground]
-test_command = []
-verify_command = []
-
-[verification.tradingagents]
-test_command = []
-verify_command = []
-
-[verification.claude_code_best_practice]
 test_command = []
 verify_command = []
 
@@ -83,20 +54,21 @@ verify_command = []
 test_command = []
 verify_command = []
 
-[repository_metadata.stock_analysis]
-kind = "research"
-lifecycle = "active"
-remote_policy = "required"
+[verification.jp_market_data]
+test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
 
-[repository_metadata.nikkei_research_os]
-kind = "research_control_plane"
-lifecycle = "active"
-remote_policy = "required"
+[verification.jp_market_data_postclose]
+test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
 
-[repository_metadata.nikkei225_factor_lab]
-kind = "research_execution_plane"
-lifecycle = "active"
-remote_policy = "required"
+[verification.jp_quant_sandbox]
+test_command = [".venv/bin/python", "-m", "pytest"]
+verify_command = []
+
+[verification.playcabinet]
+test_command = ["node_modules/.bin/vitest", "run"]
+verify_command = []
 
 [repository_metadata.signal_nest]
 kind = "notification_execution_ledger"
@@ -113,22 +85,27 @@ kind = "utility"
 lifecycle = "active"
 remote_policy = "required"
 
-[repository_metadata.playground]
-kind = "sandbox"
-lifecycle = "maintenance"
-remote_policy = "required"
-
-[repository_metadata.tradingagents]
-kind = "external_reference"
-lifecycle = "reference"
-remote_policy = "required"
-
-[repository_metadata.claude_code_best_practice]
-kind = "external_reference"
-lifecycle = "reference"
-remote_policy = "required"
-
 [repository_metadata.cc_connect]
 kind = "external_tool"
 lifecycle = "reference"
+remote_policy = "required"
+
+[repository_metadata.jp_market_data]
+kind = "data_production"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.jp_market_data_postclose]
+kind = "feature_worktree"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.jp_quant_sandbox]
+kind = "research_workspace"
+lifecycle = "active"
+remote_policy = "required"
+
+[repository_metadata.playcabinet]
+kind = "web_app"
+lifecycle = "active"
 remote_policy = "required"

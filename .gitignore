@@ -9,3 +9,5 @@ __pycache__/
 .venv/
 cache/
 tasks/
+# Claude 应用同步的 claude.ai skills 缓存（经 ~/.claude/skills 链接落在此处）
+claude/skills/synced/

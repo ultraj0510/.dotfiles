@@ -47,7 +47,6 @@ bash ~/.dotfiles/install.sh
 │   └── docs/                    # plans, lessons, archived notes
 ├── git/
 │   └── .gitconfig               # Git config
-├── portfolio-core/              # SBI portfolio auth/fetch shared implementation
 └── tests/                       # regression tests
 ```
 
@@ -91,12 +90,9 @@ bash ~/.dotfiles/install.sh
 
 | Skill | Purpose |
 |-------|---------|
-| `download-photos` | 写真販売サイトのカート画像ダウンロード |
-| `omc-reference` | Oh My Claude Code 参照 |
+| `download-photos` | 写真販売サイトのカート画像ダウンロード（`~/code/repo/download-photos` への symlink） |
 
-株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）と共有ライブラリは
-[stock-analysis](~/code/repo/stock-analysis/) に独立プロジェクトとして移行済み。
-`claude/skills/` 以下のそれらは symlink で新プロジェクトを指している。
+株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）は stock-analysis リポジトリのアーカイブに伴い退役済み。
 
 ## 自定义 Codex Skills 与 Agents
 
@@ -127,7 +123,7 @@ symlinkは上書きしません。`templates` も同じ規則で配備します�
 ```bash
 /Users/fujie/code/scripts/preflight
 /Users/fujie/code/scripts/preflight --json
-/Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/nikkei225-factor-lab
+/Users/fujie/code/scripts/preflight --repo /Users/fujie/code/repo/signal-nest
 ```
 
 `taskctl` はタスクMarkdownの手書き状態を信頼せず、現在のrisk trigger、preflight JSON、
@@ -186,10 +182,6 @@ linkは保持します。journal の canonical SHA-256 は通常の手動編集�
 - Cookie、token、`.env`、SBI証券のセッション情報、実ポートフォリオデータはコミットしません。
 - 生成物や一時状態は `runtime/`、`scratch/`、または ignore 済みディレクトリに置きます。
 - `portfolio.yaml` や分析結果は公開repoに含めず、必要な場合は redacted example のみ管理します。
-
-## テスト
-
-Cookie更新まわりの回帰テストと Python 構文チェックは [stock-analysis](~/code/repo/stock-analysis/) プロジェクトに移行済み。
 
 ## 運用メモ
 
