@@ -91,12 +91,9 @@ bash ~/.dotfiles/install.sh
 
 | Skill | Purpose |
 |-------|---------|
-| `download-photos` | 写真販売サイトのカート画像ダウンロード |
-| `omc-reference` | Oh My Claude Code 参照 |
+| `download-photos` | 写真販売サイトのカート画像ダウンロード（`~/code/repo/download-photos` への symlink） |
 
-株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）と共有ライブラリは
-[stock-analysis](~/code/repo/stock-analysis/) に独立プロジェクトとして移行済み。
-`claude/skills/` 以下のそれらは symlink で新プロジェクトを指している。
+株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）は stock-analysis リポジトリのアーカイブに伴い退役済み。
 
 ## 自定义 Codex Skills 与 Agents
 
