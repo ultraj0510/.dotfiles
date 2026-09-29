@@ -89,6 +89,10 @@ def test_repository_registry_has_one_current_name_per_repository():
         "presentation_20260904",
         "download_photos",
         "cc_connect",
+        "jp_market_data",
+        "jp_market_data_postclose",
+        "jp_quant_sandbox",
+        "playcabinet",
     }
 
     assert "projects" not in data

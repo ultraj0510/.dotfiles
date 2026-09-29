@@ -40,6 +40,10 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 | `presentation_20260904` | 以 maintenance 生命周期保留的演示文稿项目。 |
 | `download_photos` | 照片下载工具。 |
 | `cc_connect` | 外部连接工具参考。 |
+| `jp_market_data` | 免费日本市场数据采集、校验与不可变 Parquet 快照发布。 |
+| `jp_market_data_postclose` | `jp-market-data` 的 worktree（收盘后行情快照刷新分支）。 |
+| `jp_quant_sandbox` | 日本股票轻量研究与人工决策支持环境。 |
+| `playcabinet` | 个人游戏收藏与资产管理网站。 |
 
 已废弃、且不再处于工作区维护范围的项目不进入台账；重新纳入前必须先明确其
 所有权和 metadata，而不是依赖历史目录或 Git 状态。
