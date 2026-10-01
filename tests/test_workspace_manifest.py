@@ -86,25 +86,27 @@ def test_repository_registry_has_one_current_name_per_repository():
     data = load_manifest()
     expected_repositories = {
         "signal_nest",
-        "presentation_20260904",
         "download_photos",
-        "cc_connect",
         "jp_market_data",
-        "jp_market_data_postclose",
         "jp_quant_sandbox",
+        "jp_invest_lite",
         "playcabinet",
     }
 
     assert "projects" not in data
     assert "stock_analysis" not in data["repos"]
     assert data["repos"]["signal_nest"] == "repo/signal-nest"
-    assert data["repos"]["presentation_20260904"] == "repo/20260904-ppt"
+    assert data["repos"]["jp_quant_sandbox"] == "repo/jp-quant-sandbox"
+    assert data["repos"]["jp_invest_lite"] == "repo/jp-invest-lite"
     assert "stock_price_analyze" not in data["repos"]
     assert "codexpro" not in data["repos"]
     assert len(data["repos"].values()) == len(set(data["repos"].values()))
     assert set(data["repos"]) == expected_repositories
     assert set(data["verification"]) == set(data["repos"])
     assert set(data["repository_metadata"]) == set(data["repos"])
+    assert data["repository_metadata"]["signal_nest"]["lifecycle"] == "archived"
+    assert data["repository_metadata"]["jp_quant_sandbox"]["lifecycle"] == "archived"
+    assert data["repository_metadata"]["jp_invest_lite"]["lifecycle"] == "active"
 
     for commands in data["verification"].values():
         assert set(commands) == {"test_command", "verify_command"}

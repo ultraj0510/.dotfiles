@@ -4,5 +4,39 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 WORKSPACE_ROOT=$(CDPATH= cd -P -- "$SCRIPT_DIR/.." && pwd -P)
 
-exec python3 "$WORKSPACE_ROOT/ai/checks/check_workspace.py" \
+find_python() {
+  PYTHON=$(command -v python3 2>/dev/null || true)
+  if [ -n "$PYTHON" ] && "$PYTHON" -c \
+    'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) and sys.prefix == sys.base_prefix else 1)' \
+    >/dev/null 2>&1; then
+    printf '%s\n' "$PYTHON"
+    return 0
+  fi
+
+  UV=$(command -v uv 2>/dev/null || true)
+  if [ -z "$UV" ] && [ -n "${HOME:-}" ] && [ -x "${HOME}/.local/bin/uv" ]; then
+    UV="${HOME}/.local/bin/uv"
+  fi
+  if [ -z "$UV" ]; then
+    return 1
+  fi
+
+  PYTHON=$("$UV" --no-cache --offline --no-config \
+    python find --no-project --system --managed-python --no-python-downloads '>=3.11' \
+    2>/dev/null) || return 1
+  if [ -n "$PYTHON" ] && [ -x "$PYTHON" ] && "$PYTHON" -c \
+    'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) and sys.prefix == sys.base_prefix else 1)' \
+    >/dev/null 2>&1; then
+    printf '%s\n' "$PYTHON"
+    return 0
+  fi
+  return 1
+}
+
+PYTHON=$(find_python) || {
+  printf '%s\n' 'preflight: Python >=3.11 is required; no suitable installed interpreter was found.' >&2
+  exit 127
+}
+
+exec "$PYTHON" "$WORKSPACE_ROOT/ai/checks/check_workspace.py" \
   --manifest "$WORKSPACE_ROOT/workspace.toml" "$@"

@@ -17,8 +17,7 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | Path | Purpose |
 |------|---------|
-| `/Users/fujie/code/repo/signal-nest` | Signal monitoring and research-only execution-ledger workflow. Independent git repository. |
-| `/Users/fujie/code/repo/20260904-ppt` | Maintained presentation project retained in the workspace registry. Independent git repository. |
+| `/Users/fujie/code/repo/signal-nest` | 已于 2026-10-02 归档；仅保留历史源码与账本。独立 Git 仓库。 |
 | `/Users/fujie/code/repo/` | Root for independent project git repositories. Each project owns its repository boundary. |
 | `/Users/fujie/.dotfiles/claude/skills` | Git-managed Claude skill definitions. |
 | `/Users/fujie/.agents/skills` | Agent runtime skill mirror. Should not be treated as the source of truth. |
@@ -36,13 +35,11 @@ Codex and Claude Code are both expected to operate here. Shared rules live in th
 
 | 项目 | 职责分类 |
 |------|----------|
-| `signal_nest` | 信号监控与研究限定的执行账本工作流。 |
-| `presentation_20260904` | 以 maintenance 生命周期保留的演示文稿项目。 |
+| `signal_nest` | 已归档的历史信号监控与执行账本；不再自动运行。 |
 | `download_photos` | 照片下载工具。 |
-| `cc_connect` | 外部连接工具参考。 |
 | `jp_market_data` | 免费日本市场数据采集、校验与不可变 Parquet 快照发布。 |
-| `jp_market_data_postclose` | `jp-market-data` 的 worktree（收盘后行情快照刷新分支）。 |
-| `jp_quant_sandbox` | 日本股票轻量研究与人工决策支持环境。 |
+| `jp_quant_sandbox` | 已于 2026-10-01 归档的日本股票轻量研究与人工决策支持环境；保留为只读研究档案。 |
+| `jp_invest_lite` | 个人日本股票练习：选股、模拟交易与持仓风险记账（2026-10-01 起，取代 `jp_quant_sandbox` 的日常用途）。 |
 | `playcabinet` | 个人游戏收藏与资产管理网站。 |
 
 已废弃、且不再处于工作区维护范围的项目不进入台账；重新纳入前必须先明确其

@@ -26,12 +26,10 @@ omc = "runtime/omc"
 
 [repos]
 signal_nest = "repo/signal-nest"
-presentation_20260904 = "repo/20260904-ppt"
 download_photos = "repo/download-photos"
-cc_connect = "repo/cc-connect"
 jp_market_data = "repo/jp-market-data"
-jp_market_data_postclose = "repo/jp-market-data-postclose"
 jp_quant_sandbox = "repo/jp-quant-sandbox"
+jp_invest_lite = "repo/jp-invest-lite"
 playcabinet = "repo/playcabinet"
 
 [references]
@@ -42,15 +40,7 @@ playcabinet = "repo/playcabinet"
 test_command = []
 verify_command = []
 
-[verification.presentation_20260904]
-test_command = []
-verify_command = []
-
 [verification.download_photos]
-test_command = []
-verify_command = []
-
-[verification.cc_connect]
 test_command = []
 verify_command = []
 
@@ -58,12 +48,12 @@ verify_command = []
 test_command = [".venv/bin/python", "-m", "pytest"]
 verify_command = []
 
-[verification.jp_market_data_postclose]
+[verification.jp_quant_sandbox]
 test_command = [".venv/bin/python", "-m", "pytest"]
 verify_command = []
 
-[verification.jp_quant_sandbox]
-test_command = [".venv/bin/python", "-m", "pytest"]
+[verification.jp_invest_lite]
+test_command = []
 verify_command = []
 
 [verification.playcabinet]
@@ -72,12 +62,7 @@ verify_command = []
 
 [repository_metadata.signal_nest]
 kind = "notification_execution_ledger"
-lifecycle = "active"
-remote_policy = "required"
-
-[repository_metadata.presentation_20260904]
-kind = "presentation_project"
-lifecycle = "maintenance"
+lifecycle = "archived"
 remote_policy = "required"
 
 [repository_metadata.download_photos]
@@ -85,23 +70,18 @@ kind = "utility"
 lifecycle = "active"
 remote_policy = "required"
 
-[repository_metadata.cc_connect]
-kind = "external_tool"
-lifecycle = "reference"
-remote_policy = "required"
-
 [repository_metadata.jp_market_data]
 kind = "data_production"
 lifecycle = "active"
 remote_policy = "required"
 
-[repository_metadata.jp_market_data_postclose]
-kind = "feature_worktree"
-lifecycle = "active"
-remote_policy = "required"
-
 [repository_metadata.jp_quant_sandbox]
 kind = "research_workspace"
+lifecycle = "archived"
+remote_policy = "required"
+
+[repository_metadata.jp_invest_lite]
+kind = "practice_workspace"
 lifecycle = "active"
 remote_policy = "required"
 
