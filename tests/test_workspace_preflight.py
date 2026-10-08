@@ -33,6 +33,12 @@ def run(*args, cwd=None, check=True, env=None):
     )
 
 
+def write_executable(path, contents):
+    path.write_text("#!/bin/sh\n" + contents)
+    path.chmod(0o755)
+    return path
+
+
 def git(path, *args):
     return run("git", *args, cwd=path).stdout.strip()
 
@@ -1335,3 +1341,170 @@ def test_installed_preflight_resolves_implementation_through_symlink(tmp_path):
     assert installed.returncode == 0
     assert result.returncode == 1
     assert json.loads(result.stdout)["status"] == "WARN"
+
+
+def fake_shell_path(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for executable in ("sh", "dirname"):
+        source = shutil.which(executable)
+        assert source is not None
+        (fake_bin / executable).symlink_to(source)
+    return fake_bin
+
+
+def test_preflight_prefers_compatible_path_python_and_preserves_args_and_exit(tmp_path):
+    fake_bin = fake_shell_path(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    captured_args = tmp_path / "python-args.txt"
+    write_executable(
+        fake_bin / "python3",
+        'if [ "$1" = "-c" ]; then exit 0; fi\n'
+        'printf "%s\n" "$@" > "$CAPTURED_ARGS"\n'
+        'exit 37\n',
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HOME": str(home),
+            "PATH": str(fake_bin),
+            "CAPTURED_ARGS": str(captured_args),
+        }
+    )
+
+    result = run(
+        str(PREFLIGHT),
+        "--manifest",
+        "custom manifest.toml",
+        "--json",
+        "--repo",
+        "path with spaces",
+        cwd=tmp_path,
+        check=False,
+        env=environment,
+    )
+
+    assert result.returncode == 37
+    assert captured_args.read_text().splitlines() == [
+        str(CHECKER),
+        "--manifest",
+        str(ROOT / "code-workspace" / "workspace.toml"),
+        "--manifest",
+        "custom manifest.toml",
+        "--json",
+        "--repo",
+        "path with spaces",
+    ]
+
+
+def test_preflight_uv_fallback_ignores_active_venv_and_preserves_args(tmp_path):
+    fake_bin = fake_shell_path(tmp_path)
+    home = tmp_path / "home"
+    uv_bin = home / ".local" / "bin"
+    uv_bin.mkdir(parents=True)
+    business_venv = tmp_path / "business project" / ".venv"
+    business_venv.mkdir(parents=True)
+    managed_python = tmp_path / "managed-python"
+    uv_args = tmp_path / "uv-args.txt"
+    uv_virtual_env = tmp_path / "uv-virtual-env.txt"
+    python_args = tmp_path / "python-args.txt"
+    write_executable(
+        fake_bin / "python3",
+        'if [ "$1" = "-c" ]; then exit 1; fi\n'
+        'exit 98\n',
+    )
+    write_executable(
+        fake_bin / "python3.12",
+        'if [ "$1" = "-c" ]; then exit 1; fi\n'
+        'exit 99\n',
+    )
+    write_executable(
+        managed_python,
+        'if [ "$1" = "-c" ]; then exit 0; fi\n'
+        'printf "%s\n" "$@" > "$CAPTURED_ARGS"\n'
+        'exit 37\n',
+    )
+    write_executable(
+        uv_bin / "uv",
+        'printf "%s\n" "$@" > "$UV_ARGS"\n'
+        'printf "%s\n" "${VIRTUAL_ENV-}" > "$UV_VIRTUAL_ENV"\n'
+        'printf "%s\n" "$UV_INTERPRETER"\n',
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HOME": str(home),
+            "PATH": str(fake_bin),
+            "VIRTUAL_ENV": str(business_venv),
+            "UV_ARGS": str(uv_args),
+            "UV_VIRTUAL_ENV": str(uv_virtual_env),
+            "UV_INTERPRETER": str(managed_python),
+            "CAPTURED_ARGS": str(python_args),
+        }
+    )
+
+    result = run(
+        str(PREFLIGHT),
+        "--json",
+        "--repo",
+        "repo with spaces",
+        cwd=business_venv.parent,
+        check=False,
+        env=environment,
+    )
+
+    assert result.returncode == 37
+    assert uv_virtual_env.read_text().strip() == str(business_venv)
+    uv_argv = uv_args.read_text().splitlines()
+    assert uv_argv[:3] == ["--no-cache", "--offline", "--no-config"]
+    assert uv_argv[3:5] == ["python", "find"]
+    assert "--no-project" in uv_argv
+    assert "--system" in uv_argv
+    assert "--managed-python" in uv_argv
+    assert "--no-python-downloads" in uv_argv
+    assert uv_argv[-1] == ">=3.11"
+    assert "install" not in uv_argv
+    assert python_args.read_text().splitlines() == [
+        str(CHECKER),
+        "--manifest",
+        str(ROOT / "code-workspace" / "workspace.toml"),
+        "--json",
+        "--repo",
+        "repo with spaces",
+    ]
+
+
+def test_preflight_fails_clearly_when_no_suitable_interpreter_is_installed(tmp_path):
+    fake_bin = fake_shell_path(tmp_path)
+    home = tmp_path / "home"
+    uv_bin = home / ".local" / "bin"
+    uv_bin.mkdir(parents=True)
+    uv_args = tmp_path / "uv-args.txt"
+    write_executable(
+        fake_bin / "python3",
+        'if [ "$1" = "-c" ]; then exit 1; fi\n'
+        'exit 98\n',
+    )
+    write_executable(
+        uv_bin / "uv",
+        'printf "%s\n" "$@" > "$UV_ARGS"\n'
+        'exit 2\n',
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HOME": str(home),
+            "PATH": str(fake_bin),
+            "UV_ARGS": str(uv_args),
+        }
+    )
+
+    result = run(str(PREFLIGHT), cwd=tmp_path, check=False, env=environment)
+
+    assert result.returncode == 127
+    assert "Python >=3.11 is required" in result.stderr
+    uv_argv = uv_args.read_text().splitlines()
+    assert "--offline" in uv_argv
+    assert "--no-python-downloads" in uv_argv
+    assert "install" not in uv_argv
