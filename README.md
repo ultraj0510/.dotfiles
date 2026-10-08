@@ -91,12 +91,13 @@ bash ~/.dotfiles/install.sh
 | Skill | Purpose |
 |-------|---------|
 | `download-photos` | 写真販売サイトのカート画像ダウンロード（`~/code/repo/download-photos` への symlink） |
+| `swarm` | Claude `/swarm` と Codex `$swarm` の共通ルールは `agent-guidance/swarm.md` |
 
 株式分析関連の skills（`stock-*`、`portfolio-*`、`deep-analyze`）は stock-analysis リポジトリのアーカイブに伴い退役済み。
 
 ## 自定义 Codex Skills 与 Agents
 
-完整源码、运行链接和恢复说明见 [agent-guidance/README.md](agent-guidance/README.md)。`install.sh` 安装其中声明的三个 Skills 和两个 Agents；Skills 为 `equity-opportunity`、`sbi-research-data`、`luna-orchestrator`，已有 `skill-overrides/` 仍为指令覆盖文件。
+完整源码、运行链接和恢复说明见 [agent-guidance/README.md](agent-guidance/README.md)。`install.sh` 安装其中声明的三个 Skills 和两个 Agents；Skills 为 `equity-opportunity`、`sbi-research-data`、`swarm`，已有 `skill-overrides/` 仍为指令覆盖文件。
 
 ## Code workspace
 

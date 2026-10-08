@@ -5,6 +5,32 @@ set -e
 DOTFILES="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d_%H%M%S)"
 
+LEGACY_SKILL_LINK="$HOME/.codex/skills/luna-orchestrator"
+SWARM_SKILL_LINK="$HOME/.codex/skills/swarm"
+EXPECTED_LEGACY_SKILL_TARGET="$DOTFILES/agent-guidance/skills/luna-orchestrator"
+EXPECTED_SWARM_SKILL_LINK="../../.dotfiles/agent-guidance/skills/swarm"
+
+if [ -L "$LEGACY_SKILL_LINK" ]; then
+  LEGACY_SKILL_TARGET="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), os.readlink(sys.argv[1]))))' "$LEGACY_SKILL_LINK")"
+  if [ "$LEGACY_SKILL_TARGET" != "$EXPECTED_LEGACY_SKILL_TARGET" ]; then
+    echo "  BLOCKED: refusing to remove unexpected Codex skill link: $LEGACY_SKILL_LINK → $(readlink "$LEGACY_SKILL_LINK")" >&2
+    exit 2
+  fi
+elif [ -e "$LEGACY_SKILL_LINK" ]; then
+  echo "  BLOCKED: refusing to remove a non-symlink Codex skill path: $LEGACY_SKILL_LINK" >&2
+  exit 2
+fi
+
+if [ -L "$SWARM_SKILL_LINK" ]; then
+  if [ "$(readlink "$SWARM_SKILL_LINK")" != "$EXPECTED_SWARM_SKILL_LINK" ]; then
+    echo "  BLOCKED: refusing to replace unexpected Codex skill link: $SWARM_SKILL_LINK → $(readlink "$SWARM_SKILL_LINK")" >&2
+    exit 2
+  fi
+elif [ -e "$SWARM_SKILL_LINK" ]; then
+  echo "  BLOCKED: refusing to replace existing Codex skill path: $SWARM_SKILL_LINK" >&2
+  exit 2
+fi
+
 backup_and_link() {
   local src="$1"  # dotfiles内のパス
   local dst="$2"  # リンク先（ホームの実際のパス）
@@ -69,7 +95,7 @@ backup_and_link \
   "../.dotfiles/agent-guidance/personal-workstyle.md"
 
 # 自定义 Codex Skills 与 Agents：完整源码由 dotfiles 管理
-for skill in equity-opportunity sbi-research-data luna-orchestrator; do
+for skill in equity-opportunity sbi-research-data swarm; do
   backup_and_link \
     "$DOTFILES/agent-guidance/skills/$skill" \
     "$HOME/.codex/skills/$skill" \
@@ -81,6 +107,21 @@ for agent in luna-worker nikkei225-opportunity; do
     "$HOME/.codex/agents/$agent.toml" \
     "../../.dotfiles/agent-guidance/agents/$agent.toml"
 done
+
+# 新入口创建成功后，才删除仍指向旧源码的 Codex 入口
+if [ -L "$LEGACY_SKILL_LINK" ]; then
+  LEGACY_SKILL_TARGET="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), os.readlink(sys.argv[1]))))' "$LEGACY_SKILL_LINK")"
+  if [ "$LEGACY_SKILL_TARGET" = "$EXPECTED_LEGACY_SKILL_TARGET" ]; then
+    unlink "$LEGACY_SKILL_LINK"
+    echo "  removed retired Codex skill link: $LEGACY_SKILL_LINK"
+  else
+    echo "  BLOCKED: refusing to remove unexpected Codex skill link: $LEGACY_SKILL_LINK → $(readlink "$LEGACY_SKILL_LINK")" >&2
+    exit 2
+  fi
+elif [ -e "$LEGACY_SKILL_LINK" ]; then
+  echo "  BLOCKED: refusing to remove a non-symlink Codex skill path: $LEGACY_SKILL_LINK" >&2
+  exit 2
+fi
 
 # claude aliases & settings（相対symlinkでホスト・コンテナ両対応）
 mkdir -p "$HOME/.claude"

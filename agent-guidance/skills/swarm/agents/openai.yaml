@@ -1,0 +1,7 @@
+interface:
+  display_name: "Swarm 任务编排"
+  short_description: "主 Agent 协调，Claude 与 Codex 使用固定模型 worker 实施并自验"
+  default_prompt: "使用 $swarm 拆解当前任务并委派给固定模型 worker，由主 Agent 协调和验收。"
+
+policy:
+  allow_implicit_invocation: false
