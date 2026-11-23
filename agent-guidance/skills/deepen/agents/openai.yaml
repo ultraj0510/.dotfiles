@@ -1,0 +1,6 @@
+interface:
+  display_name: "Deepen"
+  short_description: "在原任务范围内加深专业方法、原始材料和外部验证，默认只重写提示词"
+  default_prompt: "使用 $deepen 加深下面的任务，保持原目标和范围，只重写，不执行。"
+policy:
+  allow_implicit_invocation: false

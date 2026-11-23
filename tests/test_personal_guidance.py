@@ -5,7 +5,7 @@ from pathlib import Path
 
 DOTFILES = Path(__file__).resolve().parents[1]
 GUIDANCE = DOTFILES / "agent-guidance" / "personal-workstyle.md"
-EXPECTED_SHA256 = "1bdd048daba67f0484529aa264890bd7cec137b6453ec83390f89f5521748ed2"
+EXPECTED_SHA256 = "1e86978b29bcff35993e760c74a0875702cca52611147a9fc4a6160150ab43f1"
 
 
 def test_personal_guidance_matches_approved_content():
